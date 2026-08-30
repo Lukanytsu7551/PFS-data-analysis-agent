@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="PFS 可追踪、可核验的报表数据分析工作台静态界面预览。">
+  <title>PFS · 报表数据分析工作台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --sidebar: oklch(25% .035 166);
+      --sidebar-deep: oklch(21% .035 166);
+      --sidebar-text: oklch(94% .018 92);
+      --sidebar-muted: oklch(78% .025 105 / .68);
+      --canvas: oklch(94% .018 86);
+      --panel: oklch(98% .012 92);
+      --panel-warm: oklch(96% .028 82);
+      --ink: oklch(25% .028 164);
+      --ink-soft: oklch(42% .026 164);
+      --ink-muted: oklch(57% .025 164);
+      --line: oklch(83% .025 84);
+      --line-dark: oklch(50% .028 165 / .35);
+      --gold: oklch(76% .14 75);
+      --gold-deep: oklch(63% .12 73);
+      --rust: oklch(65% .14 37);
+      --sage: oklch(70% .09 142);
+      --shadow: 0 16px 40px oklch(25% .025 85 / .1);
+      --ease-out: cubic-bezier(.16, 1, .3, 1);
+      --radius-xs: 7px;
+      --radius-sm: 11px;
+      --radius-md: 16px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      min-width: 320px;
+      min-height: 100vh;
+      margin: 0;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB", sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      font-kerning: normal;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body::before {
+      position: fixed;
+      z-index: -1;
+      inset: 0;
+      pointer-events: none;
+      content: "";
+      opacity: .28;
+      background-image: radial-gradient(circle at 20% 30%, oklch(100% .03 90 / .8) 0 1px, transparent 1.3px), radial-gradient(circle at 75% 65%, oklch(64% .03 80 / .28) 0 1px, transparent 1.4px);
+      background-size: 21px 21px, 27px 27px;
+      mix-blend-mode: multiply;
+    }
+
+    button, textarea { font: inherit; }
+
+    button { color: inherit; border: 0; cursor: pointer; }
+
+    button:focus-visible, a:focus-visible, textarea:focus-visible {
+      outline: 2px solid var(--rust);
+      outline-offset: 3px;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    .skip-link {
+      position: fixed;
+      z-index: 20;
+      top: 12px;
+      left: 12px;
+      padding: 9px 13px;
+      color: var(--sidebar-text);
+      background: var(--sidebar-deep);
+      border-radius: 999px;
+      transform: translateY(-150%);
+      transition: transform 180ms var(--ease-out);
+    }
+
+    .skip-link:focus { transform: translateY(0); }
+
+    .app {
+      display: grid;
+      grid-template-columns: 288px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      padding: 24px 18px 18px;
+      color: var(--sidebar-text);
+      background: var(--sidebar);
+      border-right: 1px solid var(--sidebar-deep);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 0 8px 22px;
+      border-bottom: 1px solid var(--line-dark);
+    }
+
+    .brand-mark {
+      position: relative;
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      color: var(--sidebar);
+      font-family: Georgia, serif;
+      font-size: 19px;
+      background: var(--gold);
+      border-radius: 10px 10px 10px 3px;
+    }
+
+    .brand-mark::after {
+      position: absolute;
+      right: -5px;
+      bottom: -5px;
+      width: 12px;
+      height: 12px;
+      content: "";
+      border: 1px solid var(--gold);
+      border-radius: 50%;
+    }
+
+    .brand-copy strong { display: block; font-size: 15px; font-weight: 800; letter-spacing: .02em; }
+    .brand-copy span { display: block; margin-top: 1px; color: var(--sidebar-muted); font-size: 9px; letter-spacing: .13em; text-transform: uppercase; }
+
+    .control-stack { display: grid; gap: 6px; padding: 21px 0 20px; border-bottom: 1px solid var(--line-dark); }
+
+    .control-row {
+      display: grid;
+      grid-template-columns: 57px minmax(0, 1fr) 16px;
+      gap: 8px;
+      align-items: center;
+      min-height: 37px;
+      padding: 6px 9px;
+      color: var(--sidebar-muted);
+      text-align: left;
+      background: transparent;
+      border-radius: var(--radius-xs);
+      transition: color 160ms ease, background-color 160ms ease, transform 160ms var(--ease-out);
+    }
+
+    .control-row:hover { color: var(--sidebar-text); background: oklch(96% .02 90 / .08); transform: translateX(2px); }
+
+    .control-row .control-label { font-size: 11px; }
+    .control-row strong { overflow: hidden; color: var(--sidebar-text); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .control-row .state { color: var(--gold); font-size: 9px; font-weight: 700; }
+    .control-row .state.muted { color: var(--sidebar-muted); font-weight: 500; }
+    .control-row .chevron { color: var(--sidebar-muted); font-size: 17px; line-height: 1; }
+
+    .nav-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 19px 10px 9px;
+      color: var(--sidebar-muted);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+
+    .nav-heading span:last-child { font-size: 15px; letter-spacing: 0; }
+
+    .main-nav { display: grid; gap: 3px; }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 39px;
+      padding: 7px 10px;
+      color: var(--sidebar-muted);
+      text-align: left;
+      background: transparent;
+      border-radius: var(--radius-xs);
+      transition: color 160ms ease, background-color 160ms ease, padding-left 160ms var(--ease-out);
+    }
+
+    .nav-item:hover, .nav-item[aria-current="page"] { padding-left: 14px; color: var(--sidebar-text); background: oklch(96% .02 90 / .1); }
+    .nav-item[aria-current="page"] { box-shadow: inset 3px 0 0 var(--gold); }
+    .nav-item svg { width: 16px; height: 16px; flex: 0 0 auto; stroke: currentColor; }
+    .nav-item span { flex: 1; font-size: 12px; }
+    .nav-item small { color: var(--sidebar-muted); font-size: 9px; }
+    .nav-item[aria-current="page"] small { color: var(--gold); }
+
+    .sidebar-footer { margin-top: auto; padding-top: 22px; }
+
+    .quota {
+      padding: 13px 13px 12px;
+      background: var(--sidebar-deep);
+      border: 1px solid var(--line-dark);
+      border-radius: var(--radius-sm);
+    }
+
+    .quota-head { display: flex; justify-content: space-between; gap: 8px; color: var(--sidebar-muted); font-size: 10px; }
+    .quota-head strong { color: var(--sidebar-text); font-size: 11px; font-weight: 600; }
+    .quota-meter { height: 5px; margin-top: 10px; overflow: hidden; background: oklch(96% .02 90 / .13); border-radius: 999px; }
+    .quota-meter span { display: block; width: 26%; height: 100%; background: var(--gold); border-radius: inherit; }
+    .quota-foot { display: flex; align-items: center; gap: 6px; margin-top: 9px; color: var(--sidebar-muted); font-size: 9px; }
+    .quota-foot i { width: 6px; height: 6px; background: var(--sage); border-radius: 50%; }
+
+    .sidebar-meta { display: flex; align-items: center; justify-content: space-between; padding: 15px 5px 0; color: var(--sidebar-muted); font-size: 9px; }
+    .sidebar-meta a { color: var(--sidebar-text); font-weight: 700; }
+
+    .workspace {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      min-width: 0;
+      min-height: 100vh;
+      background: var(--canvas);
+    }
+
+    .workspace-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 68px;
+      padding: 13px clamp(24px, 4vw, 56px);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .workspace-title { display: flex; align-items: center; gap: 11px; }
+    .workspace-title .crumb { color: var(--ink-muted); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+    .workspace-title .divider { color: var(--line); font-size: 20px; font-weight: 300; }
+    .workspace-title strong { font-size: 13px; font-weight: 800; }
+
+    .workspace-actions { display: flex; align-items: center; gap: 8px; }
+
+    .header-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 33px;
+      padding: 7px 10px;
+      color: var(--ink-soft);
+      font-size: 10px;
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-xs);
+      transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease;
+    }
+
+    .header-action:hover { color: var(--ink); background: var(--panel); border-color: var(--ink-muted); }
+    .header-action svg { width: 14px; height: 14px; stroke: currentColor; }
+
+    .user-badge { display: grid; width: 30px; height: 30px; place-items: center; margin-left: 4px; color: var(--panel); font-size: 10px; font-weight: 800; background: var(--rust); border-radius: 50%; }
+
+    .conversation {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      width: min(100%, 1100px);
+      min-height: 0;
+      margin: 0 auto;
+      padding: 25px clamp(24px, 5vw, 70px) 18px;
+    }
+
+    .conversation-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+    .head-statuses { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 7px; }
+    .preview-state { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; color: var(--rust); font-size: 10px; background: color-mix(in oklch, var(--panel) 78%, var(--rust)); border: 1px solid color-mix(in oklch, var(--line) 70%, var(--rust)); border-radius: 999px; }
+    .preview-state i { width: 7px; height: 7px; background: var(--rust); border-radius: 50%; }
+    .conversation-head h1 { margin: 0; font-family: "Iowan Old Style", "Noto Serif SC", Georgia, serif; font-size: 24px; font-weight: 500; letter-spacing: -.055em; }
+    .conversation-head p { margin: 4px 0 0; color: var(--ink-muted); font-size: 10px; }
+    .connection-state { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; color: var(--ink-muted); font-size: 10px; background: var(--panel-warm); border-radius: 999px; }
+    .connection-state i { width: 7px; height: 7px; background: var(--gold-deep); border-radius: 50%; }
+
+    .conversation-canvas {
+      position: relative;
+      display: grid;
+      min-height: 390px;
+      place-items: center;
+      margin-top: 20px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .conversation-canvas::before, .conversation-canvas::after { position: absolute; content: ""; pointer-events: none; }
+    .conversation-canvas::before { top: 0; left: 18%; width: 1px; height: 100%; background: color-mix(in oklch, var(--line) 60%, transparent); }
+    .conversation-canvas::after { right: 18%; bottom: 0; width: 1px; height: 28%; background: color-mix(in oklch, var(--line) 60%, transparent); }
+
+    .empty-state { position: relative; z-index: 1; width: min(650px, 100%); padding: 35px 20px; text-align: center; }
+
+    .empty-emblem {
+      position: relative;
+      display: grid;
+      width: 58px;
+      height: 58px;
+      place-items: center;
+      margin: 0 auto 21px;
+      color: var(--canvas);
+      font-family: Georgia, serif;
+      font-size: 24px;
+      background: var(--sidebar);
+      border-radius: 50%;
+      box-shadow: 0 0 0 8px oklch(25% .035 166 / .08), 0 0 0 17px oklch(25% .035 166 / .045);
+    }
+
+    .empty-emblem::after { position: absolute; top: -8px; right: 1px; width: 10px; height: 10px; content: ""; background: var(--gold); border-radius: 50%; }
+    .empty-state .eyebrow { margin: 0; color: var(--rust); font-size: 9px; font-weight: 800; letter-spacing: .17em; text-transform: uppercase; }
+    .empty-state h2 { margin: 10px 0 8px; font-family: "Iowan Old Style", "Noto Serif SC", Georgia, serif; font-size: clamp(30px, 4vw, 43px); font-weight: 500; letter-spacing: -.07em; line-height: 1.05; }
+    .empty-state > p:not(.eyebrow) { max-width: 43ch; margin: 0 auto; color: var(--ink-soft); font-size: 12px; line-height: 1.75; }
+
+    .sample-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 25px; text-align: left; }
+
+    .sample {
+      min-height: 74px;
+      padding: 11px 12px;
+      color: var(--ink-soft);
+      text-align: left;
+      background: color-mix(in oklch, var(--panel) 65%, transparent);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-xs);
+      transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease, transform 160ms var(--ease-out);
+    }
+
+    .sample:hover { color: var(--ink); background: var(--panel); border-color: var(--ink-muted); transform: translateY(-2px); }
+    .sample small { display: block; margin-bottom: 7px; color: var(--rust); font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+    .sample span { display: block; font-size: 11px; line-height: 1.55; }
+
+    .composer-area { padding-top: 16px; }
+
+    .composer {
+      padding: 15px 16px 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow);
+    }
+
+    .composer-label { display: block; color: var(--ink-muted); font-size: 9px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    .composer textarea { display: block; width: 100%; min-height: 57px; margin-top: 8px; padding: 0; color: var(--ink); font-size: 14px; line-height: 1.6; resize: vertical; background: transparent; border: 0; outline: 0; }
+    .composer textarea::placeholder { color: var(--ink-muted); opacity: 1; }
+
+    .composer-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-top: 11px; border-top: 1px solid var(--line); }
+    .tool-group { display: flex; flex-wrap: wrap; gap: 5px; }
+
+    .tool-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 27px; padding: 5px 8px; color: var(--ink-soft); font-size: 9px; background: var(--panel-warm); border-radius: 5px; }
+    .tool-chip svg { width: 12px; height: 12px; stroke: currentColor; }
+
+    .send-button { display: inline-flex; align-items: center; gap: 7px; min-height: 35px; padding: 8px 12px 8px 13px; color: var(--panel); font-size: 10px; font-weight: 800; background: var(--sidebar); border-radius: var(--radius-xs); transition: background-color 160ms ease, transform 160ms var(--ease-out); }
+    .send-button:hover { background: var(--rust); transform: translateY(-2px); }
+    .send-button svg { width: 14px; height: 14px; stroke: currentColor; }
+    .composer-hint { margin: 8px 2px 0; color: var(--ink-muted); font-size: 9px; }
+    .composer-hint kbd { padding: 2px 5px; color: var(--ink-soft); background: var(--panel-warm); border: 1px solid var(--line); border-radius: 4px; }
+
+    .workspace-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 clamp(24px, 4vw, 56px) 17px; color: var(--ink-muted); font-size: 9px; }
+    .footer-links { display: flex; gap: 14px; }
+    .footer-links a:hover { color: var(--rust); }
+
+    .reveal { animation: enter 500ms var(--ease-out) both; animation-delay: calc(var(--i, 0) * 60ms); }
+
+    @keyframes enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+
+    @media (max-width: 820px) {
+      .app { grid-template-columns: 226px minmax(0, 1fr); }
+      .sidebar { padding-inline: 13px; }
+      .control-row { grid-template-columns: 48px minmax(0, 1fr) 14px; }
+      .conversation { padding-inline: 24px; }
+      .sample-list { grid-template-columns: 1fr; max-width: 440px; margin-inline: auto; }
+      .sample { min-height: 58px; }
+    }
+
+    @media (max-width: 640px) {
+      .app { display: block; }
+      .sidebar { position: sticky; z-index: 10; top: 0; display: block; min-height: 0; padding: 10px 14px; }
+      .brand { padding: 0; border: 0; }
+      .brand-mark { width: 31px; height: 31px; font-size: 17px; border-radius: 9px 9px 9px 3px; }
+      .brand-copy strong { font-size: 13px; }
+      .brand-copy span { font-size: 8px; }
+      .control-stack { display: flex; gap: 3px; padding: 9px 0 0; border: 0; overflow-x: auto; }
+      .control-row { flex: 0 0 auto; grid-template-columns: auto auto 12px; gap: 6px; min-height: 32px; padding: 4px 7px; background: oklch(96% .02 90 / .08); }
+      .control-row .control-label { display: none; }
+      .control-row strong { max-width: 82px; font-size: 10px; }
+      .control-row .state { display: none; }
+      .nav-heading, .main-nav, .sidebar-footer { display: none; }
+      .workspace { min-height: calc(100vh - 61px); }
+      .workspace-bar { min-height: 59px; padding: 11px 17px; }
+      .workspace-title .crumb { display: none; }
+      .workspace-title .divider { display: none; }
+      .workspace-title strong { font-size: 12px; }
+      .header-action { display: none; }
+      .user-badge { width: 28px; height: 28px; }
+      .conversation { min-height: calc(100vh - 122px); padding: 19px 17px 12px; }
+      .conversation-head { align-items: start; flex-direction: column; }
+      .conversation-head h1 { font-size: 22px; }
+      .head-statuses { width: 100%; justify-content: stretch; }
+      .preview-state, .connection-state { flex: 1 1 145px; justify-content: center; }
+      .conversation-canvas { min-height: 355px; margin-top: 15px; }
+      .conversation-canvas::before { left: 8%; }
+      .conversation-canvas::after { right: 8%; }
+      .empty-state { padding: 25px 6px; }
+      .empty-state h2 { font-size: 35px; }
+      .empty-state > p:not(.eyebrow) { font-size: 11px; }
+      .composer { padding: 13px 13px 11px; }
+      .composer-tools { align-items: stretch; flex-direction: column; }
+      .send-button { justify-content: center; }
+      .workspace-footer { padding: 0 17px 13px; }
+      .footer-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="svg-sprite" aria-hidden="true" width="0" height="0" style="position:absolute">
+    <symbol id="icon-chat" viewBox="0 0 24 24"><path d="M5 5h14v11H9l-4 3z" fill="none" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-skill" viewBox="0 0 24 24"><path d="M12 4v16M4 12h16" fill="none" stroke-width="1.8"/><circle cx="12" cy="12" r="8" fill="none" stroke-width="1.5"/></symbol>
+    <symbol id="icon-book" viewBox="0 0 24 24"><path d="M5 5h14v14H5zM8 9h8M8 12h6M8 15h7" fill="none" stroke-width="1.7"/></symbol>
+    <symbol id="icon-tools" viewBox="0 0 24 24"><path d="M5 5h14v14H5zM8 8h8v8H8zM8 12H5m14 0h-3M12 8V5m0 14v-3" fill="none" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="icon-history" viewBox="0 0 24 24"><path d="M5 6h14v13H5zM8 10h8M8 13h8M8 16h5" fill="none" stroke-width="1.7"/></symbol>
+    <symbol id="icon-canvas" viewBox="0 0 24 24"><path d="M5 5h14v14H5zM8 16l3-3 2 2 3-5" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke-width="1.7"/><path d="M9.8 9.4a2.3 2.3 0 1 1 3.8 1.7c-.9.7-1.6 1.1-1.6 2.4M12 16.5v.1" fill="none" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="icon-data" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM7 9h10M7 12h7M7 15h5" fill="none" stroke-width="1.7"/></symbol>
+    <symbol id="icon-folder" viewBox="0 0 24 24"><path d="M4 7h6l2 2h8v10H4z" fill="none" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="icon-focus" viewBox="0 0 24 24"><path d="M7 4H4v3m13-3h3v3M7 20H4v-3m16 0v3h-3" fill="none" stroke-width="1.7" stroke-linecap="round"/></symbol>
+  </svg>
+
+  <a class="skip-link" href="#conversation">跳到主内容</a>
+
+  <div class="app">
+    <aside class="sidebar" aria-label="产品导航">
+      <a class="brand" href="#conversation" aria-label="PFS 报表数据分析工作台">
+        <span class="brand-mark">P</span>
+        <span class="brand-copy"><strong>PFS</strong><span>reporting workspace</span></span>
+      </a>
+
+      <div class="control-stack" aria-label="工作区连接状态">
+        <button class="control-row" type="button"><span class="control-label">会话</span><strong>新建分析</strong><span class="chevron">›</span></button>
+        <button class="control-row" type="button"><span class="control-label">引擎</span><strong>PFS Report Engine</strong><span class="chevron">⌄</span></button>
+        <button class="control-row" type="button"><span class="control-label">数据源</span><span class="state muted">未连接</span><span class="chevron">›</span></button>
+        <button class="control-row" type="button"><span class="control-label">工具桥</span><span class="state muted">未连接</span><span class="chevron">›</span></button>
+        <button class="control-row" type="button"><span class="control-label">工作目录</span><span class="state muted">未挂载</span><span class="chevron">›</span></button>
+      </div>
+
+      <div class="nav-heading"><span>Navigate</span><span>···</span></div>
+      <nav class="main-nav" aria-label="功能导航">
+        <a class="nav-item" aria-current="page" href="#conversation"><svg><use href="#icon-chat"></use></svg><span>分析模式</span><small>01</small></a>
+        <a class="nav-item" href="#recipes"><svg><use href="#icon-skill"></use></svg><span>技能库</span><small>24</small></a>
+        <a class="nav-item" href="#knowledge"><svg><use href="#icon-book"></use></svg><span>业务知识库</span><small>03</small></a>
+        <a class="nav-item" href="#tools"><svg><use href="#icon-tools"></use></svg><span>工具连接</span><small>—</small></a>
+        <a class="nav-item" href="#history"><svg><use href="#icon-history"></use></svg><span>历史记录</span><small>02</small></a>
+        <a class="nav-item" href="#canvas"><svg><use href="#icon-canvas"></use></svg><span>商业画布</span><small>—</small></a>
+        <a class="nav-item" href="#help"><svg><use href="#icon-help"></use></svg><span>帮助文档</span><small>↗</small></a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="quota" aria-label="额度摘要">
+          <div class="quota-head"><strong>本地预览</strong><span>示例状态</span></div>
+          <div class="quota-meter" aria-hidden="true"><span></span></div>
+          <div class="quota-foot"><i></i><span>工作区保持在线</span></div>
+        </div>
+        <div class="sidebar-meta"><span>静态界面预览 · 2026</span><a href="#settings">设置</a></div>
+      </div>
+    </aside>
+
+    <main class="workspace" id="conversation">
+      <header class="workspace-bar reveal" style="--i:0">
+        <div class="workspace-title"><span class="crumb">Workspace</span><span class="divider">/</span><strong>对话分析</strong></div>
+        <div class="workspace-actions">
+          <button class="header-action" type="button"><svg><use href="#icon-focus"></use></svg>专注对话</button>
+          <button class="header-action" type="button"><svg><use href="#icon-history"></use></svg>任务历史</button>
+          <button class="header-action" type="button"><svg><use href="#icon-data"></use></svg>数据预览</button>
+          <span class="user-badge" aria-label="当前工作区用户">Y</span>
+        </div>
+      </header>
+
+      <section class="conversation" aria-labelledby="conversation-title">
+        <div class="conversation-head reveal" style="--i:1">
+          <div><h1 id="conversation-title">开始一轮新的分析</h1><p>先提出问题，再决定数据与分析路径。</p></div>
+          <div class="head-statuses" aria-label="当前界面状态">
+            <span class="preview-state"><i></i>设计预览</span>
+            <span class="connection-state"><i></i>未连接数据源</span>
+          </div>
+        </div>
+
+        <div class="conversation-canvas reveal" style="--i:2">
+          <div class="empty-state">
+            <div class="empty-emblem">P</div>
+            <p class="eyebrow">Start with a question</p>
+            <h2>今天想看清什么？</h2>
+            <p>把自然语言问题带进工作区，接入表格、数据库或在线数据，再逐步得到可解释的判断。</p>
+            <div class="sample-list" aria-label="问题示例">
+              <button class="sample" type="button"><small>趋势</small><span>近 12 个月的销售趋势如何？</span></button>
+              <button class="sample" type="button"><small>诊断</small><span>哪些客户贡献了最多收入？</span></button>
+              <button class="sample" type="button"><small>比较</small><span>各地区业绩差异主要来自哪里？</span></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="composer-area reveal" style="--i:3">
+          <div class="composer">
+            <label class="composer-label" for="question">分析问题</label>
+            <textarea id="question" rows="2" placeholder="今天帮你做些什么？可用 / 选择分析配方，或用 @ 引用工作区材料。" aria-label="输入分析问题"></textarea>
+            <div class="composer-tools">
+              <div class="tool-group" aria-label="分析上下文">
+                <span class="tool-chip"><svg><use href="#icon-skill"></use></svg>技能</span>
+                <span class="tool-chip"><svg><use href="#icon-data"></use></svg>数据源</span>
+                <span class="tool-chip"><svg><use href="#icon-tools"></use></svg>工具桥</span>
+                <span class="tool-chip"><svg><use href="#icon-folder"></use></svg>工作目录</span>
+                <span class="tool-chip">团队</span>
+                <span class="tool-chip">只读</span>
+              </div>
+              <button class="send-button" type="button">开始整理 <svg><use href="#icon-arrow"></use></svg></button>
+            </div>
+          </div>
+          <p class="composer-hint">提示：输入 <kbd>/</kbd> 浏览分析配方，输入 <kbd>@</kbd> 引用已连接的文件。</p>
+        </div>
+      </section>
+
+      <footer class="workspace-footer" id="help">
+        <span>PFS / quiet tools for clearer decisions</span>
+        <nav class="footer-links" aria-label="辅助链接"><a href="#knowledge">业务知识</a><a href="#settings">偏好设置</a><a href="#help">使用说明</a></nav>
+      </footer>
+    </main>
+  </div>
+
+  <div id="recipes" hidden></div>
+  <div id="knowledge" hidden></div>
+  <div id="tools" hidden></div>
+  <div id="history" hidden></div>
+  <div id="canvas" hidden></div>
+  <div id="settings" hidden></div>
+</body>
+</html>

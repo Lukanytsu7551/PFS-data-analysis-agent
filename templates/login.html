@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{ product_name }} — 登录</title>
+  <link rel="icon" href="{{ url_for('static', filename=product_icon) }}">
+  <style>
+    :root{
+      --pfs-ink:oklch(25% .035 166);
+      --pfs-ink-deep:oklch(19% .035 166);
+      --pfs-paper:oklch(94% .018 86);
+      --pfs-paper-light:oklch(98% .012 92);
+      --pfs-rule:oklch(83% .025 84);
+      --pfs-muted:oklch(74% .025 105);
+      --pfs-brass:oklch(64% .12 75);
+      --pfs-brass-bright:oklch(76% .14 75);
+      --pfs-error:oklch(73% .12 37);
+      --pfs-radius:12px;
+      --pfs-ease:cubic-bezier(.16,1,.3,1);
+    }
+    *{margin:0;padding:0;box-sizing:border-box}
+    html{min-height:100%;background:var(--pfs-paper)}
+    body{
+      min-height:100vh;
+      display:flex;align-items:center;justify-content:center;
+      padding:24px;
+      color:var(--pfs-paper-light);
+      font-family:"Avenir Next","PingFang SC","Hiragino Sans GB",sans-serif;
+      background-color:var(--pfs-paper);
+      background-image:linear-gradient(90deg,transparent 0,transparent calc(50% - 1px),color-mix(in oklab,var(--pfs-rule) 42%,transparent) calc(50% - 1px),color-mix(in oklab,var(--pfs-rule) 42%,transparent) 50%,transparent 50%);
+      position:relative;
+    }
+    body::before,body::after{
+      content:"";position:fixed;pointer-events:none;z-index:0;
+      border:1px solid color-mix(in oklab,var(--pfs-rule) 56%,transparent);
+    }
+    body::before{inset:20px 12px 20px 12px;border-left:0;border-right:0}
+    body::after{width:18px;height:18px;right:28px;top:28px;border-radius:50%;border-color:var(--pfs-brass)}
+    .login-card{
+      width:400px;max-width:100%;
+      position:relative;z-index:1;
+      padding:38px 38px 30px;
+      background:var(--pfs-ink);
+      border:1px solid color-mix(in oklab,var(--pfs-paper-light) 14%,transparent);
+      border-radius:var(--pfs-radius);
+      box-shadow:0 22px 54px oklch(25% .035 166 / .20),0 2px 0 var(--pfs-brass);
+    }
+    .login-card::before{
+      content:"PFS / PRIVATE ANALYTICS WORKSPACE";
+      display:block;margin-bottom:24px;
+      color:var(--pfs-muted);font-size:10px;font-weight:650;
+      letter-spacing:.16em;text-align:center;
+    }
+    .login-mark{
+      width:58px;height:58px;object-fit:contain;display:block;margin:0 auto 14px;
+      border-radius:15px;box-shadow:0 8px 18px oklch(10% .02 164 / .32);
+    }
+    .login-logo{
+      width:auto;height:auto;box-shadow:none;border-radius:0;
+      color:var(--pfs-paper-light);font-size:28px;font-weight:650;
+      line-height:1.15;letter-spacing:-.025em;text-align:center;margin:0 0 8px;
+    }
+    .login-subtitle{text-align:center;font-size:13px;line-height:1.6;color:var(--pfs-muted);margin-bottom:28px}
+    .login-subtitle a{color:var(--pfs-brass-bright);text-decoration:none;font-weight:650}
+    .form-group{margin-bottom:16px}
+    .form-label{display:block;margin-bottom:7px;color:color-mix(in oklab,var(--pfs-paper-light) 78%,var(--pfs-muted));font-size:12px;font-weight:600;letter-spacing:.02em}
+    .form-input{
+      width:100%;min-height:44px;padding:10px 13px;
+      background:var(--pfs-ink-deep);border:1px solid color-mix(in oklab,var(--pfs-paper-light) 18%,transparent);
+      border-radius:8px;color:var(--pfs-paper-light);font:inherit;font-size:14px;
+      outline:none;transition:border-color 140ms var(--pfs-ease),background 140ms var(--pfs-ease),box-shadow 140ms var(--pfs-ease);
+    }
+    .form-input::placeholder{color:color-mix(in oklab,var(--pfs-muted) 82%,var(--pfs-ink))}
+    .form-input:hover{border-color:color-mix(in oklab,var(--pfs-paper-light) 28%,transparent)}
+    .form-input:focus{border-color:var(--pfs-brass-bright);background:var(--pfs-ink);box-shadow:0 0 0 3px oklch(76% .14 75 / .16)}
+    .code-row{display:flex;gap:8px}.code-row .form-input{flex:1;min-width:0}
+    .code-btn{
+      flex-shrink:0;min-height:44px;padding:10px 13px;
+      background:color-mix(in oklab,var(--pfs-ink) 82%,var(--pfs-paper-light));
+      border:1px solid color-mix(in oklab,var(--pfs-paper-light) 18%,transparent);
+      border-radius:8px;color:color-mix(in oklab,var(--pfs-paper-light) 82%,var(--pfs-muted));
+      font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;
+      transition:background 140ms var(--pfs-ease),border-color 140ms var(--pfs-ease),color 140ms var(--pfs-ease),opacity 140ms var(--pfs-ease);
+    }
+    .code-btn:hover:not(:disabled){background:var(--pfs-ink);border-color:var(--pfs-brass);color:var(--pfs-paper-light)}
+    .code-btn:disabled,.btn:disabled{opacity:.48;cursor:not-allowed}
+    .btn{
+      width:100%;min-height:46px;padding:11px 14px;border:1px solid transparent;border-radius:8px;
+      font:inherit;font-size:14px;font-weight:650;cursor:pointer;
+      transition:background 140ms var(--pfs-ease),border-color 140ms var(--pfs-ease),color 140ms var(--pfs-ease),opacity 140ms var(--pfs-ease),transform 140ms var(--pfs-ease);
+    }
+    .btn-primary{background:var(--pfs-brass);color:var(--pfs-ink-deep)}
+    .btn-primary:hover:not(:disabled){background:var(--pfs-brass-bright);transform:translateY(-1px)}
+    .btn-primary:active:not(:disabled){transform:translateY(0)}
+    .form-error{min-height:20px;margin-bottom:8px;color:var(--pfs-error);font-size:12px;line-height:1.6;text-align:center}
+    .tab-row{display:flex;gap:4px;margin-bottom:24px;padding:4px;border:1px solid color-mix(in oklab,var(--pfs-paper-light) 14%,transparent);border-radius:9px;background:var(--pfs-ink-deep)}
+    .tab-btn{min-height:38px;flex:1;padding:8px 10px;background:transparent;border:0;border-radius:6px;color:var(--pfs-muted);font:inherit;font-size:13px;cursor:pointer;transition:background 140ms var(--pfs-ease),color 140ms var(--pfs-ease)}
+    .tab-btn:hover{color:var(--pfs-paper-light)}
+    .tab-btn.active{background:var(--pfs-paper-light);color:var(--pfs-ink)}
+    button:focus-visible,.agree-row a:focus-visible{outline:2px solid var(--pfs-brass-bright);outline-offset:3px}
+    .spinner{display:inline-block;width:15px;height:15px;border:2px solid color-mix(in oklab,var(--pfs-ink-deep) 28%,transparent);border-top-color:var(--pfs-ink-deep);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-3px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .agree-row{display:flex;align-items:flex-start;gap:8px;margin-top:16px;color:var(--pfs-muted);font-size:11px;line-height:1.6}
+    .agree-row input{width:16px;height:16px;flex:0 0 16px;margin-top:1px;accent-color:var(--pfs-brass)}
+    .agree-row a{color:var(--pfs-brass-bright);text-decoration:none;cursor:pointer}
+    .agree-row a:hover{text-decoration:underline;text-underline-offset:3px}
+    .agreement-overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:100;padding:20px;background:oklch(19% .035 166 / .64)}
+    .agreement-overlay.show{display:flex}
+    .agreement-box{width:min(520px,100%);max-height:70vh;overflow-y:auto;padding:30px;background:var(--pfs-paper-light);border:1px solid var(--pfs-rule);border-radius:var(--pfs-radius);color:var(--pfs-ink);font-size:13px;line-height:1.7;box-shadow:0 20px 54px oklch(19% .035 166 / .28)}
+    .agreement-box h3{margin-bottom:16px;color:var(--pfs-ink);font-size:17px}
+    .agreement-box h4{margin:16px 0 6px;color:var(--pfs-primary,var(--pfs-ink));font-size:14px}
+    .agreement-box p{margin-bottom:8px}
+    .agreement-box .close-btn{width:100%;min-height:44px;margin-top:20px;padding:9px;background:var(--pfs-ink);border:0;border-radius:8px;color:var(--pfs-paper-light);font:inherit;font-size:13px;font-weight:650;cursor:pointer}
+    .agreement-box .close-btn:hover{background:var(--pfs-ink-deep)}
+    @media (max-width:520px){
+      body{padding:14px;background-image:none}
+      body::before{inset:10px 0;border-left:0;border-right:0}
+      body::after{right:18px;top:18px}
+      .login-card{padding:30px 22px 24px}
+      .login-card::before{margin-bottom:20px;font-size:9px}
+      .agreement-box{padding:22px}
+    }
+    @media (prefers-reduced-motion:reduce){
+      *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}
+    }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <img class="login-mark" src="{{ url_for('static', filename=product_icon) }}" alt="{{ product_name }}" width="56" height="56" loading="eager">
+    <div class="login-logo">{{ product_name }}</div>
+    <div class="login-subtitle">{{ product_version }} · {{ product_tagline }}</div>
+
+    <div class="tab-row">
+      <button class="tab-btn active" id="tab-login" data-tab="login">登录</button>
+      <button class="tab-btn" id="tab-register" data-tab="register">注册</button>
+    </div>
+
+    <div id="form-login">
+      <div class="form-group">
+        <label class="form-label" for="login-email">邮箱</label>
+        <input class="form-input" id="login-email" type="email" autocomplete="email" placeholder="输入邮箱">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="login-password">密码</label>
+        <input class="form-input" id="login-password" type="password" autocomplete="current-password" placeholder="输入密码">
+      </div>
+      <div class="form-error" id="login-error" aria-live="polite"></div>
+      <button class="btn btn-primary" id="login-btn">登录</button>
+    </div>
+
+    <div id="form-register" style="display:none">
+      <div class="form-group">
+        <label class="form-label" for="reg-email">邮箱</label>
+        <input class="form-input" id="reg-email" type="email" autocomplete="email" placeholder="输入邮箱">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="reg-code">验证码</label>
+        <div class="code-row">
+          <input class="form-input" id="reg-code" type="text" maxlength="6" placeholder="6 位验证码" inputmode="numeric">
+          <button class="code-btn" id="send-code-btn">发送验证码</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="reg-password">密码</label>
+        <input class="form-input" id="reg-password" type="password" autocomplete="new-password" placeholder="4 个字符以上">
+      </div>
+      <div class="form-error" id="reg-error" aria-live="polite"></div>
+      <button class="btn btn-primary" id="reg-btn">注册</button>
+    </div>
+
+    <label class="agree-row">
+      <input type="checkbox" id="agree-check">
+      <span>我已阅读并同意<a id="agree-link">《PFS 数据分析 Agent 用户协议》</a></span>
+    </label>
+  </div>
+
+  <div class="agreement-overlay" id="agreement-overlay">
+    <div class="agreement-box">
+      {{ agreement_html|safe }}
+      <button class="close-btn" id="agree-close-btn">我已阅读</button>
+    </div>
+  </div>
+
+  <script src="/static/js/login.js"></script>
+</body>
+</html>

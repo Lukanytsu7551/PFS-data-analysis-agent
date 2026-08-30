@@ -1,0 +1,26 @@
+{
+  "name": "pfs-data-analysis-agent-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "build": "vite build && node scripts/build-chat.mjs",
+    "build:chat": "node scripts/build-chat.mjs",
+    "build:check": "build_dir=$(mktemp -d) && trap 'rm -rf \"$build_dir\"' EXIT HUP INT TERM && vite build --outDir \"$build_dir/dashboard\" && vite build --config vite.chat-app.config.js --outDir \"$build_dir/chat\" && test -s \"$build_dir/dashboard/.vite/manifest.json\" && test -s \"$build_dir/chat/chat-app.js\"",
+    "format": "prettier --write \"frontend/core/**/*.js\" \"frontend/entries/**/*.js\" \"vite*.config.js\" \"eslint.config.js\" \"package.json\"",
+    "format:check": "prettier --check \"frontend/core/**/*.js\" \"frontend/entries/**/*.js\" \"vite*.config.js\" \"eslint.config.js\" \"package.json\"",
+    "lint": "eslint \"frontend/**/*.js\" \"vite*.config.js\"",
+    "quality": "pnpm format:check && pnpm lint && pnpm build:check && .venv/bin/python -B -m unittest discover -s tests -p 'test_*.py' && .venv/bin/ruff check . && .venv/bin/ruff format --check app.py infrastructure/startup_requirements.py tests/test_startup_requirements.py tests/test_startup_scripts.py"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "eslint": "^9.39.4",
+    "globals": "^16.5.0",
+    "prettier": "^3.9.3",
+    "vite": "^7.0.0"
+  }
+}

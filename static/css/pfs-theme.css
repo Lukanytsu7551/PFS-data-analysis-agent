@@ -1,0 +1,489 @@
+/*
+ * PFS visual layer
+ *
+ * This file is intentionally loaded last. It owns the product surface while
+ * the legacy workbench CSS continues to own layout, responsive behavior and
+ * interaction contracts. Keep feature selectors here instead of rewriting
+ * generated chat bundles or duplicating the template.
+ */
+
+:root {
+  /* PFS palette: ink, paper, brass and a restrained exception red. */
+  --color-primary: oklch(48% .09 164);
+  --color-primary-hover: oklch(40% .085 164);
+  --color-primary-soft: oklch(94% .025 164);
+  --color-primary-tint: oklch(83% .055 164);
+
+  --color-bg: oklch(94% .018 86);
+  --color-surface: oklch(98% .012 92);
+  --color-surface-2: oklch(96% .022 84);
+  --color-surface-3: oklch(91% .026 82);
+  --color-border: oklch(83% .025 84);
+  --color-border-soft: oklch(88% .018 86);
+
+  --color-sidebar-bg: oklch(25% .035 166);
+  --color-sidebar-bg-2: oklch(21% .035 166);
+  --color-sidebar-divider: oklch(50% .028 165 / .35);
+  --color-sidebar-hover: oklch(34% .045 164);
+  --color-sidebar-fg: oklch(94% .018 92);
+  --color-sidebar-fg-mute: oklch(78% .025 105);
+  --color-sidebar-fg-dim: oklch(70% .022 100);
+  --color-sidebar-fg-faint: oklch(61% .022 100);
+
+  --color-text: oklch(25% .028 164);
+  --color-text-soft: oklch(42% .026 164);
+  --color-text-mute: oklch(57% .025 164);
+  --color-text-dim: oklch(63% .022 164);
+  --color-text-on-primary: oklch(98% .012 92);
+
+  --color-success: oklch(60% .105 142);
+  --color-success-soft: oklch(94% .035 142);
+  --color-success-tint: oklch(82% .085 142);
+  --color-success-text: oklch(39% .09 142);
+  --color-warn: oklch(76% .14 75);
+  --color-warn-soft: oklch(95% .045 86);
+  --color-warn-tint: oklch(84% .12 79);
+  --color-warn-text: oklch(43% .10 70);
+  --color-danger: oklch(57% .14 37);
+  --color-danger-hover: oklch(47% .135 37);
+  --color-danger-soft: oklch(95% .035 37);
+  --color-danger-tint: oklch(83% .09 37);
+  --color-danger-text: oklch(43% .115 37);
+  --color-info-soft: oklch(94% .025 220);
+  --color-info-tint: oklch(82% .07 220);
+  --color-info-text: oklch(42% .095 220);
+
+  --color-accent: oklch(64% .12 75);
+  --color-accent-soft: oklch(95% .045 86);
+  --color-accent-tint: oklch(84% .105 78);
+  --color-accent-text: oklch(45% .105 72);
+
+  --color-user-bubble-bg: oklch(43% .09 164);
+  --color-user-bubble-fg: oklch(98% .012 92);
+  --send-btn-grad-from: oklch(54% .12 75);
+  --send-btn-grad-to: oklch(45% .105 70);
+  --send-btn-grad-hover-from: oklch(61% .13 76);
+  --send-btn-grad-hover-to: oklch(50% .115 70);
+  --send-btn-dark-from: oklch(54% .12 75);
+  --send-btn-dark-to: oklch(45% .105 70);
+  --send-btn-dark-hover-from: oklch(61% .13 76);
+  --send-btn-dark-hover-to: oklch(50% .115 70);
+  --send-btn-glow: oklch(54% .12 75 / .32);
+  --send-btn-ring: oklch(64% .12 75 / .22);
+
+  --radius-sm: 7px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-xs: 0 1px 2px oklch(25% .025 85 / .06);
+  --shadow-sm: 0 3px 10px oklch(25% .025 85 / .08);
+  --shadow-md: 0 10px 26px oklch(25% .025 85 / .11);
+  --shadow-lg: 0 20px 54px oklch(25% .025 85 / .16);
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
+  --t-fast: 140ms var(--ease-out);
+  --t-base: 220ms var(--ease-out);
+  --pfs-paper-rule: oklch(83% .025 84);
+}
+
+[data-theme="dark"] {
+  --color-primary: oklch(72% .095 164);
+  --color-primary-hover: oklch(80% .09 164);
+  --color-primary-soft: oklch(28% .045 164);
+  --color-primary-tint: oklch(42% .065 164);
+  --color-bg: oklch(18% .022 164);
+  --color-surface: oklch(23% .022 164);
+  --color-surface-2: oklch(27% .026 164);
+  --color-surface-3: oklch(31% .03 164);
+  --color-border: oklch(38% .035 164);
+  --color-border-soft: oklch(32% .028 164);
+  --color-sidebar-bg: oklch(14% .026 166);
+  --color-sidebar-bg-2: oklch(18% .03 166);
+  --color-sidebar-divider: oklch(40% .04 164 / .65);
+  --color-sidebar-hover: oklch(25% .045 164);
+  --color-sidebar-fg: oklch(94% .018 92);
+  --color-sidebar-fg-mute: oklch(80% .025 105);
+  --color-sidebar-fg-dim: oklch(71% .022 100);
+  --color-sidebar-fg-faint: oklch(60% .022 100);
+  --color-text: oklch(92% .018 92);
+  --color-text-soft: oklch(79% .022 100);
+  --color-text-mute: oklch(68% .022 100);
+  --color-text-dim: oklch(60% .022 100);
+  --color-success: oklch(72% .10 142);
+  --color-success-soft: oklch(25% .045 142);
+  --color-success-tint: oklch(42% .07 142);
+  --color-success-text: oklch(81% .08 142);
+  --color-warn-soft: oklch(29% .05 75);
+  --color-warn-tint: oklch(45% .09 75);
+  --color-warn-text: oklch(84% .11 82);
+  --color-danger-soft: oklch(29% .055 37);
+  --color-danger-tint: oklch(45% .09 37);
+  --color-danger-text: oklch(82% .09 37);
+  --color-info-soft: oklch(26% .045 220);
+  --color-info-tint: oklch(42% .07 220);
+  --color-info-text: oklch(81% .07 220);
+  --color-accent: oklch(78% .10 78);
+  --color-accent-soft: oklch(29% .05 78);
+  --color-accent-tint: oklch(46% .08 78);
+  --color-accent-text: oklch(84% .10 78);
+  --color-user-bubble-bg: oklch(46% .09 164);
+  --color-user-bubble-fg: oklch(98% .012 92);
+  --pfs-paper-rule: oklch(38% .035 164);
+}
+
+/* ── Frame and typography ─────────────────────────────────────── */
+html, body {
+  font-family: "Avenir Next", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+button, input, select, textarea { font-family: inherit; }
+
+.layout { background: var(--color-bg); }
+
+.sidebar {
+  background: var(--color-sidebar-bg);
+  background-image: none;
+  border-right: 1px solid color-mix(in oklab, var(--color-sidebar-fg) 10%, transparent);
+  padding: 20px 14px 16px;
+  gap: 18px;
+}
+
+.sb-brand { padding: 3px 7px 16px; border-bottom-color: var(--color-sidebar-divider); }
+.sb-brand-icon { border-radius: 9px; filter: drop-shadow(0 2px 3px oklch(10% .02 164 / .4)); }
+.sb-brand-name { font-weight: 650; letter-spacing: .015em; }
+.sb-brand-tagline { color: var(--color-sidebar-fg-mute); }
+
+.sb-status {
+  background: color-mix(in oklab, var(--color-sidebar-bg-2) 86%, var(--color-sidebar-bg));
+  border-color: var(--color-sidebar-divider);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 1px 0 oklch(98% .012 92 / .035);
+}
+.sb-status-row:hover { background: var(--color-sidebar-hover); }
+.sb-status-dot--info { background: var(--color-accent); box-shadow: 0 0 0 3px oklch(76% .14 75 / .12); }
+.sb-status-dot.on { background: var(--color-success); box-shadow: 0 0 0 3px oklch(70% .10 142 / .13); }
+.sb-status-model-btn, .sb-status-select {
+  background: var(--color-sidebar-bg);
+  border-color: var(--color-sidebar-divider);
+}
+.sb-status-model-btn:hover, .sb-status-model-btn[aria-expanded="true"] {
+  background: var(--color-sidebar-hover);
+  border-color: var(--color-accent);
+}
+.sb-status-row:focus-visible, .sb-status-model-btn:focus-visible { outline-color: var(--color-accent); }
+
+.sb-btn, .sb-nav-item, .sb-iconbtn, .sb-status-row, .hdr-btn, .composer-tool,
+.composer-model, .composer-expand-btn, .send-btn, .hint-chip, .input-hint-chip,
+.btn-sm, .modal-close { min-height: 34px; }
+.sb-btn-primary, .btn-sm-primary { background: var(--color-primary); border-color: var(--color-primary); }
+.sb-btn-primary:hover, .btn-sm-primary:hover { background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
+
+.sb-nav-item { color: var(--color-sidebar-fg-mute); border-radius: var(--radius-sm); }
+.sb-nav-item:hover { color: var(--color-sidebar-fg); background: var(--color-sidebar-hover); }
+.sb-nav-item.active {
+  color: var(--color-sidebar-fg);
+  background: color-mix(in oklab, var(--color-primary) 25%, var(--color-sidebar-bg));
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+/* ── Main analysis rail ───────────────────────────────────────── */
+.main {
+  background: var(--color-bg);
+  background-image: none;
+}
+.chat-header {
+  min-height: 64px;
+  background: color-mix(in oklab, var(--color-surface) 88%, var(--color-bg));
+  border-bottom: 1px solid var(--pfs-paper-rule);
+  box-shadow: none;
+}
+.chat-header::before { display: none; }
+.chat-header-title { color: var(--color-text); font-weight: 650; letter-spacing: -.015em; }
+.chat-header-sub { color: var(--color-text-mute); }
+.hdr-btn {
+  color: var(--color-text-soft);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+.hdr-btn:hover { color: var(--color-primary); background: var(--color-primary-soft); border-color: var(--color-primary-tint); }
+
+.messages { background: var(--color-bg); }
+.welcome { max-width: 850px; }
+.welcome-brand-logo {
+  width: 62px;
+  height: 62px;
+  border-radius: 15px;
+  filter: drop-shadow(0 8px 12px oklch(25% .025 85 / .14));
+}
+.welcome h2 {
+  color: var(--color-text);
+  font-family: "Iowan Old Style", "Songti SC", serif;
+  font-size: clamp(25px, 3vw, 34px);
+  font-weight: 600;
+  letter-spacing: -.025em;
+  background: none;
+  -webkit-text-fill-color: currentColor;
+}
+.welcome p { color: var(--color-text-soft); line-height: 1.75; }
+.welcome p strong { color: var(--color-primary); }
+.hint-chips { gap: 8px; }
+.hint-chip, .input-hint-chip {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-soft);
+  border-radius: 999px;
+  box-shadow: none;
+}
+.hint-chip:hover, .input-hint-chip:hover {
+  color: var(--color-primary);
+  border-color: var(--color-primary-tint);
+  background: var(--color-primary-soft);
+  box-shadow: none;
+  transform: translateY(-1px);
+}
+
+/* Assistant turns read like an analysis memo; user turns retain clear ownership. */
+.msg.assistant .msg-bubble {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary);
+  border-radius: 3px var(--radius-md) var(--radius-md) 3px;
+  box-shadow: var(--shadow-xs);
+}
+.msg.assistant .msg-bubble:hover { border-left-color: var(--color-accent); box-shadow: var(--shadow-sm); }
+.msg.user .msg-bubble {
+  background: var(--color-user-bubble-bg);
+  color: var(--color-user-bubble-fg);
+  border-radius: var(--radius-md) var(--radius-md) 3px var(--radius-md);
+  box-shadow: 0 3px 9px oklch(25% .04 164 / .16);
+}
+.msg.user .msg-bubble:hover { box-shadow: 0 5px 14px oklch(25% .04 164 / .20); }
+.msg-feishu .msg-body::before { background: var(--color-info-soft); color: var(--color-info-text); }
+
+/* Tool steps are a process trace, not decorative AI chrome. */
+.tool-steps::before { background: var(--color-border); }
+.tool-step {
+  background: var(--color-surface-2);
+  border-color: var(--color-border);
+  border-left-color: var(--color-success);
+  border-radius: 6px;
+  box-shadow: none;
+}
+.tool-step.running { background: var(--color-primary-soft); border-color: var(--color-primary-tint); border-left-color: var(--color-primary); color: var(--color-text-soft); }
+.tool-step.done { background: var(--color-surface-2); border-left-color: var(--color-success); }
+.tool-step:hover, .tool-step.done:hover { background: var(--color-surface); border-color: var(--color-primary-tint); }
+
+/* ── Composer ─────────────────────────────────────────────────── */
+.input-area { background: linear-gradient(180deg, transparent 0%, var(--color-bg) 22%, var(--color-bg) 100%); }
+.composer-shell {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+.composer-shell:focus-within { border-color: var(--color-primary-tint); box-shadow: 0 0 0 3px oklch(48% .09 164 / .12), var(--shadow-sm); }
+.composer-shell .input-card { background: transparent; }
+.composer-shell #msg-input { color: var(--color-text); }
+.composer-shell #msg-input::placeholder { color: var(--color-text-dim); }
+.composer-toolbar { border-top: 1px solid var(--color-border-soft); }
+.composer-tool, .composer-model, .composer-expand-btn {
+  color: var(--color-text-mute);
+  border-color: transparent;
+  background: transparent;
+}
+.composer-tool:hover, .composer-model:hover, .composer-model[aria-expanded="true"], .composer-expand-btn:hover {
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary-tint);
+}
+.composer-model-mark { background: var(--color-primary); color: var(--color-text-on-primary); }
+.composer-toolbar .send-btn {
+  background: var(--color-accent);
+  color: oklch(23% .03 75);
+  border-radius: 10px;
+  box-shadow: 0 3px 8px oklch(50% .10 75 / .22);
+}
+.composer-toolbar .send-btn:hover { background: var(--color-accent-text); color: var(--color-surface); }
+.composer-toolbar .send-btn.stopping { background: var(--color-danger); color: var(--color-surface); }
+
+/* ── Drawers, pickers and dialogs ─────────────────────────────── */
+.sb-drawer, .sb-panel, .skill-picker, .model-picker, .slash-popup,
+.business-canvas-drawer {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  box-shadow: var(--shadow-md);
+}
+.sb-drawer-header, .sb-panel-header, .skill-picker-head, .modal-title {
+  color: var(--color-text);
+}
+.sb-drawer-tab, .kb-tab { color: var(--color-text-mute); }
+.sb-drawer-tab.active, .kb-tab.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+.sb-drawer-tab:hover, .kb-tab:hover { background: var(--color-surface-2); color: var(--color-primary); }
+.sb-history-item:hover, .saved-item:hover, .sb-panel-item:hover { background: var(--color-surface-2); }
+
+.overlay { background: oklch(20% .025 164 / .46); backdrop-filter: blur(3px); }
+.modal {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.modal-title { font-family: "Iowan Old Style", "Songti SC", serif; font-weight: 600; }
+.modal-close:hover { color: var(--color-danger); background: var(--color-danger-soft); }
+.modal-footer { border-top-color: var(--color-border-soft); }
+.btn-sm { border-radius: var(--radius-sm); }
+.btn-sm-ghost { background: var(--color-surface-3); color: var(--color-text-soft); }
+.btn-sm-ghost:hover { background: var(--color-border); color: var(--color-text); }
+
+input:not([type="checkbox"]):not([type="radio"]), select, textarea {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+input:not([type="checkbox"]):not([type="radio"]):focus, select:focus, textarea:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px oklch(48% .09 164 / .12);
+  outline: none;
+}
+.preview-table th, .schema-box, .kb-card-sql { background: var(--color-surface-3); color: var(--color-text-soft); }
+.preview-table th, .preview-table td { border-color: var(--color-border); }
+.kb-card, .checkpoint-card, .job-card, .workflow-card, .teams-card {
+  border-color: var(--color-border);
+  background: var(--color-surface-2);
+  box-shadow: none;
+}
+.kb-card:hover, .checkpoint-card:hover, .job-card:hover { border-color: var(--color-primary-tint); box-shadow: var(--shadow-xs); }
+.kb-badge-metric { background: var(--color-primary-soft); color: var(--color-primary); }
+.kb-badge-note { background: var(--color-accent-soft); color: var(--color-accent-text); }
+.kb-import-zone { border-color: var(--color-primary-tint); background: var(--color-primary-soft); }
+.kb-import-zone.drag-over { border-color: var(--color-primary); background: var(--color-primary-tint); }
+
+/* Semantic focus: one consistent keyboard affordance across old and new UI. */
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+  .sidebar { padding: 14px 10px 12px; }
+  .chat-header { padding-inline: 14px; }
+  .chat-header-title { font-size: var(--fs-lg); }
+  .header-btns { gap: 3px; }
+  .hdr-btn { padding-inline: 7px; }
+  .welcome h2 { font-size: 26px; }
+  .welcome p { max-width: 34ch; }
+  .composer-shell { border-radius: 13px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Mobile navigation surface ─────────────────────────────────
+   The rail stays available while a secondary surface is open. The
+   backdrop gives the close action a predictable, touch-friendly target. */
+.pfs-mobile-nav-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: oklch(18% .025 164 / .46);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t-base);
+}
+
+@media (max-width: 720px) {
+  .pfs-mobile-nav-backdrop { display: block; }
+
+  body.pfs-nav-surface-open .pfs-mobile-nav-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .sb-drawer,
+  .sb-drawer.collapsed {
+    width: min(300px, calc(100vw - var(--workspace-rail) - 12px));
+    min-width: 0;
+  }
+
+  .sb-drawer.collapsed {
+    transform: translateX(calc(-100% - 12px));
+  }
+
+  .sb-panel {
+    width: min(300px, calc(100vw - var(--workspace-rail) - 12px));
+    min-width: 0;
+  }
+
+  .sb-drawer-head {
+    min-height: 64px;
+    padding: 11px 10px;
+  }
+
+  .sb-drawer-collapse {
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+    font-size: 24px;
+  }
+
+  .sb-drawer-tabs {
+    padding: 10px;
+  }
+
+  .sb-drawer-tab {
+    min-height: 44px;
+    padding-inline: 8px;
+  }
+
+  .sb-panel-search {
+    padding: 9px 10px;
+  }
+
+  .sb-panel-search-input {
+    min-height: 42px;
+  }
+
+  .sb-drawer-body {
+    padding-inline: 10px;
+  }
+
+  .input-area {
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 420px) {
+  .sb-drawer,
+  .sb-drawer.collapsed,
+  .sb-panel {
+    width: min(286px, calc(100vw - var(--workspace-rail) - 10px));
+  }
+
+  .chat-header {
+    padding-inline: 10px;
+  }
+
+  .chat-header-title {
+    max-width: 42vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .header-btns {
+    gap: 4px;
+  }
+
+  .hdr-btn {
+    padding-inline: 7px;
+  }
+}
