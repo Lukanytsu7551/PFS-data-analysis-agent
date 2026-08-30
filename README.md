@@ -41,16 +41,43 @@ PFS 的核心链路是：
 
 ## 本地运行
 
-需要 Python 3.10+。私有仓库安装需要当前环境具备 GitHub 访问权限。
+PFS 采用双入口交付：普通用户使用安装脚本或启动脚本，开发/部署人员使用 Docker。两条入口运行的是同一个 PFS Agent，普通用户不需要安装 Docker。
+
+### 普通用户：安装脚本或启动脚本
+
+需要 Python 3.10+。私有仓库安装需要当前环境具备 GitHub 访问权限。启动脚本只检查环境，不会在每次启动时偷偷安装依赖。
+
+首次使用可以执行：
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r requirements.txt
+./start.command
+```
+
+macOS/Linux 也可以使用仓库中的 `install.sh` 完成安装并生成 `pfs-data-analysis-agent` 启动命令；Windows 使用 `start.bat`。
+
+如果已经完成依赖安装，也可以直接运行：
+
+```bash
 python app.py
 ```
 
 然后打开 `http://localhost:5001`。模型、数据源和外部服务配置不会写入仓库；请通过本地配置或环境变量提供。
+
+### 开发/部署人员：Docker
+
+Docker 用于统一开发环境、验证发布镜像和部署服务，不是普通用户的必需条件。构建并启动单容器：
+
+```bash
+docker build -t pfs-data-analysis-agent:local .
+docker run --rm -p 5001:5001 \
+  -e DEEPSEEK_API_KEY=your-key \
+  pfs-data-analysis-agent:local
+```
+
+然后打开 `http://localhost:5001`。不要把 API Key 写入 Dockerfile、镜像或 Git；生产环境应通过部署平台的密钥管理注入。当前 Docker 配置覆盖 PFS 应用单容器，PostgreSQL、Redis、工作流服务和其他外部服务仍需按功能矩阵单独配置与验收。
 
 ## 开发检查
 

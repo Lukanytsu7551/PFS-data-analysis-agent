@@ -21,6 +21,7 @@
 - 上传前已排除本地参考快照 `Data-Analysis-Agent-main/`、`.venv/`、上传/输出状态、数据库、`.env`/密钥、旧品牌截图和旧图标等不应发布的内容；工作文件仍保留在本地。
 - `git push -u origin main` 已连续尝试两次，均在连接 `github.com` 的 443 端口时超时；没有产生部分远端提交。
 - GitHub 回读确认仓库 `Lukanytsu7551/PFS-data-analysis-agent` 仍为私有空仓库；待网络恢复后只需重试 push，部署和线上验收尚未开始。
+- 交付方式已确定为双入口：普通用户通过 `install.sh`、`start.command` 或 `start.bat` 使用本地 Python 环境；开发/部署人员通过 `Dockerfile` 构建和运行 PFS。普通用户不被要求安装 Docker。
 
 当前最主要的未完成项是：原项目全部能力的逐项真实复验、多轮/长任务/跨进程工作流恢复、外部数据源和 MCP/飞书、完整证据治理与审批 UI、浏览器 XLSX 和聊天产物的完整导出体验、桌面安装包、Docker 多服务和真实部署。详见功能矩阵。
 
