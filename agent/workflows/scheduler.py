@@ -225,6 +225,8 @@ class WorkflowScheduler:
             self._reconcile_jobs(run_id, version["graph"])
             if self._expire_token_budget(run_id, version["graph"]):
                 return self.detail(run_id)
+            if self._expire_cost_budget(run_id, version["graph"]):
+                return self.detail(run_id)
             if RunStatus((self.run_store.get_run(run_id) or run)["status"]) is RunStatus.CANCELING:
                 self._advance_canceling(run_id)
                 return self.detail(run_id)
@@ -380,6 +382,38 @@ class WorkflowScheduler:
             if NodeRunStatus(node_run["status"]) is NodeRunStatus.READY:
                 self.run_store.transition_node(node_run["id"], NodeRunStatus.CANCELED, error="workflow token budget exceeded")
         self.run_store.transition_run(run_id, RunStatus.FAILED, failure_code="workflow_token_budget_exceeded", failure_message=f"workflow consumed {used} tokens, above max_total_tokens={limit}")
+        return True
+
+    def _expire_cost_budget(self, run_id: str, graph: Mapping[str, Any]) -> bool:
+        limit = graph.get("limits", {}).get("max_total_cost_usd")
+        if isinstance(limit, bool) or not isinstance(limit, (int, float)) or limit <= 0:
+            return False
+        node_runs = self.run_store.list_node_runs(run_id)
+        # Only completed model usage is measurable. Pending/ready deterministic
+        # nodes have no cost field and must not make the graph check inert.
+        measured = [
+            item
+            for item in node_runs
+            if int(item.get("input_tokens") or 0)
+            or int(item.get("output_tokens") or 0)
+        ]
+        if not measured:
+            return False
+        if any(item.get("cost_usd") is None for item in measured):
+            # Unknown pricing is deliberately not converted to zero. The run
+            # remains auditable, but a cost ceiling cannot be asserted yet.
+            return False
+        used = sum(float(item["cost_usd"]) for item in measured)
+        if used < float(limit):
+            return False
+        for node_run in self.run_store.list_node_runs(run_id):
+            if NodeRunStatus(node_run["status"]) is NodeRunStatus.READY:
+                self.run_store.transition_node(node_run["id"], NodeRunStatus.CANCELED, error="workflow cost budget exceeded")
+        self.run_store.transition_run(
+            run_id, RunStatus.FAILED,
+            failure_code="workflow_cost_budget_exceeded",
+            failure_message=f"workflow consumed {used:.8f} USD, at or above max_total_cost_usd={float(limit):.8f}",
+        )
         return True
 
     def _reconcile_jobs(self, run_id: str, graph: Mapping[str, Any]) -> None:

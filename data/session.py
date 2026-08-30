@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """In-memory session management for the PFS data-analysis agent."""
 import logging
+import math
 import threading
 import time
 import uuid
@@ -68,6 +69,7 @@ class ChatSession:
     # Token usage tracking
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_cost_usd: float = 0.0
     last_prompt_tokens: int = 0      # most recent call's prompt size (for context bar)
     total_cached_input_tokens: int = 0
     total_cache_write_tokens: int = 0
@@ -648,6 +650,7 @@ class ChatSession:
         self.chart_ids.clear()
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.total_cost_usd = 0.0
         self.last_prompt_tokens = 0
         self.total_cached_input_tokens = 0
         self.total_cache_write_tokens = 0
@@ -677,6 +680,7 @@ class ChatSession:
             "chart_ids": self.chart_ids,
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
+            "total_cost_usd": self.total_cost_usd,
             "last_prompt_tokens": self.last_prompt_tokens,
             "total_cached_input_tokens": self.total_cached_input_tokens,
             "total_cache_write_tokens": self.total_cache_write_tokens,
@@ -700,6 +704,7 @@ class ChatSession:
         self.chart_ids = list(state.get("chart_ids") or [])
         self.total_input_tokens = int(state.get("total_input_tokens") or 0)
         self.total_output_tokens = int(state.get("total_output_tokens") or 0)
+        self.total_cost_usd = float(state.get("total_cost_usd") or 0.0)
         self.last_prompt_tokens = int(state.get("last_prompt_tokens") or 0)
         self.total_cached_input_tokens = int(
             state.get("total_cached_input_tokens") or 0
@@ -742,15 +747,22 @@ class ChatSession:
         breakdown: Optional[Dict[str, Any]] = None,
         cached_input_tokens: int = 0,
         cache_write_tokens: int = 0,
+        cost_usd: float | None = None,
         update_last_prompt: bool = True,
     ):
         prompt_tokens = int(prompt_tokens or 0)
         completion_tokens = int(completion_tokens or 0)
         cached_input_tokens = int(cached_input_tokens or 0)
         cache_write_tokens = int(cache_write_tokens or 0)
+        if cost_usd is not None:
+            cost_usd = float(cost_usd)
+            if cost_usd < 0 or not math.isfinite(cost_usd):
+                raise ValueError("费用必须是非负的有限数字")
         with self._usage_lock:
             self.total_input_tokens += prompt_tokens
             self.total_output_tokens += completion_tokens
+            if cost_usd is not None:
+                self.total_cost_usd += cost_usd
             if update_last_prompt:
                 self.last_prompt_tokens = prompt_tokens
             self.total_cached_input_tokens += cached_input_tokens

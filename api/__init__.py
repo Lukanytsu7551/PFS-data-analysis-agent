@@ -25,12 +25,9 @@ def _start_background_services() -> None:
         return
     if not resource_path("MCP").is_dir():
         log.info("[startup] bundled MCP resources are not installed; continuing without them")
-    else:
-        try:
-            from MCP.flowchart_server import ensure_flowchart_server
-            ensure_flowchart_server()
-        except Exception as e:
-            log.warning("[startup] flowchart server: %s", e)
+    # Diagram support is in-process: the Agent diagram tools persist draw.io
+    # XML through the business-canvas store and the browser loads the bundled
+    # editor from /static/drawio/. There is no separate flowchart MCP daemon.
 
 
 def _run_startup_hooks() -> None:

@@ -252,6 +252,8 @@ class WorkflowRuntime:
             timeout_seconds=int(node_limits.get("max_run_seconds") or 300),
             max_tokens=int(node_limits.get("max_tokens") or 2000),
             max_tool_calls=node_limits.get("max_tool_calls"),
+            max_total_tokens=node_limits.get("max_total_tokens"),
+            max_cost_usd=node_limits.get("max_cost_usd"),
             allowed_tools=frozenset(profile.get("allowed_tools") or ()),
             allow_write_tools="write_data" in set(node.get("side_effects") or ()),
         )

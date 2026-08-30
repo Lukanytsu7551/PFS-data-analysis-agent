@@ -6,7 +6,7 @@ PFS（可追踪、可核验的报表数据分析工作台）是一个面向报�
 
 > 当前版本：`0.1.0-dev` · 开发中
 >
-> 当前状态：PFS 独立产品表面、确定性报表切片、服务端重算的 JSON/CSV 报表下载、临时 PostgreSQL SQL 数据源、Docker 单容器和 DeepSeek 真实 Agent 任务已通过；停止路径、Job 存储重启收口已实测，备用模型切换已有代码回归；多轮会话、工作流跨进程恢复、其他外部数据源、多服务全栈、部署和线上验收仍未完成。
+> 当前状态：PFS 独立产品表面、CSV/XLSX 确定性报表、Claim/Evidence、JSON/CSV 下载、Excel/Word/PPT/Dashboard 统一即时交付、临时 PostgreSQL、Docker 单容器和 DeepSeek 单任务已有分层本地证据；多轮/跨进程恢复、生产数据源、完整 Evidence/HITL、安装包、部署和线上验收仍未完成。现役交接见 [`docs/HANDOFF.md`](docs/HANDOFF.md)。
 
 ## 产品边界
 
@@ -30,11 +30,11 @@ PFS 的核心链路是：
 | 能力 | 当前状态 | 证据边界 |
 |---|---|---|
 | Flask 应用、SSE 对话和数据分析工具 | 本地真实通过第一段 | DeepSeek 实际读取 schema、执行只读 SQL、返回结果并记录 Token；停止和 Job 存储重启收口已实测，多轮和工作流恢复待验证 |
-| Excel/CSV、DuckDB、图表和导出 | 固定样例本地通过；临时 PostgreSQL 连接与分组查询通过 | 真实业务文件、SQL Server/生产数据库、视觉和跨平台质量待验证 |
+| Excel/CSV、DuckDB、图表和导出 | 固定样例本地通过；临时 PostgreSQL 连接与分组查询通过 | 固定报表的 Office 结构与 Dashboard 已回读；复杂业务文件、生产数据库、视觉和跨平台质量待验证 |
 | PFS 产品身份、图标和服务标识 | 已实现 | 已做静态编译与模板入口检查 |
 | PFS 工具契约与策略门 | 已实现第一段 | `get_schema`、`query_data`、`run_analysis` 等只读/计算调用已接入；写入类仍沿用原流程 |
 | PFS 报表口径预览 | 已实现第一段 | 主聊天页可读取固定 fixture，也可选择当前会话上传的 CSV，展示指标、分组、Claim、Evidence 和数据快照哈希 |
-| PFS 报表下载 | 已实现第一段 | 预览可下载服务端重新计算的 JSON/CSV；上传数据的自然语言口径也会在服务端重新解析，Word/Excel/PPT 原有导出路径仍需逐项复验 |
+| PFS 报表下载与交付 | 已实现桌面第一段 | 服务端重新计算 JSON/CSV；Excel/Word/PPT/Dashboard 已接入统一交付区并完成固定 fixture 回读，尚未登记为工作区历史 artifact |
 | Evidence Ledger、Claim–Evidence、冲突队列 | 已实现第一段 | `pfs_agent/ledger.py` 与 `/api/pfs/ledger` 已支持稳定身份、批量幂等、冲突检测和原子 JSON 持久化；语义核验待实现 |
 | Docker 单容器 | 本地真实通过 | 镜像内容审计、健康检查、首页和 CSV 分析通过；多服务全栈及部署待验证 |
 | MCP、Feishu、生产数据源、恢复和部署 | 部分验证 | 临时 PostgreSQL 与本地 Job 恢复已通过；MCP/Feishu、生产权限、多服务恢复和部署仍需真实场景逐项验收 |
@@ -113,12 +113,14 @@ tests/                 PFS 契约、适配层和分析选择器测试
 
 ## 项目文档
 
+- [现役交接与剩余顺序](docs/HANDOFF.md)
 - [产品规格与能力矩阵](PRODUCT.md)
-- [当前真实状态](PROJECT_STATUS.md)
+- [研究与验证台账](PROJECT_STATUS.md)
+- [功能兼容矩阵](docs/FUNCTION_COMPATIBILITY_MATRIX.md)
 - [架构地图](ARCHITECTURE_MAP.md)
 - [PFS 工具策略契约](DAY2_TOOL_POLICY.md)
-- [九天改造计划](NINE_DAY_PLAN.md)
 - [框架改造路线](FRAMEWORK_9_DAY_PLAN.md)
+- [完整独立改造计划](docs/PFS_FULL_TRANSFORMATION_PLAN.md)
 - [安全策略](SECURITY.md)
 
 ## 数据与安全边界

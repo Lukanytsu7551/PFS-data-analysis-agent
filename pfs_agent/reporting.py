@@ -20,6 +20,10 @@ from typing import Any, Mapping, Optional
 class ReportingContractError(ValueError):
     """Raised when a reporting request or source violates its contract."""
 
+    def __init__(self, message: str, *, code: str = "reporting_contract_invalid") -> None:
+        super().__init__(message)
+        self.code = code
+
 
 @dataclass(frozen=True)
 class MetricContract:
@@ -91,6 +95,7 @@ class DataSnapshot:
     duplicate_rows: int
     min_date: str = ""
     max_date: str = ""
+    worksheet: str = ""
     rows: tuple[Mapping[str, str], ...] = field(default_factory=tuple, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
@@ -104,6 +109,7 @@ class DataSnapshot:
             "duplicate_rows": self.duplicate_rows,
             "min_date": self.min_date,
             "max_date": self.max_date,
+            "worksheet": self.worksheet,
         }
 
 
@@ -181,7 +187,9 @@ def load_csv_snapshot(
     reader = csv.DictReader(text.splitlines())
     columns = tuple(str(column or "").strip() for column in (reader.fieldnames or ()))
     if not columns or any(not column for column in columns):
-        raise ReportingContractError("CSV source must have a non-empty header")
+        raise ReportingContractError(
+            "CSV source must have a non-empty header", code="source_header_missing"
+        )
     rows: list[dict[str, str]] = []
     null_counts = {column: 0 for column in columns}
     row_fingerprints: set[str] = set()
@@ -200,6 +208,10 @@ def load_csv_snapshot(
         if row.get(date_column):
             dates.append(row[date_column])
 
+    if not rows:
+        raise ReportingContractError(
+            "CSV source must contain at least one data row", code="source_has_no_rows"
+        )
     return DataSnapshot(
         source_id=source_id.strip() or csv_path.stem,
         file_name=csv_path.name,
@@ -214,18 +226,41 @@ def load_csv_snapshot(
     )
 
 
+def list_xlsx_worksheets(path: str | Path) -> list[str]:
+    """Return workbook-order worksheet names without guessing which one to analyze."""
+    xlsx_path = Path(path).resolve()
+    if not xlsx_path.is_file():
+        raise ReportingContractError(
+            f"XLSX source does not exist: {xlsx_path}", code="source_not_found"
+        )
+    try:
+        from openpyxl import load_workbook
+    except ImportError as exc:
+        raise ReportingContractError(
+            "XLSX analysis requires the openpyxl dependency", code="xlsx_dependency_missing"
+        ) from exc
+    try:
+        workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
+        return list(workbook.sheetnames)
+    except Exception as exc:
+        raise ReportingContractError(
+            "XLSX source could not be read", code="source_unreadable"
+        ) from exc
+    finally:
+        try:
+            workbook.close()
+        except UnboundLocalError:
+            pass
+
+
 def load_xlsx_snapshot(
     path: str | Path,
     *,
     source_id: str,
     date_column: str,
+    worksheet: str = "",
 ) -> DataSnapshot:
-    """Read the first worksheet of an XLSX without changing cell values.
-
-    XLSX support is deliberately limited to the first worksheet in this first
-    vertical slice. The workbook bytes still form the source identity, so the
-    resulting evidence can be reproduced later.
-    """
+    """Read one explicit worksheet and preserve it in the snapshot contract."""
     xlsx_path = Path(path).resolve()
     if not xlsx_path.is_file():
         raise ReportingContractError(f"XLSX source does not exist: {xlsx_path}")
@@ -237,20 +272,46 @@ def load_xlsx_snapshot(
         raise ReportingContractError("XLSX analysis requires the openpyxl dependency") from exc
     try:
         workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
-        sheet = workbook.active
+        names = list(workbook.sheetnames)
+        if not names:
+            raise ReportingContractError(
+                "XLSX source has no worksheets", code="worksheet_missing"
+            )
+        if worksheet:
+            if worksheet not in names:
+                raise ReportingContractError(
+                    f"worksheet does not exist: {worksheet}", code="worksheet_not_found"
+                )
+            selected_worksheet = worksheet
+        elif len(names) == 1:
+            selected_worksheet = names[0]
+        else:
+            raise ReportingContractError(
+                "XLSX source contains multiple worksheets; choose a worksheet",
+                code="worksheet_required",
+            )
+        sheet = workbook[selected_worksheet]
         values = list(sheet.iter_rows(values_only=True))
+    except ReportingContractError:
+        raise
     except Exception as exc:
-        raise ReportingContractError("XLSX source could not be read") from exc
+        raise ReportingContractError(
+            "XLSX source could not be read", code="source_unreadable"
+        ) from exc
     finally:
         try:
             workbook.close()
         except UnboundLocalError:
             pass
     if not values:
-        raise ReportingContractError("XLSX source must have a non-empty header")
+        raise ReportingContractError(
+            "XLSX source must have a non-empty header", code="source_header_missing"
+        )
     columns = tuple(str(value or "").strip() for value in values[0])
     if not columns or any(not column for column in columns):
-        raise ReportingContractError("XLSX source must have a non-empty header")
+        raise ReportingContractError(
+            "XLSX source must have a non-empty header", code="source_header_missing"
+        )
     rows: list[dict[str, str]] = []
     null_counts = {column: 0 for column in columns}
     row_fingerprints: set[str] = set()
@@ -273,6 +334,10 @@ def load_xlsx_snapshot(
         row_fingerprints.add(fingerprint)
         if row.get(date_column):
             dates.append(row[date_column])
+    if not rows:
+        raise ReportingContractError(
+            "XLSX source must contain at least one data row", code="source_has_no_rows"
+        )
     return DataSnapshot(
         source_id=source_id.strip() or xlsx_path.stem,
         file_name=xlsx_path.name,
@@ -283,16 +348,21 @@ def load_xlsx_snapshot(
         duplicate_rows=duplicate_rows,
         min_date=min(dates) if dates else "",
         max_date=max(dates) if dates else "",
+        worksheet=selected_worksheet,
         rows=tuple(rows),
     )
 
 
-def load_tabular_snapshot(path: str | Path, *, source_id: str, date_column: str) -> DataSnapshot:
+def load_tabular_snapshot(
+    path: str | Path, *, source_id: str, date_column: str, worksheet: str = ""
+) -> DataSnapshot:
     suffix = Path(path).suffix.lower()
     if suffix == ".csv":
         return load_csv_snapshot(path, source_id=source_id, date_column=date_column)
     if suffix == ".xlsx":
-        return load_xlsx_snapshot(path, source_id=source_id, date_column=date_column)
+        return load_xlsx_snapshot(
+            path, source_id=source_id, date_column=date_column, worksheet=worksheet
+        )
     raise ReportingContractError("PFS deterministic analysis accepts CSV or XLSX files only")
 
 
@@ -332,9 +402,12 @@ def analyze_file(
     metric: MetricContract,
     request: AnalysisRequest,
     source_id: str = "fixture",
+    worksheet: str = "",
 ) -> AnalysisResult:
     """Analyze a supported CSV or XLSX source with one shared contract."""
-    snapshot = load_tabular_snapshot(path, source_id=source_id, date_column=metric.date_column)
+    snapshot = load_tabular_snapshot(
+        path, source_id=source_id, date_column=metric.date_column, worksheet=worksheet
+    )
     return _analyze_snapshot(snapshot, metric=metric, request=request)
 
 
@@ -376,7 +449,10 @@ def _analyze_snapshot(
         try:
             amount = Decimal(raw_value)
         except InvalidOperation as exc:
-            raise ReportingContractError(f"metric value is not numeric: {raw_value!r}") from exc
+            raise ReportingContractError(
+                f"metric value is not numeric: {raw_value!r}",
+                code="metric_value_not_numeric",
+            ) from exc
         buckets[dimension_value] = buckets.get(dimension_value, Decimal("0")) + amount
         total += amount
         included_rows += 1
@@ -392,6 +468,7 @@ def _analyze_snapshot(
     )
     evidence_text = (
         f"{snapshot.file_name} · sha256:{snapshot.content_sha256[:16]} · "
+        f"worksheet:{snapshot.worksheet or '-'} · "
         f"included_rows:{included_rows} · date:{request.date_from or snapshot.min_date}"
         f"..{request.date_to or snapshot.max_date}"
     )
@@ -424,6 +501,8 @@ def _analyze_snapshot(
                 "evidence_ids": [evidence_id],
             }
         )
+    if not included_rows:
+        warnings.append("筛选条件下没有匹配的数据行。")
     return AnalysisResult(
         run_id=request.run_id,
         status="completed" if included_rows else "unverified",

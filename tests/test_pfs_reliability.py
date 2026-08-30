@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
 
 from agent.workflows.scheduler import WorkflowConcurrencyLimiter, WorkflowScheduler
 from data.jobs_store import (
@@ -12,9 +13,68 @@ from data.jobs_store import (
 )
 from data.workflow_run_store import WorkflowRunStore
 from data.workflow_store import WorkflowStore
+from agent.workflows.models import NodeRunStatus, RunStatus
 
 
 class PfsDurableRecoveryTests(unittest.TestCase):
+    def test_workflow_cost_budget_only_uses_measured_usage_and_blocks_at_limit(self):
+        class FakeRunStore:
+            workspace_id = "pfs-cost-workspace"
+
+            def __init__(self, nodes):
+                self.nodes = nodes
+                self.transitions = []
+                self.run_transition = None
+
+            def list_node_runs(self, _run_id):
+                return self.nodes
+
+            def transition_node(self, node_id, status, error=""):
+                self.transitions.append((node_id, status, error))
+
+            def transition_run(self, run_id, status, failure_code="", failure_message=""):
+                self.run_transition = (run_id, status, failure_code, failure_message)
+
+        scheduler = WorkflowScheduler.__new__(WorkflowScheduler)
+        pending = {
+            "id": "pending", "status": NodeRunStatus.READY.value,
+            "input_tokens": 0, "output_tokens": 0, "cost_usd": None,
+        }
+        measured = {
+            "id": "measured", "status": NodeRunStatus.SUCCEEDED.value,
+            "input_tokens": 80, "output_tokens": 20, "cost_usd": 0.001,
+        }
+        store = FakeRunStore([pending, measured])
+        scheduler.run_store = store
+        self.assertTrue(scheduler._expire_cost_budget("run-1", {"limits": {"max_total_cost_usd": 0.001}}))
+        self.assertEqual([
+            ("pending", NodeRunStatus.CANCELED, "workflow cost budget exceeded"),
+        ], store.transitions)
+        self.assertEqual(RunStatus.FAILED, store.run_transition[1])
+        self.assertEqual("workflow_cost_budget_exceeded", store.run_transition[2])
+
+    def test_workflow_cost_budget_does_not_fake_zero_for_unknown_measured_cost(self):
+        class FakeRunStore:
+            def __init__(self):
+                self.transitions = []
+
+            def list_node_runs(self, _run_id):
+                return [{
+                    "id": "measured", "status": NodeRunStatus.SUCCEEDED.value,
+                    "input_tokens": 80, "output_tokens": 20, "cost_usd": None,
+                }]
+
+            def transition_node(self, *args, **kwargs):
+                self.transitions.append((args, kwargs))
+
+            def transition_run(self, *args, **kwargs):
+                self.transitions.append((args, kwargs))
+
+        scheduler = WorkflowScheduler.__new__(WorkflowScheduler)
+        scheduler.run_store = FakeRunStore()
+        self.assertFalse(scheduler._expire_cost_budget("run-unknown", {"limits": {"max_total_cost_usd": 0.001}}))
+        self.assertEqual([], scheduler.run_store.transitions)
+
     def test_reopen_closes_interrupted_jobs_and_records_recovery_events(self):
         with tempfile.TemporaryDirectory(prefix="pfs-jobs-recovery-") as temp_dir:
             db_path = Path(temp_dir) / "jobs.db"

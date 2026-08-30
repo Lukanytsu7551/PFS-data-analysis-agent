@@ -2352,7 +2352,6 @@ details.tool-audit {
   .sb-nav-label,
   .sb-footer-meta,
   .sidebar-hub .sb-footer-actions .sb-footer-update,
-  .sidebar-hub .sb-footer-actions .sb-footer-community,
   .sidebar-hub .sb-footer-actions .sb-footer-settings {
     display: none;
   }

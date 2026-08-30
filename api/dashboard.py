@@ -6,6 +6,7 @@ import os
 import re
 import datetime
 import uuid
+from urllib.parse import quote
 
 from flask import Blueprint, request, jsonify, render_template, abort
 from infrastructure.paths import data_path
@@ -446,9 +447,17 @@ def export_html(dashboard_id: str):
 
     dashboard = _load_dashboard(dashboard_id)
     html = build_export_html(dashboard, chart_store)
-    safe_name = re.sub(r"[^\w\-]", "_", dashboard.get("name", "dashboard"))
+    display_name = re.sub(r"[^\w\-]", "_", dashboard.get("name", "dashboard"))
+    ascii_name = re.sub(r"[^A-Za-z0-9_-]", "_", display_name)
+    ascii_name = re.sub(r"_+", "_", ascii_name).strip("_") or "dashboard"
+    encoded_name = quote(f"{display_name}.html", safe="")
     return Response(
         html,
         mimetype="text/html",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}.html"'},
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{ascii_name}.html"; '
+                f"filename*=UTF-8''{encoded_name}"
+            )
+        },
     )

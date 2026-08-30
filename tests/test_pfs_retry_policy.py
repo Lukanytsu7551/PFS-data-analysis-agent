@@ -10,9 +10,291 @@ from agent.retry import (
     is_retryable,
 )
 from LLM.llm_config_manager import LLMConfig, get_llm_client_with_fallback
+from data.sources.csv import CSVDataSource
+from pathlib import Path
+from agent.pricing import calculate_model_cost_usd, validate_cost_limit
 
 
 class PfsRetryPolicyTests(unittest.TestCase):
+    def test_model_cost_uses_input_and_output_rates(self):
+        self.assertEqual(0.001, calculate_model_cost_usd(80, 20, input_price_per_million=10, output_price_per_million=10))
+        self.assertIsNone(calculate_model_cost_usd(80, 20))
+        with self.assertRaisesRegex(ValueError, "同时填写"):
+            calculate_model_cost_usd(80, 20, input_price_per_million=1)
+
+    def test_cost_limit_rejects_non_positive_or_non_finite_values(self):
+        self.assertIsNone(validate_cost_limit(None))
+        for value in (0, -1, "nan", "inf", "not-a-number"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                validate_cost_limit(value)
+
+    def test_agent_rejects_cost_budget_without_complete_price_pair(self):
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace()))
+        with self.assertRaisesRegex(ValueError, "同时填写"):
+            BusinessAgent(
+                client=client,
+                model="pfs-missing-price-test",
+                session_id="pfs-missing-price-test",
+                max_cost_usd=0.01,
+            )
+
+    def test_agent_hard_stops_after_actual_cost_budget_is_reached(self):
+        class FakeCompletions:
+            def __init__(self):
+                self.calls = 0
+
+            def create(self, **kwargs):
+                self.calls += 1
+                return [SimpleNamespace(
+                    usage=SimpleNamespace(prompt_tokens=80, completion_tokens=20, total_tokens=100),
+                    choices=[SimpleNamespace(
+                        finish_reason="stop",
+                        delta=SimpleNamespace(content="已生成分析", reasoning_content=None, tool_calls=None),
+                    )],
+                )]
+
+        completions = FakeCompletions()
+        agent = BusinessAgent(
+            client=SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+            model="pfs-cost-budget-test",
+            session_id="pfs-cost-budget-test",
+            input_price_per_million=10,
+            output_price_per_million=10,
+            max_cost_usd=0.001,
+        )
+        events = list(agent.run("生成摘要", history=[]))
+        self.assertEqual(1, completions.calls)
+        usage = next(event for event in events if event.get("type") == "usage")
+        self.assertEqual(0.001, usage["cost_usd"])
+        self.assertEqual(0.001, usage["run_total_cost_usd"])
+        self.assertIn("run_cost_budget_exceeded", [event.get("code") for event in events])
+        self.assertEqual({"type": "done"}, events[-1])
+
+    def test_delegated_agent_hard_stops_after_cost_budget(self):
+        class FakeCompletions:
+            def __init__(self):
+                self.calls = 0
+
+            def create(self, **kwargs):
+                self.calls += 1
+                return SimpleNamespace(
+                    model="pfs-delegated-cost-test",
+                    usage=SimpleNamespace(prompt_tokens=80, completion_tokens=20, total_tokens=100),
+                    choices=[SimpleNamespace(message=SimpleNamespace(
+                        content="",
+                        tool_calls=[SimpleNamespace(id="cost-call", function=SimpleNamespace(name="get_schema", arguments="{}"))],
+                    ))],
+                )
+
+        completions = FakeCompletions()
+        agent = BusinessAgent(
+            client=SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+            model="pfs-delegated-cost-test",
+            session_id="pfs-delegated-cost-test",
+            input_price_per_million=10,
+            output_price_per_million=10,
+        )
+        with patch.object(agent, "_execute_delegated_tool", side_effect=AssertionError("tool must not run")) as execute_tool:
+            result = agent._run_delegated_llm(
+                member={"role": "analyst", "instructions": ""},
+                prompt="检查数据",
+                max_cost_usd=0.001,
+            )
+        self.assertEqual(1, completions.calls)
+        execute_tool.assert_not_called()
+        self.assertTrue(result["usage"]["cost_budget_exceeded"])
+        self.assertEqual(0.001, result["usage"]["cost_usd"])
+
+    def test_delegated_agent_rejects_cost_budget_without_complete_price_pair(self):
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace()))
+        agent = BusinessAgent(
+            client=client,
+            model="pfs-delegated-missing-price-test",
+            session_id="pfs-delegated-missing-price-test",
+        )
+        with self.assertRaisesRegex(ValueError, "同时填写"):
+            agent._run_delegated_llm(
+                member={"role": "analyst", "instructions": ""},
+                prompt="检查数据",
+                max_cost_usd=0.001,
+            )
+
+    def test_agent_hard_stops_when_run_tool_budget_is_exhausted(self):
+        fixture = Path(__file__).resolve().parents[1] / "data" / "fixtures" / "pfs_sales.csv"
+
+        def tool_chunk(call_id):
+            return SimpleNamespace(
+                usage=None,
+                choices=[SimpleNamespace(
+                    finish_reason="tool_calls",
+                    delta=SimpleNamespace(
+                        content=None,
+                        reasoning_content=None,
+                        tool_calls=[SimpleNamespace(
+                            index=0,
+                            id=call_id,
+                            function=SimpleNamespace(
+                                name="get_schema", arguments="{}",
+                            ),
+                        )],
+                    ),
+                )],
+            )
+
+        class FakeCompletions:
+            def __init__(self):
+                self.calls = 0
+
+            def create(self, **kwargs):
+                self.calls += 1
+                return [tool_chunk(f"call-{self.calls}")]
+
+        completions = FakeCompletions()
+        agent = BusinessAgent(
+            client=SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+            model="pfs-budget-test",
+            data_source=CSVDataSource(str(fixture), fixture.name),
+            session_id="pfs-budget-test",
+            max_iterations=5,
+            max_tool_calls=1,
+        )
+
+        events = list(agent.run("读取数据结构并继续", history=[]))
+
+        self.assertEqual(2, completions.calls)
+        self.assertIn(
+            {
+                "type": "policy_decision",
+                "tool": "get_schema",
+                "allowed": False,
+                "code": "run_tool_budget_exceeded",
+                "reason": "the run tool-call budget is exhausted",
+            },
+            events,
+        )
+        self.assertIn(
+            {
+                "type": "policy_decision",
+                "tool": "get_schema",
+                "allowed": True,
+                "code": "allowed",
+                "reason": "tool call passed the policy gate",
+            },
+            events,
+        )
+        self.assertIn(
+            {
+                "type": "error",
+                "message": "本次分析已达到工具调用上限，已安全停止。请缩小问题范围后重试。",
+            },
+            events,
+        )
+        self.assertEqual({"type": "done"}, events[-1])
+
+    def test_agent_hard_stops_after_actual_token_budget_is_reached(self):
+        def usage_chunk():
+            return SimpleNamespace(prompt_tokens=80, completion_tokens=20, total_tokens=100)
+
+        class FakeCompletions:
+            def __init__(self):
+                self.calls = 0
+
+            def create(self, **kwargs):
+                self.calls += 1
+                return [SimpleNamespace(
+                    usage=usage_chunk(),
+                    choices=[SimpleNamespace(
+                        finish_reason="stop",
+                        delta=SimpleNamespace(
+                            content="已生成分析",
+                            reasoning_content=None,
+                            tool_calls=None,
+                        ),
+                    )],
+                )]
+
+        completions = FakeCompletions()
+        agent = BusinessAgent(
+            client=SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+            model="pfs-token-budget-test",
+            session_id="pfs-token-budget-test",
+            max_total_tokens=100,
+        )
+
+        events = list(agent.run("生成摘要", history=[]))
+
+        self.assertEqual(1, completions.calls)
+        self.assertIn(
+            {
+                "type": "policy_decision",
+                "tool": "llm.run",
+                "allowed": False,
+                "code": "run_token_budget_exceeded",
+                "reason": "the run token budget is exhausted",
+            },
+            events,
+        )
+        self.assertIn(
+            {
+                "type": "error",
+                "message": "本次分析已达到 Token 预算上限，已安全停止。请缩小问题范围后重试。",
+            },
+            events,
+        )
+        self.assertEqual({"type": "done"}, events[-1])
+
+    def test_delegated_agent_does_not_execute_tools_after_token_budget(self):
+        class FakeCompletions:
+            def __init__(self):
+                self.calls = 0
+
+            def create(self, **kwargs):
+                self.calls += 1
+                return SimpleNamespace(
+                    model="pfs-delegated-budget-test",
+                    usage=SimpleNamespace(
+                        prompt_tokens=80,
+                        completion_tokens=20,
+                        total_tokens=100,
+                    ),
+                    choices=[SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="",
+                            tool_calls=[SimpleNamespace(
+                                id="delegated-call-1",
+                                function=SimpleNamespace(
+                                    name="get_schema", arguments="{}",
+                                ),
+                            )],
+                        ),
+                    )],
+                )
+
+        completions = FakeCompletions()
+        agent = BusinessAgent(
+            client=SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+            model="pfs-delegated-budget-test",
+            session_id="pfs-delegated-budget-test",
+        )
+
+        with patch.object(
+            agent, "_execute_delegated_tool",
+            side_effect=AssertionError("tool must not run"),
+        ) as execute_tool:
+            result = agent._run_delegated_llm(
+                member={"role": "analyst", "instructions": ""},
+                prompt="检查数据结构",
+                max_tool_calls=3,
+                max_total_tokens=100,
+            )
+
+        self.assertEqual(1, completions.calls)
+        execute_tool.assert_not_called()
+        self.assertTrue(result["usage"]["token_budget_exceeded"])
+        self.assertEqual(80, result["usage"]["input_tokens"])
+        self.assertEqual(20, result["usage"]["output_tokens"])
+        self.assertIn("Token 预算上限", result["content"])
+
     def test_transient_service_error_retries_with_exponential_backoff(self):
         calls = []
 

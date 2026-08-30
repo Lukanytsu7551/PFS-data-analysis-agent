@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
 import threading
 import uuid
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS workflow_node_runs (
     output_tokens INTEGER NOT NULL DEFAULT 0,
     cached_input_tokens INTEGER NOT NULL DEFAULT 0,
     tool_calls INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL,
     UNIQUE(run_id, node_id, iteration, attempt),
     FOREIGN KEY(run_id) REFERENCES workflow_runs(id)
 );
@@ -375,6 +377,7 @@ class WorkflowRunStore:
             "output_tokens": "INTEGER NOT NULL DEFAULT 0",
             "cached_input_tokens": "INTEGER NOT NULL DEFAULT 0",
             "tool_calls": "INTEGER NOT NULL DEFAULT 0",
+            "cost_usd": "REAL",
         }.items():
             if name not in node_columns:
                 self._conn.execute(
@@ -919,10 +922,14 @@ class WorkflowRunStore:
                 return False
             input_tokens = max(0, int(usage.get("input_tokens") or 0))
             output_tokens = max(0, int(usage.get("output_tokens") or 0))
+            raw_cost = usage.get("cost_usd")
+            cost_usd = None if raw_cost is None else float(raw_cost)
+            if cost_usd is not None and (not math.isfinite(cost_usd) or cost_usd < 0):
+                raise ValueError("workflow node cost_usd must be a finite non-negative number")
             self._conn.execute(
                 "UPDATE workflow_node_runs SET model_name = ?, provider_name = ?, "
                 "input_tokens = ?, output_tokens = ?, cached_input_tokens = ?, "
-                "tool_calls = ?, updated_at = ? WHERE id = ?",
+                "tool_calls = ?, cost_usd = ?, updated_at = ? WHERE id = ?",
                 (
                     str(usage.get("model") or ""),
                     str(usage.get("provider") or ""),
@@ -930,6 +937,7 @@ class WorkflowRunStore:
                     output_tokens,
                     max(0, int(usage.get("cached_input_tokens") or 0)),
                     max(0, int(usage.get("tool_calls") or 0)),
+                    cost_usd,
                     _now(),
                     node_run_id,
                 ),
@@ -943,6 +951,7 @@ class WorkflowRunStore:
                     "model": str(usage.get("model") or ""),
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
+                    "cost_usd": usage.get("cost_usd"),
                 },
             )
         return True

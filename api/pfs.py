@@ -15,11 +15,12 @@ import io
 import json
 from pathlib import Path
 import re
+from urllib.parse import unquote, urlparse
 import uuid
 
 from flask import Blueprint, Response, jsonify, request
 
-from .state import require_session_ownership, session_manager
+from .state import chart_store, require_session_ownership, session_manager
 from infrastructure.paths import data_path, resource_path
 from pfs_agent.ledger import (
     ClaimRecord,
@@ -33,6 +34,7 @@ from pfs_agent.reporting import (
     ReportingContractError,
     analyze_csv,
     analyze_file,
+    list_xlsx_worksheets,
     load_tabular_snapshot,
 )
 from pfs_agent.query import QueryInterpretationError, parse_report_question
@@ -162,7 +164,12 @@ def _ledger() -> PersistentEvidenceLedger:
 
 
 def _error(exc: Exception, status: int = 400):
-    return jsonify({"ok": False, "error": str(exc), "code": type(exc).__name__}), status
+    code = getattr(exc, "code", type(exc).__name__)
+    return jsonify({"ok": False, "error": str(exc), "code": code}), status
+
+
+def _worksheet_from_payload(payload: Mapping[str, object]) -> str:
+    return _bounded(payload.get("worksheet"), "worksheet", limit=120)
 
 
 def _export_filename(run_id: str, output_format: str) -> str:
@@ -238,6 +245,230 @@ def _export_format(payload: Mapping[str, object]) -> str:
     return output_format
 
 
+def _delivery_format(payload: Mapping[str, object]) -> str:
+    output_format = _bounded(payload.get("format"), "format", limit=16, required=True).lower()
+    if output_format not in {"xlsx", "docx", "pptx", "dashboard"}:
+        raise ReportingContractError("format must be xlsx, docx, pptx, or dashboard")
+    return output_format
+
+
+def _sql_identifier(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _report_sections(result: object) -> list[dict[str, str]]:
+    payload = result.to_dict()
+    metric = payload["metric"]
+    snapshot = payload["snapshot"]
+    request_data = payload["request"]
+    coverage = (
+        f"{request_data.get('date_from') or snapshot.get('min_date') or '全部'}"
+        f" 至 {request_data.get('date_to') or snapshot.get('max_date') or '全部'}"
+    )
+    groups = "\n".join(
+        f"{item['rank']}. {item['dimension']}：{item['value']}"
+        for item in payload.get("groups", [])
+    ) or "没有可展示的分组结果。"
+    claims = "\n".join(
+        f"- {item['text']}（{item.get('status') or 'unverified'}，置信度 {item.get('confidence', 0):.0%}）"
+        for item in payload.get("claims", [])
+    ) or "没有可展示的关键结论。"
+    evidence = "\n".join(
+        f"- {item['evidence_id']}：{item['excerpt']}"
+        for item in payload.get("evidence", [])
+    ) or "没有登记证据。"
+    return [
+        {
+            "heading": "口径与数据快照",
+            "content": (
+                f"指标：{metric['label']}\n公式：{metric['formula']}\n"
+                f"覆盖：{snapshot['row_count']} 行，{coverage}\n"
+                f"来源：{snapshot['file_name']}\nSHA-256：{snapshot['content_sha256']}"
+            ),
+        },
+        {"heading": "分组结果", "content": groups},
+        {"heading": "关键结论", "content": claims},
+        {"heading": "证据登记", "content": evidence},
+    ]
+
+
+def _ppt_slides(result: object) -> list[dict]:
+    payload = result.to_dict()
+    metric = payload["metric"]
+    snapshot = payload["snapshot"]
+    groups = payload.get("groups", [])
+    top_group = groups[0] if groups else {"dimension": "—", "value": 0}
+    return [
+        {
+            "layout": "cover",
+            "params": {
+                "title": f"PFS {metric['label']}分析",
+                "subtitle": f"{snapshot['file_name']} · 可追踪报表交付物",
+            },
+        },
+        {
+            "layout": "metric_cards",
+            "params": {
+                "title": "核心指标",
+                "cards": [
+                    ["Σ", "指标合计", f"{payload['total']:,}\n{metric['formula']}"],
+                    ["#", "纳入数据", f"{snapshot['row_count']} 行\n{snapshot.get('min_date') or '全部'} 至 {snapshot.get('max_date') or '全部'}"],
+                    ["1", "最高分组", f"{top_group['dimension']}\n{top_group['value']:,}"],
+                ],
+                "source": f"PFS · SHA-256 {snapshot['content_sha256'][:16]}",
+            },
+        },
+        {
+            "layout": "data_table",
+            "params": {
+                "title": f"按 {metric['dimension']} 分组",
+                "headers": ["排名", metric["dimension"], metric["label"]],
+                "rows": [[str(item["rank"]), str(item["dimension"]), f"{item['value']:,}"] for item in groups],
+                "source": snapshot["file_name"],
+            },
+        },
+        {
+            "layout": "closing",
+            "params": {
+                "title": "结论与核验",
+                "message": "\n".join(item["text"] for item in payload.get("claims", [])) or "分析完成",
+                "source_text": f"PFS 数据分析 Agent · {payload['run_id']}",
+            },
+        },
+    ]
+
+
+def _delivery_table(result: object, data_source: object) -> str:
+    """Resolve the exact source table represented by the analyzed snapshot."""
+    payload = result.to_dict()
+    snapshot = payload["snapshot"]
+    tables = list(data_source.list_tables() or [])
+    if not tables:
+        raise ReportingContractError(
+            "data source has no exportable table", code="delivery_table_missing"
+        )
+
+    worksheet = str(snapshot.get("worksheet") or "").strip()
+    if not worksheet:
+        if len(tables) == 1:
+            return tables[0]
+        raise ReportingContractError(
+            "report snapshot does not identify an exportable table",
+            code="delivery_table_ambiguous",
+        )
+
+    normalized = re.sub(r"[^\w]+", "_", worksheet, flags=re.UNICODE).strip("_")
+    if normalized and normalized[0].isdigit():
+        normalized = "_" + normalized
+    matches = [table for table in tables if table == worksheet or table == normalized]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ReportingContractError(
+            f"worksheet maps to multiple export tables: {worksheet}",
+            code="delivery_table_ambiguous",
+        )
+    raise ReportingContractError(
+        f"selected worksheet is unavailable for delivery: {worksheet}",
+        code="delivery_table_missing",
+    )
+
+
+def _dashboard_widgets(result: object, table_name: str) -> list[dict]:
+    payload = result.to_dict()
+    metric = payload["metric"]
+    request_data = payload["request"]
+    table = _sql_identifier(table_name)
+    value = _sql_identifier(metric["value_column"])
+    dimension = _sql_identifier(metric["dimension"])
+    date_column = _sql_identifier(metric["date_column"])
+    filters = []
+    if request_data.get("date_from"):
+        filters.append(f"{date_column} >= '{str(request_data['date_from']).replace(chr(39), chr(39) * 2)}'")
+    if request_data.get("date_to"):
+        filters.append(f"{date_column} <= '{str(request_data['date_to']).replace(chr(39), chr(39) * 2)}'")
+    where = f" WHERE {' AND '.join(filters)}" if filters else ""
+    return [
+        {
+            "id": "pfs-total",
+            "title": f"{metric['label']}合计",
+            "chart_type": "KPI_Card",
+            "sql": f"SELECT SUM({value}) AS total_value FROM {table}{where}",
+            "field_mapping": {},
+            "grid": {"x": 0, "y": 0, "w": 4, "h": 2},
+        },
+        {
+            "id": "pfs-groups",
+            "title": f"按 {metric['dimension']} 分组的{metric['label']}",
+            "chart_type": "Bar_Chart",
+            "sql": (
+                f"SELECT {dimension} AS group_name, SUM({value}) AS total_value "
+                f"FROM {table}{where} GROUP BY 1 ORDER BY total_value DESC"
+            ),
+            "field_mapping": {"x": "group_name", "y": "total_value"},
+            "grid": {"x": 0, "y": 2, "w": 8, "h": 4},
+        },
+    ]
+
+
+def _tool_links(tool_result: str) -> list[tuple[str, str]]:
+    return [
+        (label.strip(), url.strip())
+        for label, url in re.findall(r"\[([^\]]+)\]\(([^)]+)\)", str(tool_result or ""))
+    ]
+
+
+def _delivery_artifacts(result: object, data_source: object, sid: str, output_format: str) -> dict:
+    from agent.agent import BusinessAgent
+
+    payload = result.to_dict()
+    metric = payload["metric"]
+    selected_table = _delivery_table(result, data_source)
+    run_id = re.sub(r"[^A-Za-z0-9_-]+", "-", payload["run_id"])[:40].strip("-") or "report"
+    agent = BusinessAgent(
+        client=None,
+        model="pfs-deterministic-export",
+        data_source=data_source,
+        chart_store=chart_store,
+        session_id=sid,
+        color_scheme="pfs",
+    )
+    if output_format == "xlsx":
+        tool_result = agent._tool_export_excel([selected_table], f"pfs-report-{run_id}")
+    elif output_format == "docx":
+        tool_result = agent._tool_export_report(f"PFS {metric['label']}分析报告", _report_sections(result))
+    elif output_format == "pptx":
+        tool_result = agent._tool_generate_ppt(
+            f"PFS {metric['label']}分析",
+            _ppt_slides(result),
+            f"pfs-report-{run_id}",
+        )
+    else:
+        tool_result = agent._tool_generate_dashboard(
+            f"PFS {metric['label']}分析看板",
+            _dashboard_widgets(result, selected_table),
+            "pfs",
+        )
+    if str(tool_result).startswith("❌"):
+        raise ReportingContractError(str(tool_result).removeprefix("❌").strip())
+    artifacts = []
+    for label, url in _tool_links(str(tool_result)):
+        path_name = Path(unquote(urlparse(url).path)).name
+        kind = "dashboard" if "/dashboard/" in url and "/api/" not in url else output_format
+        artifacts.append(
+            {
+                "type": kind,
+                "name": path_name or re.sub(r"^[^\w]+", "", label) or f"PFS {output_format}",
+                "label": re.sub(r"^[^\w\u4e00-\u9fff]+", "", label),
+                "url": url,
+                "action": "open" if kind == "dashboard" else "download",
+            }
+        )
+    if not artifacts:
+        raise ReportingContractError("export completed without a downloadable artifact")
+    return {"ok": True, "format": output_format, "artifacts": artifacts, "message": str(tool_result)}
+
+
 def _fixture_export_result(payload: Mapping[str, object]) -> object:
     question = _bounded(payload.get("question"), "question", limit=500)
     if question:
@@ -262,9 +493,12 @@ def _fixture_export_result(payload: Mapping[str, object]) -> object:
 def _session_export_result(sid: str, payload: Mapping[str, object]) -> object:
     source_id = _bounded(payload.get("source_id"), "source_id", limit=160, required=True)
     path, _source = _session_tabular_source(sid, source_id)
+    worksheet = _worksheet_from_payload(payload)
     question = _bounded(payload.get("question"), "question", limit=500)
     if question:
-        snapshot = load_tabular_snapshot(path, source_id=source_id, date_column="month")
+        snapshot = load_tabular_snapshot(
+            path, source_id=source_id, date_column="month", worksheet=worksheet
+        )
         parsed = parse_report_question(
             question,
             snapshot.columns,
@@ -275,10 +509,18 @@ def _session_export_result(sid: str, payload: Mapping[str, object]) -> object:
                 required=True,
             ),
         )
-        return analyze_file(path, metric=parsed.metric, request=parsed.request, source_id=source_id)
+        return analyze_file(
+            path,
+            metric=parsed.metric,
+            request=parsed.request,
+            source_id=source_id,
+            worksheet=worksheet,
+        )
 
     date_column = _bounded(payload.get("date_column") or "month", "date_column", limit=120, required=True)
-    snapshot = load_tabular_snapshot(path, source_id=source_id, date_column=date_column)
+    snapshot = load_tabular_snapshot(
+        path, source_id=source_id, date_column=date_column, worksheet=worksheet
+    )
     metric = _metric_from_payload(payload, snapshot.columns)
     run_id = _bounded(
         payload.get("run_id") or f"pfs-export-{uuid.uuid4().hex[:16]}", "run_id", limit=120, required=True
@@ -294,6 +536,7 @@ def _session_export_result(sid: str, payload: Mapping[str, object]) -> object:
             date_to=_bounded(payload.get("date_to"), "date_to", limit=32),
         ),
         source_id=source_id,
+        worksheet=worksheet,
     )
 
 
@@ -310,6 +553,7 @@ def capabilities():
                 "uploaded_xlsx": "implemented",
                 "report_export_json": "implemented_server_recomputed",
                 "report_export_csv": "implemented_server_recomputed",
+                "delivery_xlsx_docx_pptx_dashboard": "implemented_deterministic_desktop_slice",
             },
             "models": {
                 "deepseek_chat": "verified_local_http",
@@ -358,6 +602,55 @@ def export_session_report(sid: str):
         return _error(exc)
 
 
+@bp.post("/api/pfs/deliver")
+def deliver_fixture_report():
+    """Generate a richer deterministic artifact from the reviewed fixture."""
+    try:
+        from data.sources.csv import CSVDataSource
+
+        payload = _body()
+        output_format = _delivery_format(payload)
+        data_source = CSVDataSource(
+            str(resource_path("data", "fixtures", "pfs_sales.csv")),
+            "pfs_sales.csv",
+        )
+        return jsonify(
+            _delivery_artifacts(
+                _fixture_export_result(payload),
+                data_source,
+                "",
+                output_format,
+            )
+        )
+    except QueryInterpretationError as exc:
+        return jsonify({"ok": False, "error": str(exc), "code": "pfs_query_failed"}), 400
+    except (TypeError, ValueError, OSError) as exc:
+        return _error(exc)
+
+
+@bp.post("/api/session/<sid>/pfs/deliver")
+@require_session_ownership
+def deliver_session_report(sid: str):
+    """Generate Excel, Word, PPT, or Dashboard artifacts for an uploaded report."""
+    try:
+        payload = _body()
+        output_format = _delivery_format(payload)
+        source_id = _bounded(payload.get("source_id"), "source_id", limit=160, required=True)
+        _path, data_source = _session_tabular_source(sid, source_id)
+        return jsonify(
+            _delivery_artifacts(
+                _session_export_result(sid, payload),
+                data_source,
+                sid,
+                output_format,
+            )
+        )
+    except QueryInterpretationError as exc:
+        return jsonify({"ok": False, "error": str(exc), "code": "pfs_query_failed"}), 400
+    except (TypeError, ValueError, OSError) as exc:
+        return _error(exc)
+
+
 @bp.get("/api/pfs/fixture")
 def fixture_analysis():
     """Return the deterministic fixture result used by offline acceptance."""
@@ -400,23 +693,57 @@ def session_pfs_sources(sid: str):
             or not _path_within(path, upload_root)
         ):
             continue
+        source_id = str(entry.get("id") or "")
+        worksheets = []
         try:
-            snapshot = load_tabular_snapshot(
-                path,
-                source_id=str(entry.get("id") or ""),
-                date_column="month",
-            )
+            if path.suffix.lower() == ".xlsx":
+                for worksheet in list_xlsx_worksheets(path):
+                    try:
+                        sheet_snapshot = load_tabular_snapshot(
+                            path,
+                            source_id=source_id,
+                            date_column="month",
+                            worksheet=worksheet,
+                        )
+                    except ReportingContractError as exc:
+                        worksheets.append(
+                            {"name": worksheet, "columns": [], "row_count": 0, "error": str(exc)}
+                        )
+                    else:
+                        worksheets.append(
+                            {
+                                "name": worksheet,
+                                "columns": list(sheet_snapshot.columns),
+                                "row_count": sheet_snapshot.row_count,
+                                "min_date": sheet_snapshot.min_date,
+                                "max_date": sheet_snapshot.max_date,
+                            }
+                        )
+                usable = [item for item in worksheets if item["columns"]]
+                snapshot = (
+                    load_tabular_snapshot(
+                        path,
+                        source_id=source_id,
+                        date_column="month",
+                        worksheet=usable[0]["name"],
+                    )
+                    if len(usable) == 1
+                    else None
+                )
+            else:
+                snapshot = load_tabular_snapshot(path, source_id=source_id, date_column="month")
         except ReportingContractError:
             continue
         sources.append(
             {
-                "source_id": str(entry.get("id") or ""),
+                "source_id": source_id,
                 "name": str(getattr(source, "name", "") or path.name),
                 "file_name": path.name,
-                "columns": list(snapshot.columns),
-                "row_count": snapshot.row_count,
-                "min_date": snapshot.min_date,
-                "max_date": snapshot.max_date,
+                "columns": list(snapshot.columns) if snapshot else [],
+                "row_count": snapshot.row_count if snapshot else sum(item["row_count"] for item in worksheets),
+                "min_date": snapshot.min_date if snapshot else "",
+                "max_date": snapshot.max_date if snapshot else "",
+                "worksheets": worksheets,
             }
         )
     return jsonify({"ok": True, "sources": sources})
@@ -430,13 +757,16 @@ def session_pfs_analysis(sid: str):
         payload = _body()
         source_id = _bounded(payload.get("source_id"), "source_id", limit=160, required=True)
         path, source = _session_tabular_source(sid, source_id)
+        worksheet = _worksheet_from_payload(payload)
         date_column = _bounded(
             payload.get("date_column") or "month",
             "date_column",
             limit=120,
             required=True,
         )
-        snapshot = load_tabular_snapshot(path, source_id=source_id, date_column=date_column)
+        snapshot = load_tabular_snapshot(
+            path, source_id=source_id, date_column=date_column, worksheet=worksheet
+        )
         metric = _metric_from_payload(payload, snapshot.columns)
         run_id = _bounded(
             payload.get("run_id") or f"pfs-{uuid.uuid4().hex[:16]}",
@@ -455,6 +785,7 @@ def session_pfs_analysis(sid: str):
                 date_to=_bounded(payload.get("date_to"), "date_to", limit=32),
             ),
             source_id=source_id,
+            worksheet=worksheet,
         )
     except QueryInterpretationError as exc:
         return jsonify({"ok": False, "error": str(exc), "code": "pfs_query_failed"}), 400
@@ -481,7 +812,10 @@ def session_pfs_query(sid: str):
         question = _bounded(payload.get("question"), "question", limit=500, required=True)
         source_id = _bounded(payload.get("source_id"), "source_id", limit=160, required=True)
         path, source = _session_tabular_source(sid, source_id)
-        snapshot = load_tabular_snapshot(path, source_id=source_id, date_column="month")
+        worksheet = _worksheet_from_payload(payload)
+        snapshot = load_tabular_snapshot(
+            path, source_id=source_id, date_column="month", worksheet=worksheet
+        )
         parsed = parse_report_question(
             question,
             snapshot.columns,
@@ -492,7 +826,13 @@ def session_pfs_query(sid: str):
                 required=True,
             ),
         )
-        result = analyze_file(path, metric=parsed.metric, request=parsed.request, source_id=source_id)
+        result = analyze_file(
+            path,
+            metric=parsed.metric,
+            request=parsed.request,
+            source_id=source_id,
+            worksheet=worksheet,
+        )
     except QueryInterpretationError as exc:
         return jsonify({"ok": False, "error": str(exc), "code": "pfs_query_failed"}), 400
     except (TypeError, ValueError, OSError) as exc:

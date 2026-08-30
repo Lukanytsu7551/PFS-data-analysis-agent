@@ -300,13 +300,17 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         self.assertTrue(listed_payload["ok"])
         self.assertEqual(1, len(listed_payload["sources"]))
         self.assertEqual("monthly_sales.xlsx", listed_payload["sources"][0]["name"])
-        self.assertIn("month", listed_payload["sources"][0]["columns"])
-        self.assertEqual(3, listed_payload["sources"][0]["row_count"])
+        self.assertEqual(
+            ["Monthly Sales", "Orders"],
+            [item["name"] for item in listed_payload["sources"][0]["worksheets"]],
+        )
+        self.assertIn("month", listed_payload["sources"][0]["worksheets"][0]["columns"])
 
         analyzed = self.client.post(
             f"/api/session/{self.sid}/pfs/analyze",
             json={
                 "source_id": source_id,
+                "worksheet": "Monthly Sales",
                 "run_id": "http-xlsx-run",
                 "value_column": "sales_amount",
                 "date_column": "month",
@@ -327,6 +331,7 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
             json={
                 "format": "json",
                 "source_id": source_id,
+                "worksheet": "Monthly Sales",
                 "run_id": "http-xlsx-export",
                 "value_column": "sales_amount",
                 "date_column": "month",
@@ -339,6 +344,40 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         self.assertEqual("http-xlsx-export", exported.headers["X-PFS-Report-Run"])
         self.assertIn("pfs-report-http-xlsx-export.json", exported.headers["Content-Disposition"])
         self.assertEqual(3600, exported.get_json()["result"]["total"])
+
+    def test_multi_sheet_xlsx_requires_valid_worksheet_and_returns_stable_codes(self):
+        with TemporaryDirectory() as temp_dir:
+            workbook = Path(temp_dir) / "multi.xlsx"
+            with pd.ExcelWriter(workbook, engine="openpyxl") as writer:
+                pd.DataFrame({"note": ["说明"]}).to_excel(writer, sheet_name="Readme", index=False)
+                pd.DataFrame(
+                    {
+                        "month": ["2026-01"],
+                        "region": ["华东"],
+                        "sales_amount": [1200],
+                    }
+                ).to_excel(writer, sheet_name="Sales", index=False)
+            with workbook.open("rb") as handle:
+                uploaded = self.client.post(
+                    f"/api/session/{self.sid}/upload",
+                    data={"file": (handle, workbook.name)},
+                    content_type="multipart/form-data",
+                )
+        source_id = uploaded.get_json()["added"][0]["source_id"]
+
+        missing = self.client.post(
+            f"/api/session/{self.sid}/pfs/analyze",
+            json={"source_id": source_id},
+        )
+        unknown = self.client.post(
+            f"/api/session/{self.sid}/pfs/analyze",
+            json={"source_id": source_id, "worksheet": "Missing"},
+        )
+
+        self.assertEqual(400, missing.status_code)
+        self.assertEqual("worksheet_required", missing.get_json()["code"])
+        self.assertEqual(400, unknown.status_code)
+        self.assertEqual("worksheet_not_found", unknown.get_json()["code"])
 
 
 if __name__ == "__main__":

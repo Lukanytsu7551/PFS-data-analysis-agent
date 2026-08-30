@@ -8,10 +8,12 @@ const state = {
   sourceValue: "fixture",
   sources: [],
   question: "",
+  deliveryFormat: "",
+  deliveryArtifacts: [],
 };
 
-function translate(key, fallback) {
-  return globalThis.PFS?.i18n?.t?.(key) || fallback;
+function translate(key, fallback, vars) {
+  return globalThis.PFS?.i18n?.t?.(key, vars) || fallback;
 }
 
 function currentLanguage() {
@@ -34,6 +36,7 @@ function formatNumber(value) {
 function controls() {
   return {
     source: document.getElementById("pfs-report-source-select"),
+    worksheet: document.getElementById("pfs-report-worksheet"),
     value: document.getElementById("pfs-report-value-column"),
     date: document.getElementById("pfs-report-date-column"),
     dimension: document.getElementById("pfs-report-dimension-column"),
@@ -61,7 +64,40 @@ function renderLoading() {
   );
 }
 
-function renderError(message) {
+function renderIdle() {
+  const content = document.getElementById("pfs-report-content");
+  const source = document.getElementById("pfs-report-source");
+  if (content) {
+    content.replaceChildren(
+      makeElement(
+        "div",
+        "pfs-report-loading",
+        translate("pfs_report.ready_to_run", "数据源已切换，请运行分析。"),
+      ),
+    );
+  }
+  if (source) {
+    source.textContent = "";
+    source.title = "";
+  }
+  setInterpretation("");
+  setExportStatus("");
+  setExportAvailability(false);
+  resetDelivery();
+}
+
+function errorGuidance(code, message) {
+  const guidance = {
+    worksheet_required: translate("pfs_report.error_worksheet_required", "请选择要分析的工作表，然后重新运行。"),
+    worksheet_not_found: translate("pfs_report.error_worksheet_missing", "工作表已变化，请刷新数据源后重新选择。"),
+    source_header_missing: translate("pfs_report.error_header_missing", "请在第一行补充完整且不为空的字段名。"),
+    source_has_no_rows: translate("pfs_report.error_no_rows", "请在表头下至少保留一行有效数据。"),
+    metric_value_not_numeric: translate("pfs_report.error_not_numeric", "请清理指标列中的文本或改选数值列。"),
+  };
+  return guidance[code] ? `${message} ${guidance[code]}` : message;
+}
+
+function renderError(message, code = "") {
   const content = document.getElementById("pfs-report-content");
   if (!content) return;
   const box = makeElement("div", "pfs-report-error");
@@ -71,7 +107,7 @@ function renderError(message) {
       "pfs-report-error-title",
       translate("pfs_report.error", "报表预览加载失败"),
     ),
-    makeElement("span", "pfs-report-error-message", message),
+    makeElement("span", "pfs-report-error-message", errorGuidance(code, message)),
   );
   content.replaceChildren(box);
 }
@@ -107,6 +143,68 @@ function setExportStatus(message = "", status = "") {
   element.dataset.state = status;
 }
 
+function deliveryLabel(format) {
+  return (
+    {
+      xlsx: translate("pfs_report.delivery_excel", "Excel 数据"),
+      docx: translate("pfs_report.delivery_word", "Word 报告"),
+      pptx: translate("pfs_report.delivery_ppt", "PPT 演示"),
+      dashboard: translate("pfs_report.delivery_dashboard", "分析看板"),
+    }[format] || format
+  );
+}
+
+function setDeliveryAvailability(available) {
+  for (const button of document.querySelectorAll("[data-pfs-delivery-format]")) {
+    const isCurrent = button.dataset.pfsDeliveryFormat === state.deliveryFormat;
+    button.disabled = !available || Boolean(state.deliveryFormat);
+    button.setAttribute("aria-disabled", String(button.disabled));
+    button.setAttribute("aria-busy", isCurrent ? "true" : "false");
+  }
+}
+
+function setDeliveryStatus(message = "", status = "") {
+  const element = document.getElementById("pfs-report-delivery-status");
+  if (!element) return;
+  element.textContent = message;
+  element.dataset.state = status;
+}
+
+function renderDeliveryArtifacts() {
+  const list = document.getElementById("pfs-report-delivery-list");
+  if (!list) return;
+  list.replaceChildren();
+  for (const artifact of state.deliveryArtifacts) {
+    const item = makeElement("div", "pfs-report-delivery-item");
+    const details = makeElement("div", "pfs-report-delivery-item-copy");
+    details.append(
+      makeElement("strong", "", artifact.label || artifact.name || "PFS 交付物"),
+      makeElement("span", "", artifact.name || artifact.type || ""),
+    );
+    const link = makeElement(
+      "a",
+      "btn-sm btn-sm-ghost",
+      artifact.action === "open"
+        ? translate("pfs_report.delivery_open", "打开")
+        : translate("pfs_report.delivery_download", "下载"),
+    );
+    link.href = artifact.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    item.append(details, link);
+    list.append(item);
+  }
+  list.hidden = state.deliveryArtifacts.length === 0;
+}
+
+function resetDelivery() {
+  state.deliveryFormat = "";
+  state.deliveryArtifacts = [];
+  setDeliveryStatus("");
+  renderDeliveryArtifacts();
+  setDeliveryAvailability(false);
+}
+
 function selectedSource() {
   const value = controls().source?.value || state.sourceValue || "fixture";
   if (value === "fixture") return null;
@@ -115,6 +213,17 @@ function selectedSource() {
 
 function selectedUploadedSource() {
   return selectedSource();
+}
+
+function selectedWorksheet() {
+  return controls().worksheet?.value || "";
+}
+
+function selectedColumns() {
+  const source = selectedSource();
+  const worksheet = selectedWorksheet();
+  const sheet = source?.worksheets?.find((item) => item.name === worksheet);
+  return sheet?.columns?.length ? sheet.columns : source?.columns || [];
 }
 
 function toggleDeterministicMode() {
@@ -150,7 +259,7 @@ function fillSelect(select, columns, preferred) {
 function updateColumnControls() {
   const current = controls();
   const source = selectedSource();
-  const columns = source?.columns || ["month", "region", "sales_amount"];
+  const columns = source ? selectedColumns() : ["month", "region", "sales_amount"];
   fillSelect(current.value, columns, chooseDefault(columns, "sales_amount", columns.length - 1));
   fillSelect(current.date, columns, chooseDefault(columns, "month", 0));
   fillSelect(
@@ -176,6 +285,30 @@ function updateColumnControls() {
   }
 }
 
+function updateWorksheetControl() {
+  const source = selectedSource();
+  const select = controls().worksheet;
+  const container = document.getElementById("pfs-report-worksheet-control");
+  if (!select || !container) return;
+  const worksheets = Array.isArray(source?.worksheets) ? source.worksheets : [];
+  const previous = select.value;
+  select.replaceChildren();
+  for (const sheet of worksheets) {
+    const label = sheet.error
+      ? `${sheet.name} · ${translate("pfs_report.worksheet_unavailable", "不可分析")}`
+      : `${sheet.name} · ${formatNumber(sheet.row_count)} ${translate("pfs_report.rows", "行")}`;
+    const option = makeElement("option", "", label);
+    option.value = sheet.name;
+    option.disabled = Boolean(sheet.error || !sheet.columns?.length);
+    select.append(option);
+  }
+  const usable = worksheets.filter((sheet) => !sheet.error && sheet.columns?.length);
+  if (usable.some((sheet) => sheet.name === previous)) select.value = previous;
+  else if (usable.length) select.value = usable[0].name;
+  container.hidden = worksheets.length === 0;
+  select.disabled = worksheets.length === 0 || usable.length === 0;
+}
+
 function renderSourceOptions() {
   const select = controls().source;
   if (!select) return;
@@ -195,6 +328,7 @@ function renderSourceOptions() {
   const valid = ["fixture", ...state.sources.map((source) => `csv:${source.source_id}`)];
   select.value = valid.includes(previous) ? previous : "fixture";
   state.sourceValue = select.value;
+  updateWorksheetControl();
   updateColumnControls();
 }
 
@@ -279,6 +413,59 @@ function renderGroups(result) {
   return section;
 }
 
+function claimStatusLabel(status) {
+  const labels = {
+    supported: translate("pfs_report.claim_supported", "有支持证据"),
+    refuted: translate("pfs_report.claim_refuted", "有反驳证据"),
+    conflicted: translate("pfs_report.claim_conflicted", "存在证据冲突"),
+    pending: translate("pfs_report.claim_pending", "待人工确认"),
+    unverified: translate("pfs_report.claim_unverified", "尚未核验"),
+  };
+  return labels[status] || labels.unverified;
+}
+
+function claimReviewState(claim) {
+  const status = String(claim?.status || "unverified").toLowerCase();
+  if (["refuted", "conflicted"].includes(status)) return "conflict";
+  if (["pending", "unverified"].includes(status)) return "pending";
+  return "supported";
+}
+
+function renderGovernanceSummary(result) {
+  const claims = Array.isArray(result.claims) ? result.claims : [];
+  const counts = claims.reduce(
+    (summary, claim) => {
+      summary[claimReviewState(claim)] += 1;
+      return summary;
+    },
+    { supported: 0, conflict: 0, pending: 0 },
+  );
+  const section = makeElement("section", "pfs-report-governance");
+  const title = makeElement(
+    "h3",
+    "pfs-report-section-title",
+    translate("pfs_report.governance", "核验状态"),
+  );
+  const summary = makeElement("div", "pfs-report-governance-summary");
+  const state = counts.conflict ? "conflict" : counts.pending ? "pending" : "supported";
+  section.dataset.state = state;
+  const message = counts.conflict
+    ? translate("pfs_report.governance_conflict", `存在 ${counts.conflict} 条冲突或待裁决结论`, {
+        count: counts.conflict,
+      })
+    : counts.pending
+      ? translate("pfs_report.governance_pending", `存在 ${counts.pending} 条尚未核验的结论`, {
+          count: counts.pending,
+        })
+      : translate("pfs_report.governance_supported", "当前结论均有支持证据");
+  summary.append(makeElement("strong", "pfs-report-governance-message", message));
+  const details = makeElement("span", "pfs-report-governance-details");
+  details.textContent = `${translate("pfs_report.governance_supported_count", "支持")} ${counts.supported} · ${translate("pfs_report.governance_conflict_count", "冲突")} ${counts.conflict} · ${translate("pfs_report.governance_pending_count", "待核验")} ${counts.pending}`;
+  summary.append(details);
+  section.append(title, summary);
+  return section;
+}
+
 function renderClaims(result) {
   const section = makeElement("section", "pfs-report-section");
   section.append(
@@ -297,16 +484,45 @@ function renderClaims(result) {
     head.append(
       makeElement(
         "span",
-        `pfs-report-claim-status ${claim.status || ""}`,
-        claim.status || "unverified",
+        `pfs-report-claim-status ${claimReviewState(claim)}`,
+        claimStatusLabel(claim.status),
       ),
     );
+    const relation = claim.relation || claim.evidence_relation;
+    const verificationReason = claim.verification_reason;
+    const decision = claim.human_decision || claim.decision;
     const meta = makeElement(
       "small",
       "pfs-report-claim-meta",
-      `confidence: ${Math.round((Number(claim.confidence) || 0) * 100)}% · ${(claim.evidence_ids || []).length} evidence`,
+      `${translate("pfs_report.confidence", "置信度")} ${Math.round((Number(claim.confidence) || 0) * 100)}% · ${(claim.evidence_ids || []).length} ${translate("pfs_report.evidence_count", "条证据")}`,
     );
     item.append(head, meta);
+    const details = makeElement("div", "pfs-report-claim-details");
+    if (relation)
+      details.append(
+        makeElement(
+          "span",
+          "pfs-report-claim-detail",
+          `${translate("pfs_report.relation", "关系")}: ${relation}`,
+        ),
+      );
+    if (verificationReason)
+      details.append(
+        makeElement(
+          "span",
+          "pfs-report-claim-detail",
+          `${translate("pfs_report.verification_reason", "核验理由")}: ${verificationReason}`,
+        ),
+      );
+    if (decision)
+      details.append(
+        makeElement(
+          "span",
+          "pfs-report-claim-detail",
+          `${translate("pfs_report.decision", "人工决策")}: ${decision}`,
+        ),
+      );
+    if (details.childElementCount) item.append(details);
     list.append(item);
   }
   section.append(list);
@@ -356,6 +572,7 @@ function renderResult(result) {
   const children = [
     renderSummary(result),
     renderGroups(result),
+    renderGovernanceSummary(result),
     renderClaims(result),
     renderEvidence(result),
   ];
@@ -375,6 +592,7 @@ async function load() {
   state.question = "";
   setExportAvailability(false);
   setExportStatus("");
+  resetDelivery();
   setStatus("running");
   renderLoading();
   setInterpretation("");
@@ -393,6 +611,7 @@ async function load() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           source_id: source.source_id,
+          worksheet: selectedWorksheet(),
           value_column: controls().value?.value,
           date_column: controls().date?.value,
           dimension: controls().dimension?.value,
@@ -401,16 +620,20 @@ async function load() {
       });
     }
     const payload = await response.json();
-    if (!response.ok || !payload.ok || !payload.result)
-      throw new Error(payload.error || `HTTP ${response.status}`);
+    if (!response.ok || !payload.ok || !payload.result) {
+      const error = new Error(payload.error || `HTTP ${response.status}`);
+      error.code = payload.code || "";
+      throw error;
+    }
     state.result = payload.result;
     state.sourceValue = sourceValue;
     renderResult(state.result);
+    setDeliveryAvailability(true);
     setStatus("completed");
   } catch (error) {
     state.result = null;
     setExportAvailability(false);
-    renderError(String(error?.message || error));
+    renderError(String(error?.message || error), error?.code);
     setStatus("error");
   } finally {
     state.loading = false;
@@ -424,7 +647,9 @@ async function loadFromQuestion() {
   const question = input?.value?.trim();
   const sid = globalThis.PFS?.state?.SID;
   if (!source || !sid) {
-    renderError(translate("pfs_report.question_requires_source", "请先上传并选择一个 CSV 或 XLSX 数据源。"));
+    renderError(
+      translate("pfs_report.question_requires_source", "请先上传并选择一个 CSV 或 XLSX 数据源。"),
+    );
     setStatus("error");
     return;
   }
@@ -438,6 +663,7 @@ async function loadFromQuestion() {
   state.question = "";
   setExportAvailability(false);
   setExportStatus("");
+  resetDelivery();
   setQuestionLoading(true);
   setStatus("running");
   renderLoading();
@@ -446,20 +672,30 @@ async function loadFromQuestion() {
     const response = await fetch(`/api/session/${encodeURIComponent(sid)}/pfs/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source_id: source.source_id, question, run_id: "pfs-question-run" }),
+      body: JSON.stringify({
+        source_id: source.source_id,
+        worksheet: selectedWorksheet(),
+        question,
+        run_id: "pfs-question-run",
+      }),
     });
     const payload = await response.json();
-    if (!response.ok || !payload.ok || !payload.result) throw new Error(payload.error || `HTTP ${response.status}`);
+    if (!response.ok || !payload.ok || !payload.result) {
+      const error = new Error(payload.error || `HTTP ${response.status}`);
+      error.code = payload.code || "";
+      throw error;
+    }
     state.result = payload.result;
     state.sourceValue = `csv:${source.source_id}`;
     state.question = question;
     setInterpretation(payload.interpretation?.interpretation);
     renderResult(state.result);
+    setDeliveryAvailability(true);
     setStatus("completed");
   } catch (error) {
     state.result = null;
     setExportAvailability(false);
-    renderError(String(error?.message || error));
+    renderError(String(error?.message || error), error?.code);
     setStatus("error");
   } finally {
     state.loading = false;
@@ -475,6 +711,7 @@ function exportPayload(format) {
   const payload = {
     format,
     source_id: source?.source_id || "fixture",
+    worksheet: source ? selectedWorksheet() : "",
     run_id: request.run_id || `pfs-export-${Date.now()}`,
     date_from: request.date_from || "",
     date_to: request.date_to || "",
@@ -540,6 +777,64 @@ async function exportReport(format = "json") {
   }
 }
 
+async function generateDelivery(format) {
+  if (
+    !state.result ||
+    state.deliveryFormat ||
+    !["xlsx", "docx", "pptx", "dashboard"].includes(format)
+  )
+    return;
+  const source = selectedSource();
+  const sid = globalThis.PFS?.state?.SID;
+  if (source && !sid) {
+    setDeliveryStatus(translate("pfs_report.export_failed", "导出失败：当前会话不可用"), "error");
+    return;
+  }
+  state.deliveryFormat = format;
+  setDeliveryAvailability(true);
+  setDeliveryStatus(
+    translate("pfs_report.delivery_running", `正在生成 ${deliveryLabel(format)}…`, {
+      format: deliveryLabel(format),
+    }),
+    "running",
+  );
+  try {
+    const endpoint = source
+      ? `/api/session/${encodeURIComponent(sid)}/pfs/deliver`
+      : "/api/pfs/deliver";
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(exportPayload(format)),
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok || !Array.isArray(payload.artifacts))
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    const knownUrls = new Set(state.deliveryArtifacts.map((artifact) => artifact.url));
+    for (const artifact of payload.artifacts) {
+      if (artifact?.url && !knownUrls.has(artifact.url)) {
+        state.deliveryArtifacts.push(artifact);
+        knownUrls.add(artifact.url);
+      }
+    }
+    renderDeliveryArtifacts();
+    setDeliveryStatus(
+      translate("pfs_report.delivery_ready", `${deliveryLabel(format)} 已生成`, {
+        format: deliveryLabel(format),
+      }),
+      "success",
+    );
+  } catch (error) {
+    setDeliveryStatus(
+      `${translate("pfs_report.delivery_failed", "生成失败")}: ${String(error?.message || error)}`,
+      "error",
+    );
+  } finally {
+    state.deliveryFormat = "";
+    setDeliveryAvailability(Boolean(state.result));
+  }
+}
+
 function open() {
   openOverlay("ov-pfs-report");
   void load();
@@ -548,8 +843,14 @@ function open() {
 function init() {
   const pfs = globalThis.PFS || {};
   pfs.pfsReport = {
-    load, loadFromQuestion, exportReport, open, close: () => closeOverlay("ov-pfs-report"),
-    selectedUploadedSource, toggleDeterministicMode,
+    load,
+    loadFromQuestion,
+    exportReport,
+    generateDelivery,
+    open,
+    close: () => closeOverlay("ov-pfs-report"),
+    selectedUploadedSource,
+    toggleDeterministicMode,
   };
   globalThis.PFS = pfs;
   const source = controls().source;
@@ -557,21 +858,33 @@ function init() {
     source.addEventListener("change", () => {
       state.sourceValue = source.value;
       state.result = null;
+      updateWorksheetControl();
       updateColumnControls();
+      renderIdle();
       setStatus("idle");
     });
+  controls().worksheet?.addEventListener("change", () => {
+    state.result = null;
+    updateColumnControls();
+    renderIdle();
+    setStatus("idle");
+  });
   document.getElementById("pfs-report-question-input")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void loadFromQuestion();
     }
   });
+  for (const button of document.querySelectorAll("[data-pfs-delivery-format]")) {
+    button.addEventListener("click", () => void generateDelivery(button.dataset.pfsDeliveryFormat));
+  }
   document.addEventListener("langchange", () => {
     setStatus(state.result ? "completed" : "idle");
     updateColumnControls();
     if (state.result) renderResult(state.result);
   });
   setExportAvailability(false);
+  setDeliveryAvailability(false);
   renderSourceOptions();
 }
 

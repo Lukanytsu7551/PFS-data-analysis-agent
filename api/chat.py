@@ -28,6 +28,7 @@ from agent.skills import SkillLoader
 from infrastructure.artifact_lifecycle import register_artifact
 from config.product_identity import PRODUCT_SHORT_NAME
 from infrastructure.compat import request_user_id, workspace_hidden_dir
+from agent.pricing import validate_cost_limit
 
 
 def _pfs_deterministic_chat_response(sid: str, message: str, payload: dict, sess):
@@ -495,6 +496,10 @@ def _build_agent(
     from LLM.llm_config_manager import get_llm_client
     client = get_llm_client(provider)
     cfg = config_manager.get_config(provider)
+    try:
+        max_cost_usd = validate_cost_limit(os.environ.get("PFS_MAX_COST_USD"))
+    except ValueError as exc:
+        raise ValueError(f"PFS_MAX_COST_USD 配置无效：{exc}") from exc
     # Use cached schema when available; recompute only after data source changes
     # (cache is invalidated by add_source / remove_source / toggle_source / data_source setter).
     if source_snapshot is not None:
@@ -569,6 +574,9 @@ def _build_agent(
         job_runner=sess.job_runner,
         context_window=getattr(cfg, "context_window", None),
         max_output_tokens=getattr(cfg, "max_output_tokens", None),
+        input_price_per_million=getattr(cfg, "input_price_per_million", None),
+        output_price_per_million=getattr(cfg, "output_price_per_million", None),
+        max_cost_usd=max_cost_usd,
         hook_engine=hook_engine,
         hook_context=hook_context,
         compaction_state=getattr(sess, "compaction_state", None),
@@ -1307,6 +1315,7 @@ def chat_stream(sid: str):
                         breakdown=event.get("prompt_breakdown"),
                         cached_input_tokens=event.get("cached_input_tokens", 0),
                         cache_write_tokens=event.get("cache_write_tokens", 0),
+                        cost_usd=event.get("cost_usd"),
                     )
                     # Cloud mode: record per-user daily token usage
                     if bool(os.environ.get("RAILWAY_PROJECT_ID")) or os.environ.get("VERCEL") == "1":
@@ -1320,6 +1329,8 @@ def chat_stream(sid: str):
                         "max_output_tokens": cfg.max_output_tokens if cfg else None,
                         "session_total_input":  sess.total_input_tokens,
                         "session_total_output": sess.total_output_tokens,
+                        "session_total_cost_usd": round(sess.total_cost_usd, 8),
+                        "cost_currency": "USD",
                     }
                     if not enriched.get("context_window"):
                         enriched["context_window"] = cfg.context_window if cfg else None

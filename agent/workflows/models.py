@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import math
 from typing import Any, Mapping
 
 from agent.workflows.features import workflow_feature_enabled
@@ -197,6 +198,7 @@ NODE_LIMIT_RANGES = {
     # Delegated execution is capped at 50 rounds × 4 calls per round.
     "max_tool_calls": (0, 200),
 }
+NODE_COST_LIMIT_MAX_USD = 1_000_000.0
 
 
 def _coerce_status(value: Any, enum_type: type[Enum], label: str):
@@ -487,6 +489,14 @@ def validate_workflow_graph(graph: Mapping[str, Any]) -> dict[str, Any]:
                 raise _graph_error(
                     f"{node_id} {key} must be an integer between {minimum} and {maximum}"
                 )
+        cost_limit = node_limits.get("max_cost_usd")
+        if cost_limit is not None:
+            try:
+                cost_limit = float(cost_limit)
+            except (TypeError, ValueError):
+                raise _graph_error(f"{node_id} max_cost_usd must be a finite number greater than 0")
+            if isinstance(node_limits.get("max_cost_usd"), bool) or not math.isfinite(cost_limit) or not 0 < cost_limit <= NODE_COST_LIMIT_MAX_USD:
+                raise _graph_error(f"{node_id} max_cost_usd must be a finite number between 0 and {NODE_COST_LIMIT_MAX_USD}")
         node_ids.add(node_id)
         nodes.append(raw_node)
 
@@ -593,5 +603,13 @@ def validate_workflow_graph(graph: Mapping[str, Any]) -> dict[str, Any]:
             isinstance(value, bool) or not isinstance(value, int) or value < 1
         ):
             raise _graph_error(f"{key} must be a positive integer")
+    total_cost_limit = limits.get("max_total_cost_usd")
+    if total_cost_limit is not None:
+        try:
+            total_cost_limit = float(total_cost_limit)
+        except (TypeError, ValueError):
+            raise _graph_error("max_total_cost_usd must be a finite number greater than 0")
+        if isinstance(limits.get("max_total_cost_usd"), bool) or not math.isfinite(total_cost_limit) or not 0 < total_cost_limit <= NODE_COST_LIMIT_MAX_USD:
+            raise _graph_error(f"max_total_cost_usd must be a finite number between 0 and {NODE_COST_LIMIT_MAX_USD}")
 
     return dict(graph)

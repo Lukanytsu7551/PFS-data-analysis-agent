@@ -1,14 +1,29 @@
-# 报表数据分析 Agent：研究与改造基线
+# 报表数据分析 Agent：研究与验证台账
 
 > 文档日期：2026-08-30  
-> 当前状态：PFS 源码边界、产品身份、只读策略门、固定/上传 CSV/XLSX 报表分析、受限自然语言报表问题路由、服务端重新计算的 JSON/CSV 报表下载、证据 Ledger 第一段、本地真实 HTTP 回读，以及真实工作台移动侧栏的一组确定性交互已实现；完整功能迁移仍在进行
-> 本文是本项目的工作基线，不代表原项目的全部能力已经在本机或线上运行成功。
+> 当前状态：PFS 源码边界、产品身份、只读策略门、固定/上传 CSV/XLSX 报表分析、多工作表显式选择、受限自然语言报表问题路由、JSON/CSV 下载、Excel/Word/PPT/Dashboard 统一交付区、证据 Ledger 第一段、本地真实 HTTP 回读和报表核验状态摘要已实现；完整功能迁移仍在进行
+> 现役交接、发布状态和剩余改造顺序以 [`docs/HANDOFF.md`](docs/HANDOFF.md) 为准。本文保留研究取证、分阶段验证和历史边界，不作为第二份现役待办。
+> 2026-08-30 范围决策：PFS 当前只交付桌面端工作台；手机端适配、移动端完整分析流程和移动端下载不再作为完成条件。此前已经完成的 390×844 验收仅作为历史质量证据保留。
 
 完整独立改造路线见：[PFS_FULL_TRANSFORMATION_PLAN.md](/Users/yangxuan/Desktop/实习/报表数据分析agent/docs/PFS_FULL_TRANSFORMATION_PLAN.md)。9 天改造与框架原理路线见：[FRAMEWORK_9_DAY_PLAN.md](/Users/yangxuan/Desktop/实习/报表数据分析agent/FRAMEWORK_9_DAY_PLAN.md)。第 2 天工具调用规则见：[DAY2_TOOL_POLICY.md](/Users/yangxuan/Desktop/实习/报表数据分析agent/DAY2_TOOL_POLICY.md)，本轮实现见 `/Users/yangxuan/Desktop/实习/报表数据分析agent/pfs_agent/`。
 
 ## 0. 2026-08-30 当前复核结论
 
-- 当前完整质量门已通过：`pnpm quality` 完成前端格式检查、ESLint、Dashboard/Chat production build、Python 全量回归和 Ruff；最新全量 Python 回归为 123 项通过、无跳过。
+- 本轮继续改造已完成一项可靠性切片：主 Agent 和工作流委托节点都支持基于 provider 实际 usage 的累计 Token 硬阻断；达到上限后不再执行后续工具调用，并返回明确的安全停止结果。随后补齐了按输入/输出单价计算 USD 费用、主 Agent/委托节点费用硬阻断、会话费用累计、工作流节点费用限制和工作流图级总费用硬阻断；费用与工作流专项测试为 19 项通过。
+- 费用预算的边界是“模型调用完成、拿到真实 usage 后，在下一次工具或模型调用前阻断”；没有配置完整单价时保持 unknown，不伪造费用。图级检查只汇总已产生实际 Token usage 的节点；费用刚好达到上限也会阻断。真实供应商账单对账、跨 provider 线上成本和跨进程恢复仍未完成。
+- 当前工作区仍有未提交改动；本轮未执行 commit、push、deploy 或 live 验收。
+- 本轮新增报表核验状态摘要：报告结果会明确显示支持、冲突/反驳和待核验结论数量；Claim 具备关系、核验理由或人工决策字段时才展示对应详情，不虚构语义核验结果。新增专项 UI 契约测试 2 项；前端构建和相关回归通过。
+- 本轮浏览器回读确认 PFS 报表预览入口仍可打开，已有上传 `sales-report.xlsx` 数据源和 JSON/CSV 导出按钮；核验状态区已进入 Chat bundle。随后在 Ego Browser 的 390×844 视口重新运行固定报表，真实回读“核验状态 / 当前结论均有支持证据 / 支持 2 · 冲突 0 · 待核验 0”，2 条 Claim 显示正常中文状态与“置信度 100% · 1 条证据”，页面无横向溢出，JSON/CSV 按钮可用，未发现 `pfs_report.*` 键名泄漏。该证据覆盖固定报表移动端结果展示，不等于浏览器上传后文件落盘回读、复杂导出或线上验收。
+- 本轮随后完成桌面端 XLSX 浏览器闭环：真实上传一份新的 `sales-report.xlsx` 数据源，报表选择器回读 3 行和 `month / region / sales_amount` 字段；运行后得到总额 100,000、华东 42,000、华南 33,000、华北 25,000、2 条支持 Claim 和 1 条 Evidence。切换数据源时发现旧报表内容残留，已改为清空结果、禁用导出并提示“数据源已切换，请运行分析”，新增专项测试防止回归。
+- 上传 XLSX 的 JSON 和 CSV 已通过真实浏览器下载落盘并回读内容：两种文件均包含 3 行覆盖、总额 100,000、三个地区分组、Claim/Evidence 和来源 SHA-256。该证据覆盖桌面本地浏览器即时下载，不代表导出历史 artifact、Word/Excel/PPT/复杂图表或线上下载完成。
+- 本轮已把 Excel、Word、PPT 和 Dashboard 接入报表结果下方的统一“生成交付物”区。四种格式使用已有生成器，固定报表在真实桌面浏览器中逐项生成 5 个可打开/下载链接；看板以 1200px 视口打开，回读 1 个 KPI、1 个地区柱状图以及 42k/33k/25k 分组值。
+- 实际生成的 XLSX、DOCX、PPTX 已用 `openpyxl`、`python-docx`、`python-pptx` 结构回读；三种 Office 文件和 Dashboard HTML 下载地址均返回 HTTP 200。回读时发现中文看板文件名会导致 Waitress 响应头编码失败，已改为 ASCII fallback + UTF-8 `filename*` 并补回归测试。
+- 本轮移除了真实工作台中原项目遗留的社群运营入口：侧栏社群按钮、QQ、Telegram、Discord 链接及其弹窗样式和国际化键；没有替换为虚构的 PFS 社群地址。身份回归测试 8/8 通过，重建后的 Chat bundle 也未发现这些旧入口标识。
+- 本轮验证：`tests.test_release_identity` 与 `tests.test_startup_scripts` 共 16 项通过；`pnpm run build:chat`、`pnpm run build:check` 和 `git diff --check` 通过。该结果只证明当前发布源和构建产物的社群入口清理，不代表所有旧作者归属、第三方版权或全部内部标识已经完成审计。
+
+- 当前完整质量门已通过：前端 Dashboard/Chat production build、Python 全量回归和 Ruff 均通过；最新全量 Python 回归为 152 项通过、无跳过。随后完成真实桌面复杂 XLSX 验收：工作表选择、字段刷新、空表禁用、非数字指标错误和 Excel/Word/PPT/Dashboard 四类交付均通过；Dashboard 无横向溢出。
+- 复杂 XLSX 使用 `说明`、`空表`、`销售明细`、`异常指标` 四张工作表。选择 `销售明细` 后按 3 行计算得到总额 3,600、华东 2,700、华南 900，Evidence 回读 `worksheet:销售明细` 与 `included_rows:3`；选择 `异常指标` 后明确提示 `metric value is not numeric: '待确认'`，并禁用全部下载和交付按钮。
+- 首次验收曾因浏览器连接旧服务进程且 Chat bundle 未重建而只读到第一张表；重启当前工作树服务并重新执行前端 production build 后复验通过。该故障说明源码存在不能替代当前运行进程和构建产物回读。
 - DeepSeek 已用本地 Waitress 真实 HTTP 复验：`deepseek-chat` 实际读取 CSV schema、执行只读 SQL 和汇总，得到华东 42,000、华南 33,000、华北 25,000、总额 100,000；最新一次记录 3 次调用、输入 12,676、输出 410 Tokens，约 5.09 秒。
 - 本轮新增报表下载闭环：固定示例和上传数据均由服务端重新计算后返回 JSON/CSV，HTTP 回归覆盖文件名、总额、分组、证据和非法格式拒绝；真实工作台固定示例预览点击“下载 JSON”后显示“已下载”。浏览器 Blob 下载不提供可回读的文件事件，因此内容以接口测试为准。
 - 当前运行期身份已切换为 PFS-only：前端命名空间、浏览器存储键、运行标记、环境变量、工作区指令文件名和远程 runner 均使用 PFS；重建后的 Dashboard/Chat bundle 未发现旧运行命名空间。旧参考快照、历史文档和本地忽略日志/缓存不属于发布源树。
@@ -23,15 +38,16 @@
 - GitHub 回读确认仓库 `Lukanytsu7551/PFS-data-analysis-agent` 仍为私有空仓库；待网络恢复后只需重试 push，部署和线上验收尚未开始。
 - 交付方式已确定为双入口：普通用户通过 `install.sh`、`start.command` 或 `start.bat` 使用本地 Python 环境；开发/部署人员通过 `Dockerfile` 构建和运行 PFS。普通用户不被要求安装 Docker。
 
-当前最主要的未完成项是：原项目全部能力的逐项真实复验、多轮/长任务/跨进程工作流恢复、外部数据源和 MCP/飞书、完整证据治理与审批 UI、浏览器 XLSX 和聊天产物的完整导出体验、桌面安装包、Docker 多服务和真实部署。详见功能矩阵。
+当前最主要的未完成项是：原项目全部能力的逐项真实复验、多轮/长任务/跨进程工作流恢复、真实多 provider 成本对账、外部数据源和 MCP/飞书、完整证据治理与审批 UI、复杂报表的 Office 视觉与跨平台打开验收、聊天产物与工作区 artifact 历史、桌面安装包、Docker 多服务和真实部署。单个 Agent、委托节点和工作流图级费用硬阻断已完成本地回归，但不等于真实供应商账单或完整生产成本治理已完成。详见功能矩阵。
 
 ### 2026-08-30 报表下载闭环（当前迭代）
 
 - 新增 `/api/pfs/export` 和 `/api/session/<sid>/pfs/export`。两个入口会在服务端重新读取固定示例或当前会话上传的 CSV/XLSX，再按同一份 Metric Contract 计算并返回 JSON/CSV，避免把浏览器里的结果直接当成下载内容。
 - JSON 下载保留报告结构、Claim、Evidence、快照哈希和请求口径；CSV 下载使用统一的 `section/field/value/detail` 表头，并保留汇总、分组、Claim、Evidence 与 warning。响应同时返回安全文件名、运行 ID 和来源 SHA-256。
 - 受限自然语言问题在上传数据导出时会重新解析，因此导出与预览使用同一套日期、指标和分组规则；非法格式会返回明确错误，不会静默生成未知文件。
-- 验证范围：固定示例、上传 CSV 和上传 XLSX 的 HTTP 导出回归通过；真实工作台固定报表预览点击下载后显示“已下载”。浏览器 Blob 下载没有可回读的文件事件，所以文件内容以 HTTP 接口回归为准。
-- 未完成边界：当前是即时下载，不是已经保存到工作区历史的导出 artifact；浏览器上传后文件落盘回读、移动端下载、Word/Excel/PPT/复杂图表导出和线上验收仍未完成。
+- 验证范围：固定示例、上传 CSV 和上传 XLSX 的 HTTP 导出回归通过；桌面真实工作台上传 XLSX 后，JSON 和 CSV 均已浏览器下载落盘并回读总额、分组、Claim/Evidence 和来源哈希。
+- 新增统一交付区：基于当前服务端重算结果生成 Excel 数据、Word 报告、4 页 PPT 和含 KPI/柱状图的 Dashboard；交付链接在报表弹窗内累计展示。多 Sheet 文件会把分析快照中的工作表选择继续传到 Excel 和 Dashboard，不再默认导出全部表或查询第一张表。
+- 未完成边界：这些是本地即时交付物，尚未统一登记为工作区历史 artifact；Office 文件已解析结构，但复杂内容、原生应用视觉、跨平台打开和线上验收仍未完成。手机端下载已移出当前范围。
 
 ## 1. 结论先行
 
@@ -151,7 +167,7 @@
 - 多轮真实模型调用、跨 provider 费用对账、SSE 长任务和工具循环恢复；DeepSeek 单轮、Token 记录和停止路径已验证。
 - Redis、Temporal、外部 MCP、Feishu、权限和多用户状态。
 - Docker 全栈、PyInstaller/Inno/macOS 桌面安装包最终产物、完整重启恢复、真实部署和线上登录后的分析流程。
-- 当前环境仍缺少具体厂商 ODBC 驱动，`pyodbc.drivers()` 为空；流程图服务也提示 `No module named 'MCP.flowchart_server'`。因此 SQL Server/ODBC 和流程图 MCP 不能标记为环境就绪。
+- 当前环境仍缺少具体厂商 ODBC 驱动，`pyodbc.drivers()` 为空，因此 SQL Server/ODBC 仍待真实连接验证。流程图能力由进程内 diagram 工具和内置 draw.io 提供，不依赖独立 `MCP.flowchart_server`；创建、读取、编辑、图形库和路径穿越防护已完成本地回归，真实 MCP 连接仍待验证。
 
 ### 3.4 外部演示站验证边界
 
@@ -190,13 +206,13 @@
 | 数据接入 | Excel/CSV、DuckDB、SQLAlchemy、Google Sheets、HTTP API、Feishu Bitable、跨源合并 | CSV/XLSX、HTTP fixture 和临时 PostgreSQL 已验证；其余连接和权限待验证 |
 | 查询与分析 | schema、SQL、派生分析表、数据 profile、清洗、14 类统计/机器学习分析 | 固定夹具和 DeepSeek 只读主链路已验证；真实业务结果待验证 |
 | 图表 | 选择器、生成器和 41 个图表目录 | 41 个注册图表已用固定夹具生成冒烟；视觉和真实业务数据待验证 |
-| 输出 | Excel、报告、PPT、Dashboard | 固定 fixture 生成和结构解析已验证；浏览器、复杂内容和跨平台打开待验证 |
+| 输出 | Excel、报告、PPT、Dashboard | 固定 fixture 已在统一桌面交付区生成；Office 结构解析、HTTP 下载和 Dashboard 浏览器打开通过，复杂内容、原生应用视觉和跨平台待验证 |
 | 多模型 | OpenAI 兼容调用、DeepSeek/OpenAI/其他 provider 配置 | DeepSeek 已真实连通并完成单任务；provider 失败切换、跨 provider 成本统计待验证 |
 | 实时交互 | Chat SSE、停止、提示建议、工具事件、图表 HTML | DeepSeek 单轮 SSE、停止、工具事件和 Token 记录已验证；长连接恢复待验证 |
 | Sessions / Memory | 会话保存、历史、记忆读取与整理 | 会话和记忆代码存在；多轮、隔离和跨进程恢复待验证 |
 | Skills / Commands | 28 个 skills 目录、17 个命令文档、斜杠命令 | 源码和文档存在，命令覆盖待验证 |
 | MCP / Knowledge | MCP server 管理、工具发现、知识库分类/检索/临时提示 | 源码存在，外部接入和检索质量待验证 |
-| Workspace | 挂载、读写、checkpoint、回滚、受限 bash facade | 源码存在，安全边界和恢复待验证 |
+| Workspace | 挂载、读写、checkpoint、回滚、受限 bash facade | checkpoint 跨 FileHistory 实例读取、文件+会话恢复、只读恢复拒绝已有本地回归；挂载与其他工作区工具仍需完整验收 |
 | Jobs / Workflows | 后台任务、DAG/工作流、审批、取消、恢复、重试、fork、调度器 | Job 存储重启收口和本地 Workflow 节点重试已验证；跨进程/跨服务恢复待验证 |
 | Teams | 受限委派、成员工具上限、质量 reviewer | 源码存在，真实并发和成本待验证 |
 | Hooks / Policy | HTTP/command hooks、确认标记、写操作门禁 | 源码存在，默认策略和 fail-closed 行为待验证 |
@@ -344,9 +360,9 @@
 | 独立品牌与新 UI | 已实现第一段 | PFS 图标、产品身份、服务名、模板、静态原型和报表预览入口已迁移；MCP、知识库和工作目录模块已切换为 PFS 主命名空间并保留旧入口兼容；真实工作台侧栏交互已完成一组移动端验收；本轮又完成浏览器 CSV 上传到会话数据源的本地回读；父级静态原型仍未接后端 |
 | typed data/agent contract | 已实现第一段 | `pfs_agent/` 已有工具契约和策略门，已接入只读/计算工具的 Agent 预分发检查 |
 | 报表口径、证据链、结论核验 | 已实现第一段 | `reporting.py`、`ledger.py` 和 `/api/pfs/ledger` 已覆盖 fixture/上传 CSV/XLSX 结果、快照哈希、Claim/Evidence、幂等、冲突和本地持久化契约；XLSX 真实依赖执行、语义核验待实现 |
-| 真实工作台移动侧栏交互 | 已实现局部切片 | 390×844 浏览器验收覆盖面板互斥、异步过期请求保护、Escape、Agent 导航、两个抽屉和 backdrop；不是完整移动端分析工作流验收 |
+| 真实工作台移动侧栏交互 | 已有历史验收；不再扩展 | 390×844 浏览器验收覆盖面板互斥、异步过期请求保护、Escape、Agent 导航、两个抽屉和 backdrop；手机端已移出当前交付范围，不再要求完整移动端分析工作流 |
 | 真实模型、数据源、SSE、长任务 | DeepSeek 单任务与停止通过；PostgreSQL 单源通过；备用切换已有代码回归；其余部分待验证 | DeepSeek + schema + 两条 SQL + SSE + Token 记录真实通过；临时 PostgreSQL 连接、选表、CTE 和越权表拒绝已实测；停止和请求级关闭记忆已实测；外部生产数据源、多轮、真实网络错误和长任务恢复仍待验收 |
-| 本地 Flask 5012 服务 | 已验证（局部） | `/api/health`、页面和本轮侧栏交互已回读；启动仍有 pyodbc/flowchart server 环境提示 |
+| 本地 Flask 5012 服务 | 已验证（局部） | `/api/health`、页面和本轮侧栏交互已回读；启动仍可能提示缺少具体 ODBC 厂商驱动，内置流程图不再有独立服务提示 |
 | Chat / Dashboard production build | 已验证（离线） | `pnpm run build:chat`、`pnpm run build:check` 通过；不代表真实模型或线上可用 |
 | Docker/数据库/队列/Temporal/沙箱 | Docker 单容器和临时 PostgreSQL 本地通过；其余待验证 | PFS 应用镜像已构建并以 `healthy` 运行；临时 PostgreSQL 已完成 SQL 数据源连接与范围回归；项目暂无 Compose 多服务编排，队列、Temporal、沙箱和生产数据库未完成全栈验收 |
 | Git commit | 已建立 | 本地 `main` 已创建初始提交；提交范围为当前 PFS 发布源树 |
@@ -371,7 +387,7 @@
 - 命令：.venv/bin/python -m unittest -v tests.test_pfs_exports tests.test_pfs_agent_vertical_slice；6/6 通过；完整回归 .venv/bin/python -m unittest discover -s tests -q 为 73 项通过、1 项可选 Torch 测试跳过。
 - 窄范围修复：Dashboard HTML 导出页脚的旧产品文案改为 PFS 数据分析 Agent；测试产物放在受控 outputs/exports 目录并在结束时清理。
 - 本地 HTTP：PFS_WSGI=flask PFS_PORT=5123 .venv/bin/python app.py 启动真实 Flask 服务；GET /api/health、GET /api/pfs/capabilities、GET /api/pfs/fixture 均返回 200。固定夹具返回销售额合计 100000、华东 42000、状态 completed。
-- 启动提示：pyodbc 缺少 macOS libodbc.2.dylib，MCP flowchart 模块缺失；对应数据库连接和流程图服务仍不能标记为环境就绪。
+- 启动限制：本机尚未安装具体数据库厂商 ODBC 驱动；流程图已改为内置 draw.io/diagram 链路并完成本地回归，真实 MCP 服务连接仍未验收。
 - 边界：这次证明 PFS 的本地确定性 API 和四类导出产物可运行，不证明真实模型、外部连接器、SSE 长任务、重启恢复、Docker 全栈、浏览器视觉、部署或线上验收。
 
 ### 2026-08-29 工作区元数据身份迁移
@@ -458,7 +474,7 @@
 - 容器验收：镜像启动后 `/api/health`、首页、会话创建、CSV 上传和确定性分析均真实回读；新增 Docker `HEALTHCHECK` 后重建，容器状态为 `healthy`、FailingStreak=0。该结论只覆盖 PFS 应用单容器，不代表 PostgreSQL、Redis、Temporal、外部模型或多服务全栈。
 - 本机真实 HTTP：在 `127.0.0.1:5188` 启动 Waitress，健康接口与首页返回 200，首页显示 PFS 品牌；真实创建会话、上传 `pfs_sales.csv`、执行“按地区统计 2026年1月到2026年3月的销售额”，返回合计 100000、华东 42000、华南 33000、华北 25000、2 条 Claim 和 1 条 Evidence。
 - 真实模型：当前 `LLM/llm_config.json` 不存在，环境变量中没有已配置模型密钥，Ollama `127.0.0.1:11434` 也未运行。真实聊天 SSE 实际返回“未配置任何 LLM 模型”，Token 统计为 0；因此真实模型任务仍未通过，不能用确定性分析替代。
-- 本机依赖：已通过 Homebrew 安装 `unixodbc 2.3.14`，`pyodbc 5.3.0` 可正常导入；当前 `pyodbc.drivers()` 为空，尚未安装具体数据库厂商驱动，也未连接真实数据库，因此 SQL Server 等连接仍待验证。`MCP.flowchart_server` 仍缺失，流程图 MCP 不能标记为环境就绪。
+- 本机依赖：已通过 Homebrew 安装 `unixodbc 2.3.14`，`pyodbc 5.3.0` 可正常导入；当前 `pyodbc.drivers()` 为空，尚未安装具体数据库厂商驱动，也未连接真实数据库，因此 SQL Server 等连接仍待验证。流程图采用内置 draw.io/diagram 工具，不依赖 `MCP.flowchart_server`；真实 MCP 连接仍待验证。
 
 ### 2026-08-30 DeepSeek 真实 Agent 任务
 

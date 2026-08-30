@@ -11,7 +11,18 @@ WINDOWS_BUILD_PATH = PROJECT_ROOT / "packaging" / "build_windows.ps1"
 SPEC_PATH = PROJECT_ROOT / "packaging" / "pfs_data_analysis_agent.spec"
 DOCKERIGNORE_PATH = PROJECT_ROOT / ".dockerignore"
 DOCKERFILE_PATH = PROJECT_ROOT / "Dockerfile"
+CHAT_TEMPLATE_PATH = PROJECT_ROOT / "templates" / "agent_chat.html"
+I18N_PATH = PROJECT_ROOT / "frontend" / "legacy" / "i18n.js"
 LEGACY_PRODUCT_NAMES = ("BusinessAnalyticsAgent", "Business Analytics Agent")
+LEGACY_COMMUNITY_MARKERS = (
+    "991636855",
+    "cdRNfS68u9BlYjJl",
+    "EEG4Sw7tde",
+    "qm.qq.com",
+    "sidebar.community",
+    "ov-community",
+    "sb-footer-community",
+)
 
 
 def read_text(path):
@@ -35,6 +46,8 @@ class ReleaseIdentityTests(unittest.TestCase):
         cls.spec = read_text(SPEC_PATH)
         cls.dockerignore = read_text(DOCKERIGNORE_PATH)
         cls.dockerfile = read_text(DOCKERFILE_PATH)
+        cls.chat_template = read_text(CHAT_TEMPLATE_PATH)
+        cls.i18n = read_text(I18N_PATH)
 
     def test_workflow_uploads_exact_windows_installer_output(self):
         output_base = require_match(
@@ -108,6 +121,12 @@ class ReleaseIdentityTests(unittest.TestCase):
         self.assertIn("HEALTHCHECK", self.dockerfile)
         self.assertIn("/api/health", self.dockerfile)
         self.assertIn("${PFS_PORT:-5001}", self.dockerfile)
+
+    def test_user_facing_chat_surface_has_no_legacy_community_entry(self):
+        for marker in LEGACY_COMMUNITY_MARKERS:
+            with self.subTest(marker=marker):
+                self.assertNotIn(marker, self.chat_template)
+                self.assertNotIn(marker, self.i18n)
 
 
 if __name__ == "__main__":

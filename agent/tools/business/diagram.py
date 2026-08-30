@@ -23,7 +23,10 @@ from agent.tools.business.xml_utils import (
 
 log = logging.getLogger(__name__)
 
-_SHAPE_LIBS_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "shape_libs"
+# ``diagram.py`` lives under ``agent/tools/business``; the shape libraries
+# are repository-level data, not ``agent/data``.  Resolve from the workspace
+# root so the tool also works when launched from another working directory.
+_SHAPE_LIBS_DIR = Path(__file__).resolve().parents[3] / "data" / "shape_libs"
 
 
 # ── display_diagram ──────────────────────────────────────────

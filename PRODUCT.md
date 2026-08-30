@@ -6,7 +6,7 @@ product
 
 ## Platform
 
-web (Flask + vanilla JS, desktop-first with responsive adaptations)
+web (Flask + vanilla JS, desktop-only delivery scope)
 
 ## Product Name
 
@@ -18,7 +18,7 @@ PFS 数据分析 Agent — 可追踪、可核验的报表数据分析工作台
 
 ## Delivery status
 
-本文件描述目标产品，不等于全部能力已经完成。当前源码迁移、PFS 第一段策略门、上传 CSV 确定性分析和 Evidence Ledger 本地持久化已落地；真实模型、外部数据源、自动事件流水线、全栈恢复、部署和线上功能仍按 [PROJECT_STATUS.md](PROJECT_STATUS.md) 分别验证。
+本文件描述目标产品，不等于全部能力已经完成。当前 CSV/XLSX 确定性分析、PFS 第一段策略门、Evidence Ledger、JSON/CSV 下载和固定报表的 Excel/Word/PPT/Dashboard 统一交付已有本地证据；外部生产数据源、完整事件流水线、跨进程恢复、安装包、部署和线上功能仍待验证。现役边界见 [docs/HANDOFF.md](docs/HANDOFF.md)。
 
 ## Users
 
@@ -33,13 +33,13 @@ PFS 数据分析 Agent — 可追踪、可核验的报表数据分析工作台
 ### Core Analysis
 - **自然语言数据分析**：输入自然语言问题，自动生成 SQL、执行查询、推荐图表并输出业务洞察
 - **多数据源支持**：文件（Excel / CSV）、数据库（SQLite / MySQL / PostgreSQL / SQL Server）
-- **智能图表系统**：6 大类 43 种图表自动推荐（对比、时间趋势、分布、地理、关系、占比）
+- **智能图表系统**：当前注册 41 个图表 ID，已有固定夹具生成证据；真实业务数据和桌面视觉仍需逐项验收
 - **SSE 流式输出**：分析过程实时可见，分阶段展示进度
 
 ### Advanced Capabilities
 - **多模型兼容**：DeepSeek / OpenAI / AtlasCloud / 任意 OpenAI SDK Compatible API
 - **深度分析**：异常值处理、十分位分组、K-Means 聚类、决策树建模
-- **报告生成**：Excel 表格、Word 文档、PPT 演示文稿导出
+- **报告生成**：Excel 表格、Word 文档、PPT 演示文稿和 Dashboard 统一即时交付；工作区历史与复杂 Office 视觉尚未完成
 - **MCP 拓展**：连接本地或远程 MCP 服务器，扩展 Agent 工具能力
 - **知识库**：上传业务知识文档，让 Agent 理解业务上下文
 
@@ -200,4 +200,4 @@ app.py                          — 应用入口，Flask factory
 
 ## Accessibility & Inclusion
 
-以键盘可达、清晰焦点、可读对比度和语义化状态为基础；支持深浅主题、减少动态效果偏好和窄屏结构重排。按钮、长名称、错误信息和结构化结果在桌面与移动视口均不得重叠或溢出。
+以键盘可达、清晰焦点、可读对比度和语义化状态为基础；支持深浅主题和减少动态效果偏好。当前验收范围为桌面视口，按钮、长名称、错误信息和结构化结果不得重叠或溢出。

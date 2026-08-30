@@ -72,6 +72,7 @@ from .validate     import (
 from .reasoning    import ThinkTagStreamParser, split_reasoning_tags
 from .hooks.models import HookContext
 from .token_metrics import build_prompt_breakdown, finalize_prompt_breakdown
+from .pricing import calculate_model_cost_usd, validate_cost_limit
 from .instructions import load_instruction_section
 from .memory import read_memory, render_memory_section
 from .mcp_discovery import (
@@ -516,6 +517,12 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
         prompt_cache_mode: str = "none",
         prompt_cache_retention: str = "in_memory",
         cache_breakpoint_strategy: str = "stable_prefix",
+        max_iterations: Optional[int] = None,
+        max_tool_calls: Optional[int] = None,
+        max_total_tokens: Optional[int] = None,
+        input_price_per_million: Optional[float] = None,
+        output_price_per_million: Optional[float] = None,
+        max_cost_usd: Optional[float] = None,
     ):
         self.client = client
         self.model = model
@@ -579,6 +586,34 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                 cache_breakpoint_strategy or "stable_prefix"
             ),
         )
+        # These are run-scoped hard limits.  They are deliberately stored on
+        # the Agent instead of being inferred from model output so a provider
+        # cannot extend a run by emitting another tool-call batch.
+        self._max_iterations = max(1, int(max_iterations or self.MAX_ITERATIONS))
+        self._max_tool_calls = max(
+            1, int(max_tool_calls or self._max_iterations * 4)
+        )
+        # A run-level token ceiling is opt-in.  It is enforced from provider
+        # usage, never from an estimate, so cost governance remains auditable.
+        self._max_total_tokens = (
+            max(1, int(max_total_tokens))
+            if max_total_tokens is not None and int(max_total_tokens) > 0
+            else None
+        )
+        self._input_price_per_million = input_price_per_million
+        self._output_price_per_million = output_price_per_million
+        self._max_cost_usd = validate_cost_limit(max_cost_usd)
+        if self._max_cost_usd is not None:
+            # A cost ceiling without a complete price pair would silently
+            # disable the ceiling. Fail at construction instead.
+            if input_price_per_million is None or output_price_per_million is None:
+                raise ValueError("启用费用预算前必须同时填写输入与输出模型单价")
+            calculate_model_cost_usd(
+                0,
+                0,
+                input_price_per_million=self._input_price_per_million,
+                output_price_per_million=self._output_price_per_million,
+            )
 
     def _apply_prompt_cache(
         self,
@@ -631,6 +666,13 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
             int(getattr(config, "context_window", 0) or 0) or context_window
         )
         self._max_output_tokens = max(1, int(max_output_tokens))
+        self._input_price_per_million = getattr(config, "input_price_per_million", None)
+        self._output_price_per_million = getattr(config, "output_price_per_million", None)
+        if self._max_cost_usd is not None and (
+            self._input_price_per_million is None
+            or self._output_price_per_million is None
+        ):
+            raise ValueError("启用费用预算前必须同时填写输入与输出模型单价")
         supports_prompt_cache = getattr(config, "supports_prompt_cache", None)
         if supports_prompt_cache is None:
             supports_prompt_cache = defaults.get("supports_prompt_cache", False)
@@ -733,6 +775,8 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
         timeout_seconds: int = 300,
         max_tokens: int = 1600,
         max_tool_calls: int | None = None,
+        max_total_tokens: int | None = None,
+        max_cost_usd: float | None = None,
         allowed_tools: frozenset[str] | set[str] | None = None,
         allow_write_tools: bool = False,
     ) -> dict:
@@ -793,7 +837,21 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
             "output_tokens": 0,
             "cached_input_tokens": 0,
             "tool_calls": 0,
+            "token_budget_exceeded": False,
+            "cost_usd": None,
+            "cost_budget_exceeded": False,
         }
+        delegated_cost_limit = validate_cost_limit(max_cost_usd)
+        if delegated_cost_limit is not None and (
+            self._input_price_per_million is None
+            or self._output_price_per_million is None
+        ):
+            raise ValueError("启用费用预算前必须同时填写输入与输出模型单价")
+
+        def _token_budget_exhausted() -> bool:
+            limit = max_total_tokens
+            used = usage_summary["input_tokens"] + usage_summary["output_tokens"]
+            return limit is not None and used >= int(limit)
 
         def _capture_usage(response_obj) -> None:
             usage = getattr(response_obj, "usage", None)
@@ -819,6 +877,26 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
             usage_summary["cached_input_tokens"] += int(
                 getattr(details, "cached_tokens", 0) or 0
             )
+            call_cost_usd = calculate_model_cost_usd(
+                getattr(usage, "prompt_tokens", None)
+                or getattr(usage, "input_tokens", 0)
+                or 0,
+                getattr(usage, "completion_tokens", None)
+                or getattr(usage, "output_tokens", 0)
+                or 0,
+                input_price_per_million=self._input_price_per_million,
+                output_price_per_million=self._output_price_per_million,
+            )
+            if call_cost_usd is not None:
+                usage_summary["cost_usd"] = (
+                    float(usage_summary["cost_usd"] or 0.0) + call_cost_usd
+                )
+            if (
+                delegated_cost_limit is not None
+                and usage_summary["cost_usd"] is not None
+                and usage_summary["cost_usd"] >= delegated_cost_limit
+            ):
+                usage_summary["cost_budget_exceeded"] = True
 
         for _delegated_iteration in range(self.DELEGATED_MAX_TOOL_ROUNDS):
             kwargs = {
@@ -865,6 +943,13 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                 response = self.client.chat.completions.create(**kwargs)
             delegated_usage = getattr(response, "usage", None)
             _capture_usage(response)
+            if _token_budget_exhausted():
+                usage_summary["token_budget_exceeded"] = True
+                log.warning(
+                    "[team] delegated token budget reached used=%d limit=%d",
+                    usage_summary["input_tokens"] + usage_summary["output_tokens"],
+                    int(max_total_tokens),
+                )
             usage_recorder = getattr(self, "_usage_recorder", None)
             if delegated_usage is not None and usage_recorder is not None:
                 finalized = finalize_prompt_breakdown(
@@ -881,6 +966,22 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
             msg = response.choices[0].message
             last_content = getattr(msg, "content", None) or ""
             tool_calls = list(getattr(msg, "tool_calls", None) or [])
+            if usage_summary["token_budget_exceeded"]:
+                usage_summary["tool_calls"] = len(used_tools)
+                return {
+                    "content": _with_tool_footer(last_content) or
+                    "成员分析已达到 Token 预算上限，未继续调用工具。",
+                    "tool_events": tool_events,
+                    "usage": usage_summary,
+                }
+            if usage_summary["cost_budget_exceeded"]:
+                usage_summary["tool_calls"] = len(used_tools)
+                return {
+                    "content": _with_tool_footer(last_content) or
+                    "成员分析已达到费用预算上限，未继续调用工具。",
+                    "tool_events": tool_events,
+                    "usage": usage_summary,
+                }
             if not tool_calls:
                 candidate = _with_tool_footer(last_content)
                 if not candidate and not empty_response_retry_used:
@@ -987,6 +1088,16 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                 log.warning("[team] delegated final synthesis failed: %s", exc)
             else:
                 _capture_usage(response)
+                if _token_budget_exhausted():
+                    usage_summary["token_budget_exceeded"] = True
+                if usage_summary["cost_budget_exceeded"]:
+                    usage_summary["tool_calls"] = len(used_tools)
+                    return {
+                        "content": _with_tool_footer(last_content) or
+                        "成员分析已达到费用预算上限，未继续调用工具。",
+                        "tool_events": tool_events,
+                        "usage": usage_summary,
+                    }
                 final_content = _visible_text(getattr(response.choices[0].message, "content", "") or "")
         if not final_content:
             final_content = (
@@ -1909,6 +2020,12 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
         all_reasoning: List[str] = []
         _consecutive_errors = 0
         _pfs_tool_call_counts: dict[str, int] = {}
+        # Count every proposed tool call, including malformed, hidden, or
+        # policy-blocked calls.  Otherwise a model could exhaust validation
+        # loops without consuming the run budget.
+        _run_tool_calls_used = 0
+        _run_total_tokens_used = 0
+        _run_total_cost_usd = 0.0
         _pfs_total_tool_calls = 0
         _run_start = time.monotonic()
         _MAX_RUN_SECONDS = self.MAX_RUN_SECONDS
@@ -1930,7 +2047,7 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
         _force_propose = False
         _force_propose_retries = 0
         _MAX_FORCE_PROPOSE_RETRIES = 3
-        for _iteration in range(self.MAX_ITERATIONS):
+        for _iteration in range(self._max_iterations):
             # ── Hard exit guards ──────────────────────────────────────────────
             # _run_start is reset after every job completes (see _run_job), so
             # MAX_RUN_SECONDS effectively caps the *idle* time between productive
@@ -2414,6 +2531,27 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
             reasoning_content = "".join(reasoning_parts) or None
 
             if usage_data:
+                _usage_prompt_tokens = int(
+                    getattr(usage_data, "prompt_tokens", None)
+                    or getattr(usage_data, "input_tokens", 0)
+                    or 0
+                )
+                _usage_completion_tokens = int(
+                    getattr(usage_data, "completion_tokens", None)
+                    or getattr(usage_data, "output_tokens", 0)
+                    or 0
+                )
+                _run_total_tokens_used += (
+                    _usage_prompt_tokens + _usage_completion_tokens
+                )
+                _call_cost_usd = calculate_model_cost_usd(
+                    _usage_prompt_tokens,
+                    _usage_completion_tokens,
+                    input_price_per_million=self._input_price_per_million,
+                    output_price_per_million=self._output_price_per_million,
+                )
+                if _call_cost_usd is not None:
+                    _run_total_cost_usd += _call_cost_usd
                 _elapsed = time.monotonic() - _t0
                 _prompt_breakdown = finalize_prompt_breakdown(
                     _prompt_breakdown, usage_data,
@@ -2451,7 +2589,52 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                     # keeps the % shown there consistent with the compaction
                     # trigger (both use _get_context_window()).
                     "context_window": _ctx_window,
+                    "cost_usd": _call_cost_usd,
+                    "run_total_cost_usd": round(_run_total_cost_usd, 8),
+                    "cost_currency": "USD",
                 }
+                if (
+                    self._max_total_tokens is not None
+                    and _run_total_tokens_used >= self._max_total_tokens
+                ):
+                    log.warning(
+                        "[run] token budget reached used=%d limit=%d",
+                        _run_total_tokens_used, self._max_total_tokens,
+                    )
+                    yield {
+                        "type": "policy_decision",
+                        "tool": "llm.run",
+                        "allowed": False,
+                        "code": "run_token_budget_exceeded",
+                        "reason": "the run token budget is exhausted",
+                    }
+                    yield {
+                        "type": "error",
+                        "message": "本次分析已达到 Token 预算上限，已安全停止。请缩小问题范围后重试。",
+                    }
+                    yield {"type": "done"}
+                    return
+                if (
+                    self._max_cost_usd is not None
+                    and _run_total_cost_usd >= self._max_cost_usd
+                ):
+                    log.warning(
+                        "[run] cost budget reached used=%.8f limit=%.8f",
+                        _run_total_cost_usd, self._max_cost_usd,
+                    )
+                    yield {
+                        "type": "policy_decision",
+                        "tool": "llm.run",
+                        "allowed": False,
+                        "code": "run_cost_budget_exceeded",
+                        "reason": "the run cost budget is exhausted",
+                    }
+                    yield {
+                        "type": "error",
+                        "message": "本次分析已达到费用预算上限，已安全停止。请调整预算或缩小问题范围后重试。",
+                    }
+                    yield {"type": "done"}
+                    return
 
             class _F:
                 def __init__(self, name, arguments):
@@ -2539,6 +2722,25 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                 _hook_prompt_backlog: list[str] = []
                 for tc in tc_objects:
                     name = tc.function.name
+                    if _run_tool_calls_used >= self._max_tool_calls:
+                        log.warning(
+                            "[run] tool-call budget reached used=%d limit=%d",
+                            _run_tool_calls_used, self._max_tool_calls,
+                        )
+                        yield {
+                            "type": "policy_decision",
+                            "tool": name,
+                            "allowed": False,
+                            "code": "run_tool_budget_exceeded",
+                            "reason": "the run tool-call budget is exhausted",
+                        }
+                        yield {
+                            "type": "error",
+                            "message": "本次分析已达到工具调用上限，已安全停止。请缩小问题范围后重试。",
+                        }
+                        yield {"type": "done"}
+                        return
+                    _run_tool_calls_used += 1
                     args, _decode_error = _decode_tool_call_args(
                         name, tc.function.arguments,
                     )
@@ -2612,7 +2814,11 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                         visible_tools=_visible_tool_names,
                         has_data_source=_has_sources,
                         has_workspace=_workspace_available,
-                        remaining_calls=(self.MAX_ITERATIONS * 4) - _pfs_total_tool_calls,
+                        # The outer guard has already reserved the current
+                        # proposal's token. Keep one policy token available
+                        # for this call; the next proposal is blocked by the
+                        # run-scoped guard above.
+                        remaining_calls=self._max_tool_calls - _run_tool_calls_used + 1,
                         remaining_seconds=int(max(
                             0, _MAX_RUN_SECONDS - (time.monotonic() - _run_start)
                         )),
@@ -4698,6 +4904,6 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
         log.warning("[run] max iterations reached  model=%s", self.model)
         yield {
             "type": "text",
-            "content": "分析完成（已达到最大工具调用次数）。Analysis complete (max iterations reached).",
+            "content": "分析已安全停止（达到最大推理轮次）。请缩小问题范围后重试。",
         }
         yield {"type": "done"}

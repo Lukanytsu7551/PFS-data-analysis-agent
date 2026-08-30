@@ -119,7 +119,6 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         "MCP",
-        "MCP.flowchart_server",
         "gunicorn",
         "pytest",
     ],
