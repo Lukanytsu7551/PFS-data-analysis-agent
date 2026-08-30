@@ -39,7 +39,7 @@ PFS 数据分析 Agent — 可追踪、可核验的报表数据分析工作台
 ### Advanced Capabilities
 - **多模型兼容**：DeepSeek / OpenAI / AtlasCloud / 任意 OpenAI SDK Compatible API
 - **深度分析**：异常值处理、十分位分组、K-Means 聚类、决策树建模
-- **报告生成**：Excel 表格、Word 文档、PPT 演示文稿和 Dashboard 统一即时交付；工作区历史与复杂 Office 视觉尚未完成
+- **报告生成**：Excel 表格、Word 文档、PPT 演示文稿和 Dashboard 统一即时交付；会话 Artifact 历史已接入，跨进程关联与复杂 Office 视觉尚未完成
 - **MCP 拓展**：连接本地或远程 MCP 服务器，扩展 Agent 工具能力
 - **知识库**：上传业务知识文档，让 Agent 理解业务上下文
 

@@ -2,7 +2,7 @@
 
 > 制定日期：2026-08-28  
 > 目标：保留并重新验证 Data-Analysis-Agent 的全部功能，同时完成 PFS 的独立产品身份、用户界面、内部标识、文档、安装和发布体系。  
-> 当前基线：CSV/XLSX + PFS 口径 + Claim/Evidence + JSON/CSV + Excel/Word/PPT/Dashboard 桌面即时交付、DeepSeek 单任务和 Docker 单容器已有分层本地证据；完整兼容复验、Artifact/Lineage、Evidence/HITL、跨进程恢复、安装包、发布和线上验收仍未完成。不要用百分比替代功能矩阵状态。
+> 当前基线：CSV/XLSX + PFS 口径 + Claim/Evidence + JSON/CSV + Excel/Word/PPT/Dashboard 桌面即时交付、会话 Artifact/Lineage、DeepSeek 单任务和 Docker 单容器已有分层本地证据；完整兼容复验、动态 Evidence/HITL、跨进程恢复、安装包、部署和线上验收仍未完成。不要用百分比替代功能矩阵状态。
 > 范围更新：当前产品只要求桌面端工作台。手机端适配、移动端完整分析流程和移动端下载不再纳入完成标准；已有 390×844 验收记录作为历史证据保留。
 
 ## 1. 完成目标如何判定
@@ -39,7 +39,7 @@
 - 真实工作台与静态 `index.html` 仍是两套表面；还没有收敛成一个产品入口。
 - 内部仍有历史命名与兼容标识需要审计，例如前端全局命名空间、旧配置键、存储文件名和数据结构。
 - 本机尚无具体厂商 ODBC 驱动；内置流程图链路已有本地回归，但真实 MCP 连接仍待验证。
-- 当前目录已初始化本地 Git 并创建初始提交；两次 push 均因连接 `github.com:443` 超时未成功，尚未 deploy 或进行 PFS 线上验收。
+- GitHub 私有仓库 `main` 已建立并接收当前 PFS 提交；尚未 deploy，也没有 PFS 线上验收证据。
 - 交付策略已确定：普通用户走安装脚本/启动脚本和本地 Python 环境；开发/部署人员走 Docker。两条路径必须分别验收，不能把 Docker 单容器通过写成安装包或线上部署完成。
 
 ## 3. Phase 0：建立“一项功能一张验收卡”
@@ -307,7 +307,7 @@
 
 ## 11. 推荐执行顺序与里程碑
 
-现役顺序以 [`docs/HANDOFF.md`](HANDOFF.md) 第 5 节为准：先保住当前 dirty 成果并完成首次私有仓库 push，再补桌面错误态与复杂 Excel，之后依次完成 Artifact/Lineage、Evidence/HITL、功能兼容复验、长任务/工作流恢复、Office/安装包和部署/live 验收。
+现役顺序以 [`docs/HANDOFF.md`](HANDOFF.md) 第 5 节为准：当前提交与私有仓库 push 已完成；下一步依次完成桌面错误态、Artifact 跨进程关联、动态 Evidence/HITL、原能力兼容复验、长任务/工作流恢复、Office/安装包和部署/live 验收。
 
 不再用主观百分比表达改造完成度；真正状态来自功能兼容矩阵的逐项证据。
 

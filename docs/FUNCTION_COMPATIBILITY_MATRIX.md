@@ -26,10 +26,10 @@
 | API-02 | 聊天、SSE、停止 | api/chat.py | DeepSeek 真实任务通过 SSE 返回工具事件、Token usage、最终文本和 done；长请求中调用 `/stop` 后真实返回 `stopped`，任务为 `canceled`，历史为空；Job 存储重开后未结束任务会收口并写入恢复事件；主模型 503 后切换备用模型的 Agent 路径已有替身回归；Agent 运行级工具调用硬上限、主 Agent Token/费用总量硬阻断、会话费用累计和完整价格配置门禁已有回归 | 本地真实通过（单轮 DeepSeek + 停止 + Job 存储恢复 + 运行级工具上限）+ 静态故障切换/Token/费用门禁回归 | 多轮流式、超时、真实网络错误、流式中断重连和工作流恢复；真实供应商账单对账仍待实现 |
 | API-03 | 数据源 | api/datasource.py | 固定/上传 CSV/XLSX 通用上传入口存在；桌面浏览器已真实上传含说明、空表、业务明细和异常指标的四工作表 XLSX，选择器与字段按工作表刷新，空表不可分析 | 本地真实通过（复杂 XLSX 桌面切片） | 大文件、更多复杂业务 Excel 及外部连接器 |
 | API-04 | 输出 | api/output.py、Function/Output、tests/test_pfs_exports.py、tests/test_pfs_delivery_artifacts.py | 固定 PFS fixture 的 Excel、Word、PPT、Dashboard 已结构解析；三种 Office 和 Dashboard HTML 下载 HTTP 200；多 Sheet Excel/Dashboard 已确认只读取所选工作表，中文文件名响应头已回归 | 本地真实通过（固定 fixture + 多 Sheet HTTP/文件结构） | 复杂报表、原生应用视觉、跨平台打开与品牌元数据验收 |
-| API-05 | PFS 可信分析 | api/pfs.py、pfs_agent/ | Ledger、Claim、幂等、冲突和固定 fixture 有测试；报表预览新增支持/冲突/待核验状态摘要，并按结果字段展示 Claim 关系、核验理由和人工决策；固定报表移动端展示已通过浏览器回读 | 模拟通过（UI 状态契约已通过） | 绑定完整 Ledger 详情、人工裁决操作并完成真实上传数据 UI 回链；不等于自动语义核验完成 |
+| API-05 | PFS 可信分析 | api/pfs.py、pfs_agent/ | Ledger、Claim、幂等、冲突和固定 fixture 有测试；报表预览展示 Claim 关系、核验理由和人工决策，冲突项支持二次确认后调用决策接口；会话 Artifact 详情可展示匹配的人工裁决审计记录 | 模拟通过（UI 状态、决策调用和审计回读契约已通过） | 真实上传数据 UI 回链、统一审计界面和语义核验；不等于自动语义核验完成 |
 | API-06 | 上传到 PFS 报表闭环 | api/datasource.py、api/pfs.py、tests/test_pfs_http_vertical_slice.py | 四工作表 XLSX 桌面闭环通过：选择 `销售明细` 后回读 3 行、总额 3,600、华东 2,700、华南 900、2 条 Claim 和工作表 Evidence；`异常指标` 非数字值被明确拒绝且禁用交付 | 本地真实通过（复杂 XLSX 桌面切片） | 缺字段、日期异常、大文件、通用聊天 Agent 和真实部署 |
 | API-07 | 受限自然语言报表问题 | pfs_agent/query.py、api/pfs.py、frontend/legacy/pfs-report-preview.js、tests/test_pfs_http_vertical_slice.py | 明确问题可映射到指标/日期/分组列，时间范围解析后交给确定性 grouped SUM，并返回解释、Claim/Evidence；报表预览已提供问题输入、识别口径展示和错误反馈；含糊问题明确拒绝 | 本地 HTTP 与前端 production build 通过 | LLM 意图理解、更多指标/计算方式、复杂表达、通用聊天入口、浏览器视觉验收 |
-| API-08 | PFS 报表下载与交付 | api/pfs.py、frontend/legacy/pfs-report-preview.js、templates/agent_chat.html、tests/test_pfs_http_vertical_slice.py、tests/test_pfs_delivery_artifacts.py | 上传 XLSX 的 JSON/CSV 已下载回读；复杂多 Sheet 文件在真实桌面页面按 `销售明细` 生成 Excel/Word/PPT/Dashboard，Dashboard 回读 KPI 3600、华东 2700、华南 900 且无横向溢出；错误 Sheet 不生成交付物 | 本地真实通过（HTTP + 复杂 XLSX 桌面 + 文件结构） | 工作区 artifact 历史、复杂 Office 内容、原生视觉/跨平台打开和真实部署；移动端不在当前范围 |
+| API-08 | PFS 报表下载与交付 | api/pfs.py、frontend/legacy/pfs-report-preview.js、templates/agent_chat.html、tests/test_pfs_http_vertical_slice.py、tests/test_pfs_delivery_artifacts.py | 上传 XLSX 的 JSON/CSV 已下载回读；复杂多 Sheet 文件在真实桌面页面按 `销售明细` 生成 Excel/Word/PPT/Dashboard；交付 Artifact 已带分析参数、SQL、图表规格、最终结论和 warnings，并可在会话历史中读取详情和下载 | 本地真实通过（HTTP + 复杂 XLSX 桌面 + 文件结构） | 跨进程工作区关联、复杂 Office 内容、原生视觉/跨平台打开和真实部署；移动端不在当前范围 |
 
 ## B. Agent 工具和分析能力
 
@@ -84,18 +84,19 @@
 |---|---|---|---|---|---|
 | PFS-01 | Metric Contract | pfs_agent/contracts.py、api/pfs.py | 固定/上传 CSV/XLSX 使用统一指标、维度和筛选契约 | 模拟通过 | 版本化指标字典、复杂公式和生产口径验收 |
 | PFS-02 | Evidence Ledger 与 evidence identity | pfs_agent/、api/pfs.py | 稳定身份、批量幂等、原子 JSON 持久化已有契约测试 | 模拟通过 | 数据库适配、并发和自动消费运行事件 |
-| PFS-03 | Claim–Evidence、冲突和人工决定 | api/pfs.py | 支持/反驳关系、冲突状态和人工决定字段已有契约与摘要 UI | 模拟通过 | 详情回链、人工裁决操作和语义核验评估 |
+| PFS-03 | Claim–Evidence、冲突和人工决定 | api/pfs.py、frontend/legacy/pfs-report-preview.js、frontend/features/ui/job-history-ui.js | 支持/反驳关系、冲突状态和人工决定字段已有契约；UI 展示 Evidence 详情、冲突裁决操作和 Artifact 关联审计记录 | 模拟通过 | 动态 Evidence 详情回链、统一审计界面、真实上传数据回链和语义核验评估 |
 | PFS-04 | 成本、延迟、错误、重试、恢复记录 | pfs_agent/runtime.py、聊天与工作流模块 | DeepSeek 主任务记录 3 次调用、Token、缓存命中和耗时；请求级 `memory_enabled=false` 实测只记录主调用；503 指数退避、主模型失败后的备用模型切换和 MiniMax 候选优先级已有回归；JobsStore 重开收口、恢复事件和 Workflow 节点 retry attempt 已有本地真实回归；主 Agent、委托节点和工作流图级总费用按实际 usage 的 Token/费用硬阻断均有回归；会话可累计并恢复费用；未知价格不会伪造 0 成本 | 部分完成（真实模型观测 + Job/Workflow 本地恢复 + Token/费用/工具调用硬上限） | 多 provider 真实成本对账、跨进程恢复 |
-| ID-01 | 用户可见 PFS 品牌 | config/product_identity.py、模板、安装/发布材料 | PFS 名称、图标、工作台和发布源标识已有静态回归 | 静态通过 | 最终仓库、安装包和线上品牌残留扫描 |
-| ID-02 | 内部标识迁移 | frontend/core/product-identity.js、frontend/core/runtime.js、frontend/core/overlay.js、infrastructure/compat.py、前端模块、agent/instructions.py、remote_runner/ | 当前运行期已统一使用 PFS 浏览器命名空间、pfs_* 存储键、__pfs* 运行标记、PFS_* 配置、PFS 工作区指令文件名和 PFS runner；Dashboard/Chat bundle 已重建，旧运行命名空间未进入发布 staging。参考快照、历史审计文字和本地忽略日志/缓存仍需在最终交付前单独清理或确认不随包发布 | 本地发布 staging 静态审计通过；最终仓库交付待验证 | 首次 push 后扫描 Git 树、发布 staging、安装包和线上静态资源 |
+| ID-01 | 用户可见 PFS 品牌 | config/product_identity.py、模板、安装/发布材料 | PFS 名称、图标、工作台和发布源标识已有静态回归；GitHub 源码与发布 staging 已审计 | 静态通过 | 安装包和线上品牌残留扫描 |
+| ID-02 | 内部标识迁移 | frontend/core/product-identity.js、frontend/core/runtime.js、frontend/core/overlay.js、infrastructure/compat.py、前端模块、agent/instructions.py、remote_runner/ | 当前运行期已统一使用 PFS 浏览器命名空间、pfs_* 存储键、__pfs* 运行标记、PFS_* 配置、PFS 工作区指令文件名和 PFS runner；Dashboard/Chat bundle 已重建，旧运行命名空间未进入发布 staging。参考快照、历史审计文字和本地忽略日志/缓存仍需在最终交付前单独清理或确认不随包发布 | GitHub 源码与本地发布 staging 静态审计通过；安装包待验证 | 安装包和线上静态资源扫描 |
 | ID-03 | 授权、版权、供应链边界 | NOTICE.md、SECURITY.md、参考快照 | NOTICE、安全说明和授权参考快照存在 | 源码存在 | 最终依赖许可、源码归属和发布包审计 |
-| ID-04 | 发布与线上交付 | Dockerfile、.dockerignore、install.sh、packaging/、railway.json | PFS 镜像本地构建通过；镜像内容审计不含密钥、数据库和原项目快照；容器健康检查为 healthy，首页与 CSV 确定性分析真实回读；尚未 push、部署或线上验收 | 本地 Docker 单容器通过；发布待验证 | 首次 push、CI、桌面安装包、部署和线上回读 |
+| ID-04 | 发布与线上交付 | Dockerfile、.dockerignore、install.sh、packaging/、railway.json | PFS 镜像本地构建通过；镜像内容审计不含密钥、数据库和原项目快照；容器健康检查为 healthy，首页与 CSV 确定性分析真实回读；GitHub 私有仓库 `main` 已建立 | 本地 Docker 单容器与 GitHub push 通过；部署待验证 | CI、桌面安装包、部署和线上回读 |
 
 ## 当前统计和下一切片
 
 - 全项目剩余顺序以 [`HANDOFF.md`](HANDOFF.md) 第 5 节为准；本矩阵只负责逐项记录能力证据，不维护第二份并行排期。
-- 已确认：14 类分析、41 个图表 ID、23 个 API 领域入口；最新完整 Python 回归为 152 项通过、无跳过。
+- 已确认：14 类分析、41 个图表 ID、23 个 API 领域入口；最新完整 Python 回归为 161 项通过、无跳过。
 - 当前没有任何一项可以据此宣布“原项目全部功能已重新验证”。
+- 本轮新增错误契约：`source_columns_missing`、`source_date_invalid`、`date_filter_invalid`、`upload_file_too_large`、`model_not_configured` 和交付失败建议已进入本地代码/专项回归；这不等于所有错误状态都已完成真实桌面验收。
 - 当前最小可执行垂直切片：新建会话 → 上传 CSV/XLSX → 预览 → 业务问题 → 确定性分析 → 图表/结论 → 依据 → 导出。
 - 本轮已把 XLSX 纳入同一条确定性分析闭环，并完成 41 个注册图表的固定夹具逐项生成冒烟；该结果仍不代表真实业务报表、统计准确性、浏览器展示或导出链路已验收。
 
@@ -105,7 +106,7 @@
 - JSON 保留完整的报告、Claim、Evidence、快照哈希和请求口径；CSV 使用统一的 `section/field/value/detail` 结构，保留汇总、分组、Claim、Evidence 和 warning 信息。
 - HTTP 回归覆盖固定数据总额 100000、上传数据总额 4400、地区分组、证据字段、安全文件名、来源哈希、受限自然语言口径和非法格式拒绝；真实工作台固定报表预览点击下载后显示成功状态。
 - 补充：Excel/Word/PPT/Dashboard 已接入报表弹窗的统一交付区，并完成固定 fixture 的桌面浏览器触发、Office 结构回读、Dashboard 打开和四类 HTTP 下载检查。
-- 边界：这些是即时交付物，不是已经持久化到工作区历史的导出 artifact；复杂内容、Office 原生视觉与跨平台打开、品牌元数据和部署仍待验证；移动端不在当前范围。
+- 边界：artifact 元数据已持久化到本地生命周期 registry，并接入会话历史详情；跨进程工作区关联、复杂内容、Office 原生视觉与跨平台打开、品牌元数据和部署仍待验证；移动端不在当前范围。
 
 ### 2026-08-30 上传到 PFS 报表预览 HTTP 回归
 

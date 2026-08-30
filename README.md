@@ -34,7 +34,7 @@ PFS 的核心链路是：
 | PFS 产品身份、图标和服务标识 | 已实现 | 已做静态编译与模板入口检查 |
 | PFS 工具契约与策略门 | 已实现第一段 | `get_schema`、`query_data`、`run_analysis` 等只读/计算调用已接入；写入类仍沿用原流程 |
 | PFS 报表口径预览 | 已实现第一段 | 主聊天页可读取固定 fixture，也可选择当前会话上传的 CSV，展示指标、分组、Claim、Evidence 和数据快照哈希 |
-| PFS 报表下载与交付 | 已实现桌面第一段 | 服务端重新计算 JSON/CSV；Excel/Word/PPT/Dashboard 已接入统一交付区并完成固定 fixture 回读，尚未登记为工作区历史 artifact |
+| PFS 报表下载与交付 | 已实现桌面第一段 | 服务端重新计算 JSON/CSV；Excel/Word/PPT/Dashboard 已登记为会话 Artifact，可读取 lineage、裁决审计与下载历史；跨进程工作区关联仍待实现 |
 | Evidence Ledger、Claim–Evidence、冲突队列 | 已实现第一段 | `pfs_agent/ledger.py` 与 `/api/pfs/ledger` 已支持稳定身份、批量幂等、冲突检测和原子 JSON 持久化；语义核验待实现 |
 | Docker 单容器 | 本地真实通过 | 镜像内容审计、健康检查、首页和 CSV 分析通过；多服务全栈及部署待验证 |
 | MCP、Feishu、生产数据源、恢复和部署 | 部分验证 | 临时 PostgreSQL 与本地 Job 恢复已通过；MCP/Feishu、生产权限、多服务恢复和部署仍需真实场景逐项验收 |
