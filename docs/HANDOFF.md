@@ -17,7 +17,7 @@
 | 运行态 | `verified-current` / `pending` | 本地 Waitress 健康检查、桌面报表与固定交付物已回读；无部署和线上 PFS 可用性证据。 |
 | 文档 | `changed-and-verified` | 本文作为现役入口；README、PRODUCT、完整改造计划和能力矩阵按当前边界对齐。 |
 | 规则 | `changed-and-verified` | 项目根目录新增精简 `AGENTS.md`，保存命令、权威入口、状态分层和安全边界。 |
-| 记忆 | `changed-and-verified` | 项目 `memory/` 是应用运行数据，当前为空且不应写入项目事实；Codex 生成记忆通过宿主允许的 correction note 更新，不直改生成索引。 |
+| 记忆 | `changed-and-verified` | 项目 `memory/` 含本地应用运行记忆，已被 Git 忽略且不作为项目事实来源；Codex 生成记忆通过宿主允许的 correction note 更新，不直改生成索引。 |
 | 工作区 | `pending` | Git 源码改动已提交；参考快照、数据库、密钥文件、输出、上传和缓存均被 ignore，但复核现场和发布 staging 临时证据尚未清理。 |
 
 ## 3. 已经形成的主链路
