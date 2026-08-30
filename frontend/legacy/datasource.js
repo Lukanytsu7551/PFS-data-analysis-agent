@@ -430,7 +430,9 @@ const pfs = () => globalThis.PFS;
       progressWrap.classList.add('hidden');
       btn.disabled = false;
       cancelBtn.disabled = false;
-      errEl.textContent = d.error;
+      errEl.textContent = d.code === "upload_file_too_large"
+        ? `${d.error} 单个文件上限为 100 MB，请压缩或拆分后重试。`
+        : d.error;
       return;
     }
 
@@ -527,7 +529,10 @@ const pfs = () => globalThis.PFS;
 
     // Show partial errors if any
     if (d.errors && d.errors.length) {
-      errEl.textContent = "部分文件失败: " + d.errors.join("; ");
+      const prefix = d.added?.length
+        ? `已成功加入 ${d.added.length} 个文件；`
+        : "上传失败；";
+      errEl.textContent = prefix + d.errors.join("; ");
     }
 
     // Update schema display (first added file)

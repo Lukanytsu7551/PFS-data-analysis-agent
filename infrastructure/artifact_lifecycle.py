@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 import threading
@@ -85,6 +86,21 @@ def _record(event: str, payload: dict[str, Any]) -> None:
         log.warning("[lifecycle] audit write failed: %s", exc)
 
 
+def record_governance_decision(
+    *, claim_id: str, task_id: str, previous_decision: str, decision: str,
+    reason: str, session_id: str = "",
+) -> None:
+    """Record a human Claim decision without exposing filesystem paths."""
+    _record("claim_decision", {
+        "claim_id": claim_id,
+        "task_id": task_id,
+        "previous_decision": previous_decision,
+        "decision": decision,
+        "reason": reason,
+        "session_id": session_id,
+    })
+
+
 def register_session_file(path: Path, *, session_id: str, autosave: bool) -> None:
     """Record an owned session artifact without exposing its contents."""
     _record("session_registered", {
@@ -109,7 +125,7 @@ def _session_owned_artifacts(session_id: str, exclude_files: set[Path]) -> list[
     for item in _active_registry_items(items):
         if str(item.get("session_id") or "") != session_id:
             continue
-        if str(item.get("type") or "") not in {"chart", "export", "report", "upload"}:
+        if str(item.get("type") or "") not in {"chart", "export", "report", "upload", "xlsx", "docx", "pptx", "dashboard"}:
             continue
         relative = str(item.get("path") or "")
         if not relative or not (data_root / relative).is_file():
@@ -487,6 +503,7 @@ def register_artifact(
     session_id: str = "",
     workspace_id: str = "",
     artifact_id: str = "",
+    metadata: dict[str, Any] | None = None,
 ) -> str:
     """Register an owned artifact under a lifecycle-managed root.
 
@@ -498,6 +515,8 @@ def register_artifact(
     if not path.is_file() or not _within(resolved, root):
         raise ValueError("产物路径不在受控数据目录内")
     key = artifact_id or uuid.uuid4().hex
+    metadata = dict(metadata or {})
+    digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
     with _LOCK:
         items = _load_registry()
         items[key] = {
@@ -508,10 +527,70 @@ def register_artifact(
             "workspace_id": workspace_id,
             "created_at": _now(),
             "size_bytes": resolved.stat().st_size,
+            "sha256": digest,
+            **{k: v for k, v in metadata.items() if k not in {"id", "path", "size_bytes", "sha256"}},
         }
         _save_registry(items)
-    _record("artifact_registered", {"artifact_id": key, "type": artifact_type, "session_id": session_id})
+    _record("artifact_registered", {"artifact_id": key, "type": artifact_type, "session_id": session_id, "sha256": digest})
     return key
+
+
+def list_registered_artifacts(*, session_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    """Return safe metadata for active registered artifacts, never local paths."""
+    limit = max(1, min(int(limit), 200))
+    with _LOCK:
+        items = list(_load_registry().values())
+    items = [
+        item for item in items
+        if str(item.get("status") or "active") == "active"
+        and (not session_id or str(item.get("session_id") or "") == session_id)
+    ]
+    items.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    safe_fields = (
+        "id", "type", "session_id", "workspace_id", "created_at", "size_bytes",
+        "sha256", "run_id", "source_id", "source_sha256", "worksheet",
+        "included_rows", "metric_contract", "claim_ids", "evidence_ids",
+        "analysis_parameters", "sql", "chart_specs", "final_claims", "warnings",
+        "download_count", "download_history",
+    )
+    return [{key: item[key] for key in safe_fields if key in item} for item in items[:limit]]
+
+
+def resolve_registered_artifact_path(artifact_id: str, *, session_id: str = "") -> tuple[dict[str, Any], Path] | None:
+    """Resolve an active registered artifact for internal serving only.
+
+    The registry path never crosses the API boundary. Both the artifact ID and
+    session owner must match before returning a path inside the managed root.
+    """
+    key = str(artifact_id or "")
+    root = data_path().resolve(strict=False)
+    with _LOCK:
+        item = dict(_load_registry().get(key) or {})
+    if not item or str(item.get("status") or "active") != "active":
+        return None
+    if session_id and str(item.get("session_id") or "") != str(session_id):
+        return None
+    relative = _safe_relative_path(str(item.get("path") or ""))
+    target = (root / relative).resolve(strict=False)
+    if not _within(target, root) or not target.is_file():
+        return None
+    return item, target
+
+
+def record_artifact_download(artifact_id: str) -> bool:
+    """Increment download telemetry for an existing active artifact."""
+    with _LOCK:
+        items = _load_registry()
+        item = items.get(str(artifact_id or ""))
+        if not item or str(item.get("status") or "active") != "active":
+            return False
+        history = list(item.get("download_history") or [])[-49:]
+        history.append(_now())
+        item["download_history"] = history
+        item["download_count"] = len(history)
+        _save_registry(items)
+    _record("artifact_downloaded", {"artifact_id": str(artifact_id), "download_count": len(history)})
+    return True
 
 
 def _managed_artifact_dirs() -> dict[str, Path]:
@@ -924,8 +1003,8 @@ def recycle_registered_artifact(artifact_id: str) -> dict[str, Any]:
         if not item or str(item.get("status") or "active") != "active":
             raise FileNotFoundError(artifact_id)
         artifact_type = str(item.get("type") or "")
-        if artifact_type not in {"chart", "export", "report"}:
-            raise ValueError("仅支持回收 chart/export/report 已登记产物")
+        if artifact_type not in {"chart", "export", "report", "xlsx", "docx", "pptx", "dashboard"}:
+            raise ValueError("仅支持回收已登记的分析产物")
         relative = _safe_relative_path(str(item.get("path") or ""))
         target = (root / relative).resolve(strict=False)
         if not target.is_file() or not _within(target, root):

@@ -96,7 +96,10 @@ def _metric_from_payload(payload: Mapping[str, object], columns: tuple[str, ...]
     )
     missing = {value_column, date_column, dimension} - set(columns)
     if missing:
-        raise ReportingContractError("metric columns missing from CSV source: " + ", ".join(sorted(missing)))
+        raise ReportingContractError(
+            "metric columns missing from CSV source: " + ", ".join(sorted(missing)),
+            code="source_columns_missing",
+        )
     metric_id = _bounded(payload.get("metric_id") or value_column, "metric_id", limit=120, required=True)
     label = _bounded(payload.get("label") or value_column, "label", limit=120, required=True)
     grain = _bounded(payload.get("grain") or "month", "grain", limit=40, required=True)
@@ -161,6 +164,108 @@ def _ledger() -> PersistentEvidenceLedger:
         # makes the dependency-free contract usable in local adapter tests.
         pass
     return PersistentEvidenceLedger(data_path("outputs", "pfs", "ledger", f"{scope}.json"))
+
+
+def _ledger_task_id(result: object, sid: str) -> str:
+    run_id = str(result.to_dict().get("run_id") or "")
+    return f"{sid}:{run_id}" if sid else run_id
+
+
+class _GovernedReportResult:
+    """Small explicit adapter that preserves the report result contract."""
+
+    def __init__(self, payload: dict):
+        self._payload = payload
+
+    def to_dict(self) -> dict:
+        return self._payload
+
+
+def _governance_result(result: object, sid: str = "") -> dict:
+    """Persist deterministic report claims and return their hydrated detail.
+
+    The report UI and the Ledger must refer to the same records.  Session
+    prefixes keep local single-user ledgers from allowing one session to
+    accidentally decide another session's report.
+    """
+    payload = result.to_dict()
+    task_id = _ledger_task_id(result, sid)
+    ledger = _ledger()
+    evidence = payload.get("evidence") or []
+    ledger_entries = []
+    for item in evidence:
+        # The ledger identity is deliberately project-scoped, while Claim
+        # links are task-scoped.  A repeated run may therefore need its own
+        # ledger entry when the same snapshot was already registered by a
+        # different task; keep the canonical URL/snippet and add a stable
+        # task discriminator only for that collision.
+        source_url = (
+            f"https://pfs.local/source/{payload['snapshot'].get('source_id', 'unknown')}"
+            f"?sha256={payload['snapshot'].get('content_sha256', '')}"
+        )
+        snippet = str(item.get("excerpt") or "")
+        existing = next(
+            (candidate for candidate in ledger.list_evidence(task_id)
+             if candidate.snippet == snippet and candidate.source_url == source_url),
+            None,
+        )
+        if existing is None and any(candidate.snippet == snippet for candidate in ledger.list_evidence()):
+            source_url += "&task=" + hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:16]
+        entry, _ = ledger.register(EvidenceCandidate(
+            source_url=source_url,
+            snippet=snippet,
+            task_id=task_id,
+            title=str(payload["snapshot"].get("file_name") or "PFS 数据快照"),
+            source_type="tabular_snapshot",
+            trust_level="computed",
+            content_sha256=str(item.get("content_sha256") or payload["snapshot"].get("content_sha256") or ""),
+        ))
+        ledger_entries.append(entry)
+    entry_by_report_id = {item.get("evidence_id"): entry for item, entry in zip(evidence, ledger_entries)}
+    hydrated_claims = []
+    for raw in payload.get("claims") or []:
+        original_claim_id = str(raw.get("claim_id") or "")
+        claim_id = original_claim_id
+        candidate_claim = ClaimRecord(
+            claim_id=claim_id, task_id=task_id, text=str(raw.get("text") or ""),
+            status=str(raw.get("status") or "unverified"),
+            confidence=float(raw.get("confidence") or 0),
+        )
+        claim = ledger.get_claim(claim_id)
+        if claim is not None and (claim.task_id != candidate_claim.task_id or claim.text != candidate_claim.text):
+            # Legacy deterministic reports used only run_id in claim IDs.
+            # Keep that public ID when it is safe, but derive a stable
+            # task-scoped ID on collision so one session cannot overwrite
+            # another session's governance record.
+            claim_id = (
+                f"{original_claim_id}_"
+                f"{hashlib.sha256(task_id.encode('utf-8')).hexdigest()[:12]}"
+            )
+            candidate_claim = ClaimRecord(
+                claim_id=claim_id, task_id=task_id, text=str(raw.get("text") or ""),
+                status=str(raw.get("status") or "unverified"),
+                confidence=float(raw.get("confidence") or 0),
+            )
+            claim = ledger.get_claim(claim_id)
+        if claim is None:
+            claim = ledger.create_claim(candidate_claim)
+        for report_evidence_id in raw.get("evidence_ids") or []:
+            entry = entry_by_report_id.get(report_evidence_id)
+            if entry is not None:
+                claim = ledger.link_claim(
+                    claim_id, evidence_id=entry.evidence_id, relation="supports",
+                    confidence=float(raw.get("confidence") or 0),
+                    verification_reason="由 PFS 确定性报表计算得到",
+                )
+        hydrated_claims.append(claim.to_dict())
+    payload["claims"] = hydrated_claims
+    payload["evidence"] = [
+        {**item, "evidence_id": entry.evidence_id, "source_url": entry.source_url,
+         "title": entry.title, "captured_at": entry.captured_at,
+         "publisher": entry.publisher, "published_at": entry.published_at}
+        for item, entry in zip(evidence, ledger_entries)
+    ]
+    return payload
 
 
 def _error(exc: Exception, status: int = 400):
@@ -433,6 +538,28 @@ def _delivery_artifacts(result: object, data_source: object, sid: str, output_fo
         session_id=sid,
         color_scheme="pfs",
     )
+    artifact_id = f"pfs:{run_id}:{output_format}"
+    chart_specs = _dashboard_widgets(result, selected_table)
+    agent._artifact_metadata = {
+        "artifact_id": artifact_id,
+        "run_id": payload["run_id"],
+        "source_id": payload["snapshot"].get("source_id", ""),
+        "source_sha256": payload["snapshot"].get("content_sha256", ""),
+        "worksheet": payload["snapshot"].get("worksheet", ""),
+        "included_rows": payload["snapshot"].get("row_count", 0),
+        "metric_contract": metric,
+        "analysis_parameters": payload.get("request", {}),
+        "sql": [widget.get("sql", "") for widget in chart_specs],
+        "chart_specs": chart_specs,
+        "final_claims": [item.get("text", "") for item in payload.get("claims", [])],
+        "warnings": list(payload.get("warnings", [])),
+        "claim_ids": [item.get("claim_id") for item in payload.get("claims", [])],
+        "evidence_ids": [item.get("evidence_id") for item in payload.get("evidence", [])],
+        "claim_details": list(payload.get("claims", [])),
+        "evidence_details": list(payload.get("evidence", [])),
+        "download_count": 0,
+        "download_history": [],
+    }
     if output_format == "xlsx":
         tool_result = agent._tool_export_excel([selected_table], f"pfs-report-{run_id}")
     elif output_format == "docx":
@@ -446,27 +573,71 @@ def _delivery_artifacts(result: object, data_source: object, sid: str, output_fo
     else:
         tool_result = agent._tool_generate_dashboard(
             f"PFS {metric['label']}分析看板",
-            _dashboard_widgets(result, selected_table),
+            chart_specs,
             "pfs",
         )
     if str(tool_result).startswith("❌"):
-        raise ReportingContractError(str(tool_result).removeprefix("❌").strip())
+        raise ReportingContractError(
+            str(tool_result).removeprefix("❌").strip(),
+            code="delivery_generation_failed",
+        )
     artifacts = []
     for label, url in _tool_links(str(tool_result)):
         path_name = Path(unquote(urlparse(url).path)).name
         kind = "dashboard" if "/dashboard/" in url and "/api/" not in url else output_format
+        if kind != "dashboard":
+            url = f"{url}{'&' if '?' in url else '?'}artifact_id={artifact_id}"
+        if kind == "dashboard":
+            from infrastructure.artifact_lifecycle import register_artifact
+            from api.dashboard import _dashboard_path
+            dashboard_path = Path(_dashboard_path(path_name))
+            if dashboard_path.is_file():
+                try:
+                    register_artifact(
+                        dashboard_path,
+                        artifact_type="dashboard",
+                        session_id=sid,
+                        artifact_id=artifact_id,
+                        metadata=agent._artifact_metadata,
+                    )
+                except ValueError:
+                    # Test/custom dashboard roots may intentionally live outside
+                    # the managed data root; lifecycle registration stays conservative.
+                    pass
         artifacts.append(
             {
+                "artifact_id": artifact_id,
                 "type": kind,
                 "name": path_name or re.sub(r"^[^\w]+", "", label) or f"PFS {output_format}",
                 "label": re.sub(r"^[^\w\u4e00-\u9fff]+", "", label),
                 "url": url,
                 "action": "open" if kind == "dashboard" else "download",
+                "run_id": agent._artifact_metadata["run_id"],
+                "source_sha256": agent._artifact_metadata["source_sha256"],
+                "worksheet": agent._artifact_metadata["worksheet"],
+                "included_rows": agent._artifact_metadata["included_rows"],
+                "metric_contract": agent._artifact_metadata["metric_contract"],
+                "analysis_parameters": agent._artifact_metadata["analysis_parameters"],
+                "sql": agent._artifact_metadata["sql"],
+                "chart_specs": agent._artifact_metadata["chart_specs"],
+                "final_claims": agent._artifact_metadata["final_claims"],
+                "warnings": agent._artifact_metadata["warnings"],
+                "claim_ids": agent._artifact_metadata["claim_ids"],
+                "evidence_ids": agent._artifact_metadata["evidence_ids"],
+                "claim_details": agent._artifact_metadata["claim_details"],
+                "evidence_details": agent._artifact_metadata["evidence_details"],
             }
         )
     if not artifacts:
         raise ReportingContractError("export completed without a downloadable artifact")
-    return {"ok": True, "format": output_format, "artifacts": artifacts, "message": str(tool_result)}
+    return {
+        "ok": True,
+        "format": output_format,
+        "run_id": payload["run_id"],
+        "source_sha256": payload["snapshot"].get("content_sha256", ""),
+        "artifacts": artifacts,
+        "message": str(tool_result),
+    }
 
 
 def _fixture_export_result(payload: Mapping[str, object]) -> object:
@@ -614,9 +785,11 @@ def deliver_fixture_report():
             str(resource_path("data", "fixtures", "pfs_sales.csv")),
             "pfs_sales.csv",
         )
+        result = _fixture_export_result(payload)
+        governed = _governance_result(result)
         return jsonify(
             _delivery_artifacts(
-                _fixture_export_result(payload),
+                _GovernedReportResult(governed),
                 data_source,
                 "",
                 output_format,
@@ -637,9 +810,11 @@ def deliver_session_report(sid: str):
         output_format = _delivery_format(payload)
         source_id = _bounded(payload.get("source_id"), "source_id", limit=160, required=True)
         _path, data_source = _session_tabular_source(sid, source_id)
+        result = _session_export_result(sid, payload)
+        governed = _governance_result(result, sid)
         return jsonify(
             _delivery_artifacts(
-                _session_export_result(sid, payload),
+                _GovernedReportResult(governed),
                 data_source,
                 sid,
                 output_format,
@@ -672,7 +847,7 @@ def fixture_analysis():
         )
     except (TypeError, ValueError) as exc:
         return _error(exc)
-    return jsonify({"ok": True, "result": result.to_dict()})
+    return jsonify({"ok": True, "result": _governance_result(result)})
 
 
 @bp.get("/api/session/<sid>/pfs/sources")
@@ -798,7 +973,7 @@ def session_pfs_analysis(sid: str):
                 "source_id": source_id,
                 "name": str(getattr(source, "name", "") or path.name),
             },
-            "result": result.to_dict(),
+            "result": _governance_result(result, sid),
         }
     )
 
@@ -842,7 +1017,7 @@ def session_pfs_query(sid: str):
             "ok": True,
             "source": {"source_id": source_id, "name": str(getattr(source, "name", "") or path.name)},
             "interpretation": parsed.to_dict(),
-            "result": result.to_dict(),
+            "result": _governance_result(result, sid),
         }
     )
 
@@ -920,6 +1095,59 @@ def get_ledger_claim(claim_id: str):
     except (TypeError, ValueError, OSError) as exc:
         return _error(exc, 404 if "does not exist" in str(exc) else 400)
     return jsonify({"ok": True, **detail})
+
+
+@bp.get("/api/session/<sid>/pfs/ledger/claims/<claim_id>")
+@require_session_ownership
+def get_session_ledger_claim(sid: str, claim_id: str):
+    """Read one Claim and its Evidence only inside its session namespace."""
+    try:
+        task_id = _bounded(request.args.get("task_id"), "task_id", limit=300, required=True)
+        if not task_id.startswith(f"{sid}:"):
+            raise LedgerError("claim task is outside this session")
+        detail = _ledger().claim_detail(_bounded(claim_id, "claim_id", limit=160, required=True))
+        if detail["claim"].get("task_id") != task_id:
+            raise LedgerError("claim does not belong to this session")
+    except (TypeError, ValueError, OSError) as exc:
+        return _error(
+            exc,
+            404
+            if any(token in str(exc) for token in ("does not belong", "outside this session", "does not exist"))
+            else 400,
+        )
+    return jsonify({"ok": True, **detail})
+
+
+@bp.post("/api/session/<sid>/pfs/ledger/claims/<claim_id>/decision")
+@require_session_ownership
+def decide_session_ledger_claim(sid: str, claim_id: str):
+    """Decide only a Claim created by this session's report run."""
+    try:
+        payload = _body()
+        task_id = _bounded(payload.get("task_id"), "task_id", limit=300, required=True)
+        if not task_id.startswith(f"{sid}:"):
+            raise LedgerError("claim task is outside this session")
+        ledger = _ledger()
+        before = ledger.get_claim(_bounded(claim_id, "claim_id", limit=160, required=True))
+        if before is None or before.task_id != task_id:
+            raise LedgerError("claim does not belong to this session")
+        decision = _bounded(payload.get("decision"), "decision", limit=120, required=True)
+        reason = _bounded(payload.get("reason"), "reason", limit=1000)
+        result = ledger.decide_claim(claim_id, decision, reason=reason)
+        from infrastructure.artifact_lifecycle import record_governance_decision
+        record_governance_decision(
+            claim_id=claim_id, task_id=task_id,
+            previous_decision=before.human_decision, decision=decision,
+            reason=reason, session_id=sid,
+        )
+    except (TypeError, ValueError, OSError) as exc:
+        return _error(
+            exc,
+            404
+            if any(token in str(exc) for token in ("does not belong", "outside this session", "does not exist"))
+            else 400,
+        )
+    return jsonify({"ok": True, "claim": result.to_dict()})
 
 
 @bp.post("/api/pfs/ledger/claims/<claim_id>/links")

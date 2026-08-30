@@ -52,7 +52,10 @@ import { ensureUiIsland } from "../features/vue-app.js";
   }
 
   function callbacks() {
-    return { onCancel: cancelJob, onRefresh: refresh, onClearCompleted: clearCompleted };
+    return {
+      onCancel: cancelJob, onRefresh: refresh, onClearCompleted: clearCompleted,
+      onArtifactDetail: loadArtifactDetail,
+    };
   }
 
   async function fetchJobs(targetSid = sid, limit = 100) {
@@ -61,6 +64,33 @@ import { ensureUiIsland } from "../features/vue-app.js";
     if (!response.ok) throw new Error(`Job history request failed (${response.status})`);
     const data = await response.json();
     return Array.isArray(data.jobs) ? data.jobs : [];
+  }
+
+  async function fetchRegisteredArtifacts(targetSid = sid, limit = 100) {
+    if (!targetSid) return [];
+    const response = await fetch(
+      `/api/session/${encodeURIComponent(targetSid)}/lifecycle/artifacts?limit=${limit}`,
+    );
+    if (!response.ok) throw new Error(`Artifact history request failed (${response.status})`);
+    const data = await response.json();
+    return Array.isArray(data.artifacts) ? data.artifacts : [];
+  }
+
+  async function fetchArtifactDetail(artifactId) {
+    if (!sid || !artifactId) return null;
+    const response = await fetch(
+      `/api/session/${encodeURIComponent(sid)}/lifecycle/artifacts/${encodeURIComponent(artifactId)}`,
+    );
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Artifact detail request failed (${response.status})`);
+    return data.artifact || null;
+  }
+
+  async function loadArtifactDetail(artifactId) {
+    const detail = await fetchArtifactDetail(artifactId);
+    if (!detail) return null;
+    getUiIsland("jobHistory")?.updateRegisteredArtifact?.(detail);
+    return detail;
   }
 
   async function hasHistory(targetSid) {
@@ -130,6 +160,7 @@ import { ensureUiIsland } from "../features/vue-app.js";
     vue.setError("");
     try {
       vue.setJobs(await fetchJobs(), callbacks());
+      vue.setRegisteredArtifacts?.(await fetchRegisteredArtifacts());
       await replay();
     } catch (error) {
       vue.setError(error?.message || String(error));

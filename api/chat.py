@@ -492,7 +492,9 @@ def _build_agent(
 ) -> BusinessAgent:
     provider = sess.model_provider or config_manager.get_default_provider()
     if not provider:
-        raise ValueError("未配置任何 LLM 模型，请先在「模型设置」中添加模型。")
+        error = ValueError("未配置任何 LLM 模型，请先在「模型设置」中添加模型。")
+        error.code = "model_not_configured"
+        raise error
     from LLM.llm_config_manager import get_llm_client
     client = get_llm_client(provider)
     cfg = config_manager.get_config(provider)
@@ -1020,8 +1022,9 @@ def chat_stream(sid: str):
             log.error("[chat] build_agent failed  sid=%s  error=%s", sid, exc)
             runner.fail_tracked(conversation_job_id, str(exc))
             source_snapshot.release()
-            _record_prompt_command_metric("error", "agent_build_failed")
-            yield _sse({"type": "error", "message": str(exc)})
+            error_code = str(getattr(exc, "code", "agent_build_failed"))
+            _record_prompt_command_metric("error", error_code)
+            yield _sse({"type": "error", "message": str(exc), "code": error_code})
             yield _sse({"type": "done"})
             return
 
@@ -1476,7 +1479,7 @@ def chat_stream(sid: str):
                 error_context = hook_context.child(event_name="error", error=str(exc))
                 for notification in hook_engine.run_hooks("error", error_context):
                     yield _sse(notification.to_event())
-            yield _sse({"type": "error", "message": f"内部错误：{exc}"})
+            yield _sse({"type": "error", "message": f"内部错误：{exc}", "code": "agent_runtime_failed"})
 
         finally:
             conversation_scope.__exit__(None, None, None)

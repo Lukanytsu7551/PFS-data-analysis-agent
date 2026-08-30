@@ -1678,13 +1678,19 @@ import { loadSavedList } from "../legacy/sessions.js";
     if (state.askUserPending) return;
     _cancelTailActivity();
     _hideToolActivity(ctx);
+    const guidance = {
+      model_not_configured: "请先打开模型设置，配置 DeepSeek 或其他可用模型，再重试。",
+      agent_build_failed: "请检查模型配置和数据源权限后重试。",
+      agent_runtime_failed: "本次分析未完成；请检查数据源和网络后重试。",
+    }[ev.code];
+    const displayMessage = guidance ? String(ev.message || "") + " " + guidance : ev.message;
     if (getUiIsland("chat") && getUiIsland("chat").setError) {
-      if (getUiIsland("chat").setError(ctx.bubbleEl, ev.message, ctx.typing)) return;
+      if (getUiIsland("chat").setError(ctx.bubbleEl, displayMessage, ctx.typing)) return;
     }
     if (ctx.typing.parentNode) ctx.typing.remove();
     const span = document.createElement("span");
     span.className = "stream-error";
-    span.textContent = `⚠ ${ev.message}`;
+    span.textContent = `⚠ ${displayMessage}`;
     ctx.bubbleEl.appendChild(span);
   }
 

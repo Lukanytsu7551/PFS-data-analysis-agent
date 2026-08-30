@@ -52,6 +52,7 @@ function setStatus(status) {
     running: translate("pfs_report.running", "计算中"),
     completed: translate("pfs_report.completed", "已完成"),
     error: translate("pfs_report.error", "报表预览加载失败"),
+    canceled: translate("pfs_report.canceled", "已取消"),
   };
   element.textContent = labels[status] || status;
 }
@@ -92,7 +93,15 @@ function errorGuidance(code, message) {
     worksheet_not_found: translate("pfs_report.error_worksheet_missing", "工作表已变化，请刷新数据源后重新选择。"),
     source_header_missing: translate("pfs_report.error_header_missing", "请在第一行补充完整且不为空的字段名。"),
     source_has_no_rows: translate("pfs_report.error_no_rows", "请在表头下至少保留一行有效数据。"),
+    source_columns_missing: translate("pfs_report.error_columns_missing", "请确认指标列、日期列和分组列都存在于数据源中。"),
+    source_date_invalid: translate("pfs_report.error_date_invalid", "请将日期列统一为 YYYY-MM 或 YYYY-MM-DD，并修正无效日期。"),
+    date_filter_invalid: translate("pfs_report.error_date_filter_invalid", "请检查起止日期格式，并确保开始日期不晚于结束日期。"),
     metric_value_not_numeric: translate("pfs_report.error_not_numeric", "请清理指标列中的文本或改选数值列。"),
+    delivery_table_missing: translate("pfs_report.error_delivery_table", "当前数据源没有可交付的表，请重新选择有效工作表。"),
+    upload_file_too_large: translate("pfs_report.error_file_too_large", "请压缩文件或拆分后再上传，单文件上限为 100 MB。"),
+    model_not_configured: translate("pfs_report.error_model_not_configured", "请先在模型设置中配置 DeepSeek 或其他可用模型，再运行 Agent。"),
+    delivery_generation_failed: translate("pfs_report.error_delivery_generation", "交付物生成失败，请检查输出目录权限后重试。"),
+    delivery_table_ambiguous: translate("pfs_report.error_delivery_ambiguous", "请先明确选择一个工作表，再生成交付物。"),
   };
   return guidance[code] ? `${message} ${guidance[code]}` : message;
 }
@@ -181,6 +190,15 @@ function renderDeliveryArtifacts() {
       makeElement("strong", "", artifact.label || artifact.name || "PFS 交付物"),
       makeElement("span", "", artifact.name || artifact.type || ""),
     );
+    const lineage = [
+      artifact.run_id ? "运行 " + artifact.run_id : "",
+      artifact.included_rows != null ? "覆盖 " + artifact.included_rows + " 行" : "",
+      artifact.worksheet ? "工作表 " + artifact.worksheet : "",
+      artifact.source_sha256 ? "快照 " + (artifact.source_sha256 || "").slice(0, 12) + "…" : "",
+      Array.isArray(artifact.claim_ids) ? artifact.claim_ids.length + " 条结论" : "",
+      Array.isArray(artifact.evidence_ids) ? artifact.evidence_ids.length + " 条证据" : "",
+    ].filter(Boolean).join(" · ");
+    if (lineage) details.append(makeElement("small", "pfs-report-delivery-lineage", lineage));
     const link = makeElement(
       "a",
       "btn-sm btn-sm-ghost",
@@ -489,6 +507,9 @@ function renderClaims(result) {
       ),
     );
     const relation = claim.relation || claim.evidence_relation;
+    const links = Array.isArray(claim.evidence_links) ? claim.evidence_links : [];
+    const supports = links.filter((link) => link.relation === "supports");
+    const refutes = links.filter((link) => link.relation === "refutes");
     const verificationReason = claim.verification_reason;
     const decision = claim.human_decision || claim.decision;
     const meta = makeElement(
@@ -506,6 +527,12 @@ function renderClaims(result) {
           `${translate("pfs_report.relation", "关系")}: ${relation}`,
         ),
       );
+    if (supports.length)
+      details.append(makeElement("span", "pfs-report-claim-detail pfs-report-relation-supports",
+        "支持证据: " + supports.map((link) => link.evidence_id).join("、")));
+    if (refutes.length)
+      details.append(makeElement("span", "pfs-report-claim-detail pfs-report-relation-refutes",
+        "反驳证据: " + refutes.map((link) => link.evidence_id).join("、")));
     if (verificationReason)
       details.append(
         makeElement(
@@ -546,11 +573,84 @@ function renderEvidence(result) {
       ),
     );
     card.append(makeElement("code", "pfs-report-evidence-locator", evidence.locator || "—"));
+    if (evidence.source_url || evidence.title || evidence.publisher || evidence.captured_at)
+      card.append(makeElement("small", "pfs-report-evidence-details",
+        [evidence.title, evidence.publisher, evidence.published_at ? "发布 " + evidence.published_at : "",
+          evidence.captured_at ? "抓取 " + evidence.captured_at : "", evidence.source_url].filter(Boolean).join(" · ")));
     card.append(makeElement("p", "pfs-report-evidence-excerpt", evidence.excerpt || ""));
     list.append(card);
   }
   section.append(list);
   return section;
+}
+
+function renderConflictQueue(result) {
+  const conflicts = (result.claims || []).filter((claim) => {
+    const relations = new Set((claim.evidence_links || []).map((link) => link.relation));
+    return (relations.has("supports") && relations.has("refutes")) || claim.status === "conflicted";
+  });
+  if (!conflicts.length) return null;
+  const section = makeElement("section", "pfs-report-section pfs-report-conflicts");
+  section.append(makeElement("h3", "pfs-report-section-title", "冲突待裁决"));
+  const list = makeElement("ul", "pfs-report-conflict-list");
+  for (const claim of conflicts) {
+    const item = makeElement("li", "pfs-report-conflict-item");
+    item.append(makeElement("div", "pfs-report-conflict-copy",
+      (claim.claim_id || "claim") + ": " + (claim.text || "—") + " · 请人工确认支持与反驳证据"));
+    const actions = makeElement("div", "pfs-report-conflict-actions");
+    for (const [decision, label] of [["支持", "确认支持"], ["反驳", "确认反驳"], ["保留待确认", "保留待确认"]]) {
+      const button = makeElement("button", "btn-sm btn-sm-ghost", label);
+      button.type = "button";
+      button.dataset.claimDecision = decision;
+      button.dataset.claimId = claim.claim_id || "";
+      button.addEventListener("click", () => void decideClaim(claim, decision, button));
+      actions.append(button);
+    }
+    item.append(actions);
+    list.append(item);
+  }
+  section.append(list);
+  return section;
+}
+
+async function decideClaim(claim, decision, button) {
+  const claimId = String(claim?.claim_id || "").trim();
+  if (!claimId || button?.disabled) return;
+  const accepted = await (globalThis.PFS?.ui?.confirm?.({
+    title: "确认人工裁决",
+    message: "将把结论“" + (claim.text || claimId) + "”标记为“" + decision + "”。该操作会写入核验记录，是否继续？",
+    confirmText: "确认裁决",
+    cancelText: "取消",
+  }) ?? window.confirm("确认将该结论标记为“" + decision + "”并写入核验记录吗？"));
+  if (accepted === false) return;
+  button.disabled = true;
+  try {
+    const taskId = String(state.result?.run_id || "").trim();
+    const sessionId = String(
+      globalThis.PFS?.state?.SID ||
+      globalThis.PFS?.storage?.sessionGet?.("session_id") ||
+      globalThis.PFS?.storage?.get?.("session_id") ||
+      ""
+    ).trim();
+    const endpoint = sessionId
+      ? "/api/session/" + encodeURIComponent(sessionId) + "/pfs/ledger/claims/" + encodeURIComponent(claimId) + "/decision"
+      : "/api/pfs/ledger/claims/" + encodeURIComponent(claimId) + "/decision";
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision, reason: "报表界面人工裁决", task_id: sessionId ? sessionId + ":" + taskId : taskId }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok || !payload.claim) {
+      throw new Error(payload.error || ("HTTP " + response.status));
+    }
+    const index = (state.result?.claims || []).findIndex((item) => item.claim_id === claimId);
+    if (index >= 0) state.result.claims[index] = payload.claim;
+    renderResult(state.result);
+  } catch (error) {
+    button.disabled = false;
+    renderError("人工裁决失败：" + String(error?.message || error), "claim_decision_failed");
+  }
 }
 
 function renderWarnings(result) {
@@ -576,6 +676,8 @@ function renderResult(result) {
     renderClaims(result),
     renderEvidence(result),
   ];
+  const conflicts = renderConflictQueue(result);
+  if (conflicts) children.splice(3, 0, conflicts);
   const warnings = renderWarnings(result);
   if (warnings) children.push(warnings);
   content.replaceChildren(...children);
@@ -752,7 +854,9 @@ async function exportReport(format = "json") {
     });
     if (!response.ok) {
       const errorPayload = await response.json().catch(() => ({}));
-      throw new Error(errorPayload.error || `HTTP ${response.status}`);
+      const error = new Error(errorPayload.error || `HTTP ${response.status}`);
+      error.code = errorPayload.code || "";
+      throw error;
     }
     const blob = await response.blob();
     const fallback = `pfs-report.${format}`;
@@ -808,8 +912,11 @@ async function generateDelivery(format) {
       body: JSON.stringify(exportPayload(format)),
     });
     const payload = await response.json();
-    if (!response.ok || !payload.ok || !Array.isArray(payload.artifacts))
-      throw new Error(payload.error || `HTTP ${response.status}`);
+    if (!response.ok || !payload.ok || !Array.isArray(payload.artifacts)) {
+      const error = new Error(payload.error || `HTTP ${response.status}`);
+      error.code = payload.code || "";
+      throw error;
+    }
     const knownUrls = new Set(state.deliveryArtifacts.map((artifact) => artifact.url));
     for (const artifact of payload.artifacts) {
       if (artifact?.url && !knownUrls.has(artifact.url)) {
@@ -826,7 +933,7 @@ async function generateDelivery(format) {
     );
   } catch (error) {
     setDeliveryStatus(
-      `${translate("pfs_report.delivery_failed", "生成失败")}: ${String(error?.message || error)}`,
+      `${translate("pfs_report.delivery_failed", "生成失败")}: ${errorGuidance(error?.code, String(error?.message || error))}`,
       "error",
     );
   } finally {

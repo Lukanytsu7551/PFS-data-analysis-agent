@@ -1,4 +1,5 @@
 import json
+import os
 import unittest
 import uuid
 from pathlib import Path
@@ -9,6 +10,8 @@ import pandas as pd
 
 from api import create_app
 from api.state import session_manager
+from infrastructure.artifact_lifecycle import register_artifact
+from infrastructure.paths import data_path
 from agent.agent import BusinessAgent
 
 
@@ -26,6 +29,66 @@ class PfsDeliveryArtifactTests(unittest.TestCase):
     def tearDown(self):
         session_manager.remove(self.sid)
 
+    def test_session_artifact_history_is_scoped_and_returns_lineage_metadata(self):
+        other_sid = f"pfs-other-{uuid.uuid4().hex[:12]}"
+        session_manager.get_or_create(other_sid)
+        try:
+            with TemporaryDirectory() as tmp, patch.dict(os.environ, {"PFS_DATA_DIR": tmp}, clear=False):
+                output_dir = data_path("outputs", "exports")
+                output_dir.mkdir(parents=True, exist_ok=True)
+                artifact_path = output_dir / "scoped.xlsx"
+                artifact_path.write_bytes(b"pfs artifact")
+                artifact_id = register_artifact(
+                    artifact_path, artifact_type="xlsx", session_id=self.sid,
+                    metadata={"run_id": "scoped-run", "claim_ids": [], "evidence_ids": [],
+                              "analysis_parameters": {"metric_id": "sales_amount"}},
+                )
+                listed = self.client.get(f"/api/session/{self.sid}/lifecycle/artifacts")
+                self.assertEqual(200, listed.status_code)
+                self.assertEqual(artifact_id, listed.get_json()["artifacts"][0]["id"])
+                self.assertEqual("scoped-run", listed.get_json()["artifacts"][0]["run_id"])
+                self.assertIn("/download", listed.get_json()["artifacts"][0]["download_url"])
+                self.assertNotIn("lineage", listed.get_json()["artifacts"][0])
+                detail = self.client.get(f"/api/session/{self.sid}/lifecycle/artifacts/{artifact_id}")
+                self.assertEqual(200, detail.status_code)
+                self.assertEqual(artifact_id, detail.get_json()["artifact"]["id"])
+                self.assertIn("lineage", detail.get_json()["artifact"])
+                downloaded = self.client.get(f"/api/session/{self.sid}/lifecycle/artifacts/{artifact_id}/download")
+                self.assertEqual(200, downloaded.status_code)
+                self.assertEqual(b"pfs artifact", downloaded.data)
+                self.assertEqual(1, self.client.get(f"/api/session/{self.sid}/lifecycle/artifacts/{artifact_id}").get_json()["artifact"]["download_count"])
+                cross_session = self.client.get(f"/api/session/{other_sid}/lifecycle/artifacts/{artifact_id}")
+                self.assertEqual(404, cross_session.status_code)
+                self.assertEqual("artifact_not_found", cross_session.get_json()["code"])
+                self.assertEqual(404, self.client.get(f"/api/session/{other_sid}/lifecycle/artifacts/{artifact_id}/download").status_code)
+        finally:
+            session_manager.remove(other_sid)
+
+    def test_registered_artifact_recycle_restore_is_recoverable_and_idempotent(self):
+        with TemporaryDirectory() as tmp, patch.dict(os.environ, {"PFS_DATA_DIR": tmp}, clear=False):
+            output_dir = data_path("outputs", "exports")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            artifact_path = output_dir / "restore-me.xlsx"
+            artifact_path.write_bytes(b"recoverable pfs artifact")
+            artifact_id = register_artifact(
+                artifact_path, artifact_type="xlsx", session_id=self.sid,
+                metadata={"run_id": "restore-run"},
+            )
+            recycled = self.client.post(
+                "/api/lifecycle/artifacts/registered/recycle",
+                json={"artifact_id": artifact_id},
+            )
+            self.assertEqual(200, recycled.status_code, recycled.get_data(as_text=True))
+            trash_id = recycled.get_json()["summary"]["trash_id"]
+            self.assertEqual([], self.client.get(f"/api/session/{self.sid}/lifecycle/artifacts").get_json()["artifacts"])
+            restored = self.client.post(f"/api/lifecycle/artifact-trash/{trash_id}/restore")
+            self.assertEqual(200, restored.status_code, restored.get_data(as_text=True))
+            restored_items = self.client.get(f"/api/session/{self.sid}/lifecycle/artifacts").get_json()["artifacts"]
+            self.assertEqual([artifact_id], [item["id"] for item in restored_items])
+            self.assertTrue(artifact_path.is_file())
+            repeated = self.client.post(f"/api/lifecycle/artifact-trash/{trash_id}/restore")
+            self.assertEqual(404, repeated.status_code)
+
     def test_fixture_delivery_generates_parseable_office_files(self):
         with TemporaryDirectory() as tmp, patch.object(
             BusinessAgent, "_get_export_dir", return_value=tmp
@@ -41,6 +104,15 @@ class PfsDeliveryArtifactTests(unittest.TestCase):
                     self.assertTrue(payload["ok"])
                     artifact = payload["artifacts"][0]
                     self.assertEqual(output_format, artifact["type"])
+                    self.assertEqual(f"delivery-{output_format}", artifact["run_id"])
+                    self.assertTrue(artifact["source_sha256"])
+                    self.assertEqual(2, len(artifact["claim_ids"]))
+                    self.assertEqual(1, len(artifact["evidence_ids"]))
+                    self.assertIn("analysis_parameters", artifact)
+                    self.assertTrue(artifact["sql"])
+                    self.assertEqual(2, len(artifact["chart_specs"]))
+                    self.assertEqual(2, len(artifact["final_claims"]))
+                    self.assertIn("metric_id", artifact["analysis_parameters"])
                     self.assertTrue(artifact["name"].endswith(extension))
                     self.assertTrue((Path(tmp) / artifact["name"]).is_file())
 

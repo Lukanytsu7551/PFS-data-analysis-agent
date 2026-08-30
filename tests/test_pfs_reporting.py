@@ -176,6 +176,25 @@ class PfsReportingTests(unittest.TestCase):
         self.assertEqual("unverified", result.status)
         self.assertIn("筛选条件下没有匹配的数据行。", result.warnings)
 
+    def test_invalid_dates_and_reversed_date_filters_have_explicit_codes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bad-date.csv"
+            path.write_text("month,region,sales_amount\n2026-02-30,华东,1200\n", encoding="utf-8")
+            with self.assertRaises(ReportingContractError) as source_error:
+                analyze_file(path, metric=METRIC, request=self._request("bad-date"))
+        self.assertEqual("source_date_invalid", source_error.exception.code)
+        with self.assertRaises(ReportingContractError) as filter_error:
+            self._request("reversed", date_from="2026-03", date_to="2026-01")
+        self.assertEqual("date_range_invalid", filter_error.exception.code)
+
+    def test_missing_metric_columns_have_explicit_code(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "missing-column.csv"
+            path.write_text("month,region\n2026-01,华东\n", encoding="utf-8")
+            with self.assertRaises(ReportingContractError) as error:
+                analyze_file(path, metric=METRIC, request=self._request("missing-column"))
+        self.assertEqual("source_columns_missing", error.exception.code)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,7 +13,7 @@ export function mountJobHistoryUi() {
 
   const { h, render, reactive } = Vue;
   const state = reactive({
-    open: false, loading: false, error: "", jobs: [], focusJobId: "",
+    open: false, loading: false, error: "", jobs: [], registeredArtifacts: [], focusJobId: "",
   });
   let callbacks = {};
 
@@ -162,8 +162,94 @@ export function mountJobHistoryUi() {
     const name = artifact.filename || artifact.name || artifact.label || `${typeName} ${index + 1}`;
     const href = artifact.url || artifact.download_url || "";
     return href
-      ? h("a", { class: "job-history-artifact", href, target: "_blank", rel: "noopener" }, `↗ ${name}`)
+      ? h("a", { class: "job-history-artifact", href, target: "_blank", rel: "noopener", download: true }, `↗ ${name}`)
       : h("span", { class: "job-history-artifact" }, `✓ ${name}`);
+  }
+
+  function renderRegisteredArtifact(artifact, index) {
+    const typeName = { xlsx: "Excel", docx: "Word", pptx: "PPT", dashboard: "Dashboard" };
+    const type = String(artifact.type || "").toLowerCase();
+    const label = typeName[type] || type || "交付物";
+    const lineage = [
+      artifact.run_id ? `运行 ${artifact.run_id}` : "",
+      artifact.worksheet ? `工作表 ${artifact.worksheet}` : "",
+      artifact.included_rows != null ? `覆盖 ${artifact.included_rows} 行` : "",
+      artifact.source_sha256 ? `快照 ${(artifact.source_sha256 || "").slice(0, 12)}…` : "",
+      Array.isArray(artifact.claim_ids) ? `结论 ${artifact.claim_ids.length}` : "",
+      Array.isArray(artifact.evidence_ids) ? `证据 ${artifact.evidence_ids.length}` : "",
+      artifact.download_count != null ? `下载 ${artifact.download_count}` : "",
+    ].filter(Boolean).join(" · ");
+    const lineageDetails = artifact.lineage || {};
+    const claims = Array.isArray(lineageDetails.claims) ? lineageDetails.claims : [];
+    const evidence = Array.isArray(lineageDetails.evidence) ? lineageDetails.evidence : [];
+    const governanceAudit = Array.isArray(lineageDetails.governance_audit) ? lineageDetails.governance_audit : [];
+    const expanded = Boolean(artifact.lineageExpanded);
+    const detailLoading = Boolean(artifact.detailLoading);
+    const detailError = artifact.detailError || "";
+    const details = expanded ? h("div", { class: "job-history-artifact-details" }, [
+      claims.length ? h("div", { class: "job-history-artifact-detail-group" }, [
+        h("strong", null, "关键结论"),
+        ...claims.map(claim => h("div", { class: "job-history-artifact-claim", key: claim.claim_id }, [
+          h("span", { class: "job-history-artifact-claim-status" }, claim.status || "未核验"),
+          h("span", null, claim.text || claim.claim_id),
+          claim.human_decision ? h("small", null, "人工决定：" + claim.human_decision) : null,
+        ])),
+      ]) : null,
+      evidence.length ? h("div", { class: "job-history-artifact-detail-group" }, [
+        h("strong", null, "关联证据"),
+        ...evidence.map(item => h("div", { class: "job-history-artifact-evidence", key: item.evidence_id }, [
+          h("code", null, item.evidence_id || "evidence"),
+          h("span", null, item.snippet || item.source_url || ""),
+        ])),
+      ]) : null,
+      artifact.analysis_parameters ? h("div", { class: "job-history-artifact-detail-group" }, [
+        h("strong", null, "分析参数"),
+        h("pre", null, JSON.stringify(artifact.analysis_parameters, null, 2)),
+      ]) : null,
+      artifact.sql ? h("div", { class: "job-history-artifact-detail-group" }, [
+        h("strong", null, "生成 SQL"), h("code", { class: "job-history-artifact-sql" }, artifact.sql),
+      ]) : null,
+      Array.isArray(artifact.chart_specs) && artifact.chart_specs.length ? h("div", { class: "job-history-artifact-detail-group" }, [
+        h("strong", null, "图表规格"),
+        h("pre", null, JSON.stringify(artifact.chart_specs, null, 2)),
+      ]) : null,
+      Array.isArray(artifact.final_claims) && artifact.final_claims.length ? h("div", { class: "job-history-artifact-detail-group" }, [
+        h("strong", null, "最终结论"),
+        ...artifact.final_claims.map((claim, claimIndex) => h("div", { class: "job-history-artifact-final-claim", key: claimIndex }, String(claim))),
+      ]) : null,
+      Array.isArray(artifact.warnings) && artifact.warnings.length ? h("div", { class: "job-history-artifact-detail-group job-history-artifact-warnings" }, [
+        h("strong", null, "运行提示"),
+        ...artifact.warnings.map((warning, warningIndex) => h("div", { key: warningIndex }, String(warning))),
+      ]) : null,
+      governanceAudit.length ? h("div", { class: "job-history-artifact-detail-group" }, [
+        h("strong", null, "人工裁决记录"),
+        ...governanceAudit.map((event, eventIndex) => h("div", { class: "job-history-artifact-audit", key: eventIndex },
+          `${event.at || ""} · ${event.decision || ""}${event.reason ? `：${event.reason}` : ""}`,
+        )),
+      ]) : null,
+      !claims.length && !evidence.length && !governanceAudit.length && !artifact.analysis_parameters && !artifact.sql && !artifact.chart_specs?.length && !artifact.final_claims?.length && !artifact.warnings?.length
+        ? h("small", { class: "job-history-artifact-detail-empty" }, "关联详情暂不可用") : null,
+      detailError ? h("small", { class: "job-history-artifact-detail-error" }, detailError) : null,
+    ]) : null;
+    return h("article", { class: "job-history-registered-artifact", key: artifact.id || (type + "-" + index) }, [
+      h("div", { class: "job-history-registered-artifact-head" }, [
+        h("strong", null, label),
+        h("code", null, artifact.id || "artifact"),
+      ]),
+      lineage ? h("small", { class: "job-history-registered-artifact-lineage" }, lineage) : null,
+      artifact.download_url ? h("a", { class: "job-history-artifact-download", href: artifact.download_url, download: true }, "下载交付物") : null,
+      h("button", { class: "job-history-artifact-toggle", type: "button", disabled: detailLoading, onClick: async () => {
+        if (!expanded && !artifact.detailLoaded && callbacks.onArtifactDetail) {
+          artifact.detailLoading = true; artifact.detailError = ""; draw();
+          try { await callbacks.onArtifactDetail(artifact.id); artifact.detailLoaded = true; }
+          catch (error) { artifact.detailError = error?.message || "读取交付物详情失败"; }
+          finally { artifact.detailLoading = false; }
+        }
+        artifact.lineageExpanded = !artifact.lineageExpanded;
+        draw();
+      } }, detailLoading ? "正在读取详情…" : expanded ? "收起详情" : "读取完整详情"),
+      details,
+    ]);
   }
 
   function renderStep(step) {
@@ -274,8 +360,14 @@ export function mountJobHistoryUi() {
       ? h("div", { class: "job-history-empty" }, text("job.history.loading", "Loading…"))
       : state.error
         ? h("div", { class: "job-history-error" }, state.error)
-        : state.jobs.length
-          ? h("div", { class: "job-history-list" }, state.jobs.map(renderJob))
+        : state.jobs.length || state.registeredArtifacts.length
+          ? h("div", null, [
+            state.jobs.length ? h("div", { class: "job-history-list" }, state.jobs.map(renderJob)) : null,
+            state.registeredArtifacts.length ? h("section", { class: "job-history-registered-artifacts" }, [
+              h("h3", null, "本会话交付物"),
+              ...state.registeredArtifacts.map(renderRegisteredArtifact),
+            ]) : null,
+          ])
           : h("div", { class: "job-history-empty" }, text("job.history.empty", "No background jobs yet"));
     render(h("div", {
       class: "overlay open",
@@ -327,10 +419,19 @@ export function mountJobHistoryUi() {
   }
   function setLoading(loading) { state.loading = Boolean(loading); draw(); }
   function setError(error) { state.error = error || ""; draw(); }
-  function reset() { state.jobs = []; state.error = ""; state.loading = false; draw(); }
+  function setRegisteredArtifacts(artifacts) { state.registeredArtifacts = Array.isArray(artifacts) ? artifacts : []; draw(); }
+  function updateRegisteredArtifact(detail) {
+    const id = String(detail?.id || "");
+    const index = state.registeredArtifacts.findIndex(item => String(item.id || "") === id);
+    if (index < 0) return;
+    const expanded = state.registeredArtifacts[index].lineageExpanded;
+    state.registeredArtifacts[index] = { ...state.registeredArtifacts[index], ...detail, lineageExpanded: expanded, detailLoaded: true };
+    draw();
+  }
+  function reset() { state.jobs = []; state.registeredArtifacts = []; state.error = ""; state.loading = false; draw(); }
 
   registerUiIsland("jobHistory", {
-    setOpen, setLoading, setError, setJobs, applyEvent, reset, focus,
+    setOpen, setLoading, setError, setJobs, setRegisteredArtifacts, updateRegisteredArtifact, applyEvent, reset, focus,
     isOpen: () => state.open,
   });
 }

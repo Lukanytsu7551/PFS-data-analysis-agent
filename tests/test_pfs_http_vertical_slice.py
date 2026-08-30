@@ -86,6 +86,19 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         self.assertEqual(1, len(result["evidence"]))
         self.assertEqual("http-upload-run", result["request"]["run_id"])
 
+    def test_upload_rejects_oversized_file_with_explicit_code(self):
+        from api.datasource import MAX_UPLOAD_BYTES
+
+        response = self.client.post(
+            f"/api/session/{self.sid}/upload",
+            data={"file": (io.BytesIO(b"x" * (MAX_UPLOAD_BYTES + 1)), "too-large.csv")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(413, response.status_code)
+        payload = response.get_json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual("upload_file_too_large", payload["code"])
+
     def test_fixture_report_export_returns_server_recomputed_json_and_csv(self):
         json_response = self.client.post(
             "/api/pfs/export",
@@ -378,6 +391,69 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         self.assertEqual("worksheet_required", missing.get_json()["code"])
         self.assertEqual(400, unknown.status_code)
         self.assertEqual("worksheet_not_found", unknown.get_json()["code"])
+
+    def test_report_governance_is_idempotent_and_session_scoped(self):
+        uploaded = self._upload()
+        source_id = uploaded.get_json()["added"][0]["source_id"]
+        request = {
+            "source_id": source_id,
+            "run_id": "governance-idempotent",
+            "value_column": "sales_amount",
+            "date_column": "month",
+            "dimension": "region",
+        }
+
+        first = self.client.post(f"/api/session/{self.sid}/pfs/analyze", json=request)
+        second = self.client.post(f"/api/session/{self.sid}/pfs/analyze", json=request)
+        self.assertEqual(200, first.status_code)
+        self.assertEqual(200, second.status_code)
+        first_result = first.get_json()["result"]
+        second_result = second.get_json()["result"]
+        self.assertEqual(
+            [claim["claim_id"] for claim in first_result["claims"]],
+            [claim["claim_id"] for claim in second_result["claims"]],
+        )
+        task_id = f"{self.sid}:governance-idempotent"
+        ledger = self.client.get(f"/api/pfs/ledger?task_id={task_id}").get_json()
+        self.assertEqual(2, len(ledger["claims"]))
+        self.assertEqual(1, len(ledger["evidence"]))
+
+        claim_id = first_result["claims"][0]["claim_id"]
+        decided = self.client.post(
+            f"/api/session/{self.sid}/pfs/ledger/claims/{claim_id}/decision",
+            json={
+                "task_id": task_id,
+                "decision": "支持",
+                "reason": "端到端核验",
+            },
+        )
+        self.assertEqual(200, decided.status_code, decided.get_data(as_text=True))
+        self.assertEqual("支持", decided.get_json()["claim"]["human_decision"])
+        detail = self.client.get(
+            f"/api/session/{self.sid}/pfs/ledger/claims/{claim_id}?task_id={task_id}"
+        )
+        self.assertEqual(200, detail.status_code, detail.get_data(as_text=True))
+        self.assertEqual(claim_id, detail.get_json()["claim"]["claim_id"])
+        self.assertEqual(1, len(detail.get_json()["evidence"]))
+        wrong_task = self.client.get(
+            f"/api/session/{self.sid}/pfs/ledger/claims/{claim_id}?task_id={self.sid}:other"
+        )
+        self.assertEqual(404, wrong_task.status_code)
+
+        other_sid = f"pfs-http-other-{uuid.uuid4().hex[:12]}"
+        session_manager.get_or_create(other_sid)
+        try:
+            forbidden = self.client.post(
+                f"/api/session/{other_sid}/pfs/ledger/claims/{claim_id}/decision",
+                json={
+                    "task_id": task_id,
+                    "decision": "反驳",
+                    "reason": "不应跨会话裁决",
+                },
+            )
+            self.assertEqual(404, forbidden.status_code)
+        finally:
+            session_manager.remove(other_sid)
 
 
 if __name__ == "__main__":

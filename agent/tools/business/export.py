@@ -24,6 +24,18 @@ class ExportToolsMixin:
 
     # ── A5: export directory resolution ───────────────────────────────────────
 
+    def _register_export_artifact(self, path: Path, artifact_type: str) -> str:
+        """Register a generated file, optionally carrying a PFS lineage contract."""
+        metadata = getattr(self, "_artifact_metadata", None)
+        return register_artifact(
+            path,
+            artifact_type=artifact_type,
+            session_id=getattr(self, "_session_id", ""),
+            workspace_id=getattr(self, "_workspace_id", ""),
+            artifact_id=str((metadata or {}).get("artifact_id") or ""),
+            metadata=metadata,
+        )
+
     def _get_export_dir(self) -> str:
         """返回导出文件应该写入的目录。
 
@@ -85,7 +97,7 @@ class ExportToolsMixin:
             log.warning("[export] excel export failed: %s", exc)
             return f"❌ 导出失败：{exc}"
 
-        register_artifact(Path(filepath), artifact_type="export", session_id=getattr(self, "_session_id", ""), workspace_id=getattr(self, "_workspace_id", ""))
+        self._register_export_artifact(Path(filepath), "export")
         download_url = self._build_download_url(safe_name)
         return (
             f"✅ Excel 文件已生成，共 {len(tables)} 张表：{', '.join(tables)}。\n\n"
@@ -132,7 +144,7 @@ class ExportToolsMixin:
 
         n_charts = len(chart_htmls)
         chart_note = f"（含 {n_charts} 张图表）" if n_charts else ""
-        register_artifact(Path(_result_path), artifact_type="report", session_id=getattr(self, "_session_id", ""), workspace_id=getattr(self, "_workspace_id", ""))
+        self._register_export_artifact(Path(_result_path), "report")
         download_url = self._build_download_url(download_name)
         return (
             f"✅ 报告已生成，共 {len(sections)} 个章节{chart_note}。\n\n"
@@ -452,7 +464,7 @@ class ExportToolsMixin:
             log.warning("[export] PPT save failed: %s", exc)
             return f"❌ PPT 文件保存失败：{exc}"
 
-        register_artifact(Path(filepath), artifact_type="export", session_id=getattr(self, "_session_id", ""), workspace_id=getattr(self, "_workspace_id", ""))
+        self._register_export_artifact(Path(filepath), "export")
         download_url = self._build_download_url(safe_name)
         return (
             f"✅ PowerPoint 演示文稿已生成，共 **{total}** 张幻灯片。\n\n"

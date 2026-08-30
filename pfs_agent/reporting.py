@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -23,6 +24,31 @@ class ReportingContractError(ValueError):
     def __init__(self, message: str, *, code: str = "reporting_contract_invalid") -> None:
         super().__init__(message)
         self.code = code
+
+
+_DATE_PATTERNS = (re.compile(r"^\d{4}-\d{2}$"), re.compile(r"^\d{4}-\d{2}-\d{2}(?:[ T].*)?$"))
+
+
+def _date_key(value: str, *, code: str) -> tuple[int, int, int]:
+    """Return a comparable date key and reject ambiguous source/filter values."""
+    text = str(value or "").strip()
+    if not any(pattern.fullmatch(text) for pattern in _DATE_PATTERNS):
+        raise ReportingContractError(
+            f"date value must use YYYY-MM or YYYY-MM-DD: {text!r}", code=code
+        )
+    date_text = text[:10] if len(text) >= 10 else text
+    parts = [int(item) for item in date_text.split("-")]
+    year, month = parts[:2]
+    day = parts[2] if len(parts) == 3 else 1
+    if not 1 <= month <= 12:
+        raise ReportingContractError(f"date value has invalid month: {text!r}", code=code)
+    if day < 1 or day > 31:
+        raise ReportingContractError(f"date value has invalid day: {text!r}", code=code)
+    # Calendar validation without adding a heavyweight dependency.
+    import calendar
+    if year < 1 or (len(parts) == 3 and day > calendar.monthrange(year, month)[1]):
+        raise ReportingContractError(f"date value is not a real calendar date: {text!r}", code=code)
+    return year, month, day
 
 
 @dataclass(frozen=True)
@@ -80,8 +106,10 @@ class AnalysisRequest:
             raise ReportingContractError("metric_id must not be empty")
         if not self.dimension.strip():
             raise ReportingContractError("dimension must not be empty")
-        if self.date_from and self.date_to and self.date_from > self.date_to:
-            raise ReportingContractError("date_from must not be after date_to")
+        from_key = _date_key(self.date_from, code="date_filter_invalid") if self.date_from else None
+        to_key = _date_key(self.date_to, code="date_filter_invalid") if self.date_to else None
+        if from_key and to_key and from_key > to_key:
+            raise ReportingContractError("date_from must not be after date_to", code="date_range_invalid")
 
 
 @dataclass(frozen=True)
@@ -206,6 +234,7 @@ def load_csv_snapshot(
             duplicate_rows += 1
         row_fingerprints.add(fingerprint)
         if row.get(date_column):
+            _date_key(row[date_column], code="source_date_invalid")
             dates.append(row[date_column])
 
     if not rows:
@@ -333,6 +362,7 @@ def load_xlsx_snapshot(
             duplicate_rows += 1
         row_fingerprints.add(fingerprint)
         if row.get(date_column):
+            _date_key(row[date_column], code="source_date_invalid")
             dates.append(row[date_column])
     if not rows:
         raise ReportingContractError(
@@ -428,7 +458,8 @@ def _analyze_snapshot(
     } - set(snapshot.columns)
     if missing_columns:
         raise ReportingContractError(
-            "metric columns missing from snapshot: " + ", ".join(sorted(missing_columns))
+            "metric columns missing from snapshot: " + ", ".join(sorted(missing_columns)),
+            code="source_columns_missing",
         )
 
     buckets: dict[str, Decimal] = {}
@@ -437,9 +468,13 @@ def _analyze_snapshot(
     included_rows = 0
     for row in snapshot.rows:
         date_value = row.get(metric.date_column, "")
-        if request.date_from and date_value < request.date_from:
+        if not date_value:
+            warnings.append("存在缺少日期的行，无法纳入本次时间范围汇总。")
             continue
-        if request.date_to and date_value > request.date_to:
+        date_key = _date_key(date_value, code="source_date_invalid")
+        if request.date_from and date_key < _date_key(request.date_from, code="date_filter_invalid"):
+            continue
+        if request.date_to and date_key > _date_key(request.date_to, code="date_filter_invalid"):
             continue
         dimension_value = row.get(request.dimension, "")
         raw_value = row.get(metric.value_column, "")

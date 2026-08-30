@@ -65,6 +65,8 @@ WAREHOUSE_SAVE_DIR = _BASE_WAREHOUSE_DIR
 PARSED_EXCEL_DIR = _BASE_UPLOAD_DIR / ".parsed_excel"
 PARSED_EXCEL_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED_EXTS = {".xlsx", ".xls", ".csv"}
+# Keep the limit explicit and user-facing.
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 _finalize_lock = threading.RLock()
 
 
@@ -380,6 +382,14 @@ def upload_file(sid: str):
         safe_name = safe_stem if safe_stem else f"upload_{uuid.uuid4().hex[:8]}{ext}"
         save_path = upload_dir / f"{sid[:8]}_{uuid.uuid4().hex[:6]}_{safe_name}"
         f.save(str(save_path))
+        try:
+            file_bytes = save_path.stat().st_size
+        except OSError:
+            file_bytes = 0
+        if file_bytes > MAX_UPLOAD_BYTES:
+            save_path.unlink(missing_ok=True)
+            errors.append(f"{f.filename}: 文件过大（上限 {MAX_UPLOAD_BYTES // (1024 * 1024)} MB）")
+            continue
         register_artifact(save_path, artifact_type="upload", session_id=sid)
         log.info("[upload] saved → %s  (display: %s)", save_path, display_name)
 
@@ -410,7 +420,12 @@ def upload_file(sid: str):
             errors.append(f"{f.filename}: {exc}")
 
     if not added and not pending_jobs:
-        return jsonify({"error": "; ".join(errors) or "文件解析失败"}), 400
+        return jsonify({
+            "ok": False,
+            "error": "; ".join(errors) or "文件解析失败",
+            "code": "upload_file_too_large" if errors and all("文件过大" in item for item in errors) else "upload_failed",
+            "errors": errors,
+        }), 413 if errors and all("文件过大" in item for item in errors) else 400
 
     warehouse_autosave = (
         _autosave_uploaded_warehouse(sess, sid, [item["source_name"] for item in added], user_id=user_id)
@@ -425,6 +440,7 @@ def upload_file(sid: str):
         "source_name": added[0]["source_name"] if added else pending_jobs[0]["source_name"],
         "schema_preview": added[0]["schema_preview"] if added else "",
         "errors": errors,
+        "error_details": [{"code": "upload_file_too_large", "message": item} for item in errors if "文件过大" in item],
         "warehouse_autosave": warehouse_autosave,
     }
     return jsonify(payload), (202 if pending_jobs else 200)
