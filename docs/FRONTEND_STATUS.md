@@ -49,7 +49,7 @@ PFS 已经形成独立的视觉方向，并有一个可以本地打开的 Flask 
 - 远程训练入口已增加 PFS 规范模块，SSH 预检优先调用 PFS runner；当前只有协议和拒绝任意命令的离线测试，未连接真实远程 GPU。
 - 本地启动仍记录两个环境提示：`pyodbc: libodbc.2.dylib not found`、`flowchart server: No module named 'MCP.flowchart_server'`。这两个提示未在本轮侧栏交互中复现为失败，但相关数据源/流程图能力仍待环境处理和单独验证。
 - 真实工作台的固定 PFS 报表预览已验证服务端重新计算的 JSON 下载反馈；上传 CSV/XLSX 的 JSON/CSV 导出由 HTTP 测试验证，尚未完成浏览器上传后点击下载的文件落盘回读和移动端导出验收。
-- 当前工作区根目录不是 Git 仓库，因此本轮没有提交、推送或部署动作。
+- 当前工作区已初始化本地 Git 并创建初始提交；两次 push 均因连接 `github.com:443` 超时未成功，远端仍为空，尚未部署。
 
 ### 2026-08-30 浏览器 CSV 上传闭环
 

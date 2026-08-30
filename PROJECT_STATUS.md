@@ -13,7 +13,14 @@
 - 本轮新增报表下载闭环：固定示例和上传数据均由服务端重新计算后返回 JSON/CSV，HTTP 回归覆盖文件名、总额、分组、证据和非法格式拒绝；真实工作台固定示例预览点击“下载 JSON”后显示“已下载”。浏览器 Blob 下载不提供可回读的文件事件，因此内容以接口测试为准。
 - 当前运行期身份已切换为 PFS-only：前端命名空间、浏览器存储键、运行标记、环境变量、工作区指令文件名和远程 runner 均使用 PFS；重建后的 Dashboard/Chat bundle 未发现旧运行命名空间。旧参考快照、历史文档和本地忽略日志/缓存不属于发布源树。
 - 发布 staging 实际生成 3,870 个文件、183,207,740 bytes；artifact audit 为 0 findings，密钥、数据库、上传/输出状态和本地参考快照没有进入 staging。压缩 draw.io 模板中的随机字符串不作为品牌命中。
-- GitHub 私有仓库已创建但仍为空；当前工作区尚未初始化 Git，也没有 commit、push、deploy 或 live 验收。因此本地改造还没有成为远端可安装版本。
+- GitHub 私有仓库已创建但仍为空；本地已初始化 Git 并创建初始提交，但两次 HTTPS push 均因连接 `github.com:443` 超时未成功。因此本地改造尚未成为远端可安装版本，也没有 deploy 或 live 验收。
+
+### 2026-08-30 GitHub 初始上传状态
+
+- 本地 `main` 已初始化，并已提交当前 PFS 源码、前端、后端、测试、文档、Docker/部署配置和公开示例数据。
+- 上传前已排除本地参考快照 `Data-Analysis-Agent-main/`、`.venv/`、上传/输出状态、数据库、`.env`/密钥、旧品牌截图和旧图标等不应发布的内容；工作文件仍保留在本地。
+- `git push -u origin main` 已连续尝试两次，均在连接 `github.com` 的 443 端口时超时；没有产生部分远端提交。
+- GitHub 回读确认仓库 `Lukanytsu7551/PFS-data-analysis-agent` 仍为私有空仓库；待网络恢复后只需重试 push，部署和线上验收尚未开始。
 
 当前最主要的未完成项是：原项目全部能力的逐项真实复验、多轮/长任务/跨进程工作流恢复、外部数据源和 MCP/飞书、完整证据治理与审批 UI、浏览器 XLSX 和聊天产物的完整导出体验、桌面安装包、Docker 多服务和真实部署。详见功能矩阵。
 
@@ -341,8 +348,8 @@
 | 本地 Flask 5012 服务 | 已验证（局部） | `/api/health`、页面和本轮侧栏交互已回读；启动仍有 pyodbc/flowchart server 环境提示 |
 | Chat / Dashboard production build | 已验证（离线） | `pnpm run build:chat`、`pnpm run build:check` 通过；不代表真实模型或线上可用 |
 | Docker/数据库/队列/Temporal/沙箱 | Docker 单容器和临时 PostgreSQL 本地通过；其余待验证 | PFS 应用镜像已构建并以 `healthy` 运行；临时 PostgreSQL 已完成 SQL 数据源连接与范围回归；项目暂无 Compose 多服务编排，队列、Temporal、沙箱和生产数据库未完成全栈验收 |
-| Git commit | 未建立 | 工作区和附件均未发现 `.git` |
-| GitHub push | 未执行 | 私有仓库已创建，但没有 push 本地源码 |
+| Git commit | 已建立 | 本地 `main` 已创建初始提交；提交范围为当前 PFS 发布源树 |
+| GitHub push | 未成功 | 已尝试两次；均因连接 `github.com:443` 超时失败，远端回读仍为空，待网络恢复后重试 |
 | deploy | 未执行 | 没有部署本项目 |
 | live | 未验收 | 仅探测到原演示站登录页，未验证登录后分析 |
 
