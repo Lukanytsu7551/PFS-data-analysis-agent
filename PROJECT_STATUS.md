@@ -630,4 +630,4 @@
 - 门禁：2026-09-03 实跑 196 项 Python 测试，全部通过、无失败、无跳过；Ruff、ESLint、Chat production build、Dashboard/Chat build check 和 `git diff --check` 全部通过。Chat 主 bundle 为 511.80 kB，保留既有 500 kB 体积提示。
 - 发布预演：独立临时 staging 为 489 个文件、37,703,382 bytes；artifact audit 为 0 findings、0 symlink，路径回读未发现 draw.io、shape_libs、business_canvas 或 gsheets，文件回读未发现数据库和本地凭据。
 - 隔离运行：当前工作树在 `127.0.0.1:5023` 启动 Waitress，`/api/health` 和主工作台返回 200；`/static/drawio/index.html`、`/api/business-canvas` 和 `/api/connect-gsheets` 均返回 404。回读后测试服务已停止。
-- 清场与发布边界：用户在完整汇报后确认删除两份临时 staging、一份隔离运行目录和未跟踪的 `direction-approved.md`，清理后逐项回读为不存在。被忽略的本地凭据、数据库、上传、输出和参考快照继续保留且不进入发布包。当前切片仍未 commit、push、构建桌面安装包、部署或线上验收。
+- 清场与发布边界：用户在完整汇报后确认删除两份临时 staging、一份隔离运行目录和未跟踪的 `direction-approved.md`，清理后逐项回读为不存在。被忽略的本地凭据、数据库、上传、输出和参考快照继续保留且不进入发布包。主切片已提交为 `756f358 feat: close PFS local transformation slice`；首次 push 因 GitHub 443 连接超时失败，远端尚未回读到本轮提交；桌面安装包、部署和线上验收仍未执行。
