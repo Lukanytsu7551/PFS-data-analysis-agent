@@ -4,6 +4,7 @@ import { $, esc, hideWelcome } from "../core/dom.js";
 import { closeOverlay, openOverlay, toast } from "../core/overlay.js";
 import { sysMsg } from "./msg.js";
 import { invalidate as invalidatePreview } from "./preview.js";
+import { iconSpan } from "../core/icons.js";
 
 const pfs = () => globalThis.PFS;
 
@@ -12,10 +13,10 @@ const pfs = () => globalThis.PFS;
 
   // ── Type icon map ──────────────────────────────────────────────────────────
   const TYPE_ICON = {
-    excel: "📊", csv: "📄", sql: "🗄️", gsheets: "📋", http: "🔗",
+    excel: "chart", csv: "file", sql: "database", http: "external",
   };
   const TYPE_LABEL = {
-    excel: "Excel", csv: "CSV", sql: "SQL", gsheets: "Sheets", http: "API",
+    excel: "Excel", csv: "CSV", sql: "SQL", http: "API",
   };
 
   // ── Render the source list in the sidebar ─────────────────────────────────
@@ -33,7 +34,7 @@ const pfs = () => globalThis.PFS;
 
     wrap.hidden = false;
     ul.innerHTML = sources.map(src => {
-      const icon  = TYPE_ICON[src.type] || "📁";
+      const icon  = iconSpan(TYPE_ICON[src.type] || "folder", { className: "source-item-icon-box", size: 16 });
       const label = TYPE_LABEL[src.type] || src.type;
       const activeClass = src.active ? " source-item--active" : "";
       const toggleTitle = src.active ? "点击取消激活" : "点击激活此数据源";
@@ -44,12 +45,12 @@ const pfs = () => globalThis.PFS;
               <span class="source-toggle-thumb"></span>
             </span>
           </button>
-          <span class="source-item-icon">${icon}</span>
+          ${icon}
           <span class="source-item-info">
             <span class="source-item-name" title="${src.name}">${src.name}</span>
             <span class="source-item-type">${label}${src.active ? " · 已激活" : " · 未激活"}</span>
           </span>
-          <button class="source-item-btn source-item-btn--remove" data-sid="${src.id}" title="移除此数据源">✕</button>
+          <button class="source-item-btn source-item-btn--remove" data-sid="${src.id}" title="移除此数据源" aria-label="移除此数据源">${iconSpan("close", { className: "pfs-icon", size: 14 })}</button>
         </li>`;
     }).join("");
 
@@ -187,8 +188,8 @@ const pfs = () => globalThis.PFS;
             <div class="saved-meta">${[date, count].filter(Boolean).join(" · ")}${names}</div>
             <div class="warehouse-hint">点击重新连接数据源，不会加载或覆盖当前对话</div>
           </div>
-          <button class="saved-del" title="✕" data-action="deleteDataWarehouse"
-                  data-filename="${escAttr(item.filename)}" data-name="${escAttr(item.name)}">✕</button>
+          <button class="saved-del" title="删除数据仓库" aria-label="删除数据仓库" data-action="deleteDataWarehouse"
+                  data-filename="${escAttr(item.filename)}" data-name="${escAttr(item.name)}">${iconSpan("close", { className: "pfs-icon", size: 14 })}</button>
         </div>`;
     }).join("");
   }
@@ -336,15 +337,6 @@ const pfs = () => globalThis.PFS;
       $("db-conn").dataset.hasSaved   = "1";
       if (sql.name) $("db-name").value = sql.name;
       _showDsStatus("db-status", sql.name || "SQL DB");
-    }
-
-    const gs = cfgs.gsheets || {};
-    if (gs.has_creds_json) {
-      $("gsheets-creds").placeholder      = t('ds.conn_saved_ph');
-      $("gsheets-creds").dataset.hasSaved = "1";
-      if (gs.spreadsheet) $("gsheets-sheet").value = gs.spreadsheet;
-      if (gs.name)         $("gsheets-name").value = gs.name;
-      _showDsStatus("gsheets-status", gs.name || "Google Sheets");
     }
 
     const api = cfgs.api || {};
@@ -650,40 +642,6 @@ const pfs = () => globalThis.PFS;
     sysMsg(t('sys.connected', { name: d.source_name }));
   }
 
-  // ── Google Sheets ──────────────────────────────────────────────────────────
-  async function connectGSheets() {
-    const creds = $("gsheets-creds").value.trim();
-    const sheet = $("gsheets-sheet").value.trim();
-    const name  = $("gsheets-name").value.trim();
-    const errEl = $("gsheets-err");
-    const hasSavedCreds = $("gsheets-creds").dataset.hasSaved === "1";
-    if (!creds && !hasSavedCreds) { errEl.textContent = t('gsheets_err.no_creds'); return; }
-    if (!sheet)                   { errEl.textContent = t('gsheets_err.no_sheet'); return; }
-    errEl.textContent = "";
-    const loadingEl = $("gsheets-loading");
-    const btn       = $("gsheets-btn");
-    const cancelBtn = $("gsheets-cancel-btn");
-    loadingEl.classList.remove('hidden');
-    btn.disabled       = true;
-    cancelBtn.disabled = true;
-    const r = await fetch(`/api/session/${state.SID}/connect-gsheets`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ creds_json: creds, spreadsheet: sheet, name }),
-    });
-    const d = await r.json();
-    loadingEl.classList.add('hidden');
-    btn.disabled       = false;
-    cancelBtn.disabled = false;
-    if (d.error) { errEl.textContent = d.error; return; }
-    state.schemaText = d.schema_preview || "";
-    $("gsheets-schema").textContent  = state.schemaText;
-    $("gsheets-schema").classList.remove('hidden');
-    onSourcesUpdated(d.sources || [], d.source_name, 'src.hint.gsheets');
-    closeOverlay("ov-gsheets");
-    toast(t('toast.gsheets_ok'), "ok");
-    sysMsg(t('sys.connected', { name: d.source_name }));
-  }
-
   // ── Custom API ─────────────────────────────────────────────────────────────
   function toggleApiAuthValue() {
     const type = $("api-auth-type").value;
@@ -727,11 +685,11 @@ const pfs = () => globalThis.PFS;
     loadDatasourceConfigs, disconnectSrc, resetSourceState,
     openSaveWarehouseDialog, loadWarehouseList, saveDataWarehouse,
     loadDataWarehouse, deleteDataWarehouse,
-    onXlFile, uploadXl, loadSample, connectDB, connectGSheets, connectAPI, toggleApiAuthValue,
+    onXlFile, uploadXl, loadSample, connectDB, connectAPI, toggleApiAuthValue,
   };
 
   eventBus.on("overlay:open", ({ id }) => {
-    if (id === "ov-db" || id === "ov-gsheets" || id === "ov-api") {
+    if (id === "ov-db" || id === "ov-api") {
       loadDatasourceConfigs();
     }
   });

@@ -16,8 +16,7 @@ export function applyTheme(theme) {
   const button = document.getElementById("theme-toggle");
   if (!button) return;
 
-  button.textContent = theme === "dark" ? "☀" : "🌙";
-  button.title =
+  const label =
     theme === "dark"
       ? globalThis.t
         ? globalThis.t("theme.to_light")
@@ -25,6 +24,9 @@ export function applyTheme(theme) {
       : globalThis.t
         ? globalThis.t("theme.to_dark")
         : "Dark mode";
+  button.dataset.theme = theme;
+  button.title = label;
+  button.setAttribute("aria-label", label);
 }
 
 export function setTheme(theme) {

@@ -1,6 +1,7 @@
 import { registerUiIsland } from "../../core/ui-registry.js";
 import { bindBubbleImages } from "../../legacy/msg.js";
 import { renderMd } from "../../legacy/markdown.js";
+import { iconVNode, svgMarkup } from "../../core/icons.js";
 
 // Progressive Vue island for the chat message list.
 // It renders the outer message shell and now owns basic text-stream state.
@@ -65,12 +66,12 @@ export function mountChatUi() {
       "data-vue-msg-id": msg.id,
     }, [
       h("div", { class: "msg-avatar" }, [
-        msg.role === "user" ? "👤" : _assistantAvatar(),
+        msg.role === "user" ? iconVNode(h, "users", { size: 18 }) : _assistantAvatar(),
       ]),
       h("div", { class: "msg-body" }, [
         _renderTurnQueueState(msg),
         msg.skill ? h("div", { class: "msg-skill-badge" }, [
-          h("span", { class: "msg-skill-icon" }, msg.skill.icon || "🧩"),
+          h("span", { class: "msg-skill-icon", "aria-hidden": "true" }, iconVNode(h, "spark", { size: 14 })),
           h("span", { class: "msg-skill-name" }, msg.skill.name || ""),
         ]) : null,
         h("div", { class: "tool-steps" }),
@@ -99,7 +100,7 @@ export function mountChatUi() {
       label = _queueText("queue.canceled", "Removed from queue");
     }
     const children = [
-      h("span", { class: "turn-queue-icon", "aria-hidden": "true" }, msg.queueStatus === "queued" ? "⏳" : "·"),
+      h("span", { class: "turn-queue-icon", "aria-hidden": "true" }, [iconVNode(h, msg.queueStatus === "queued" ? "activity" : "more", { size: 16 })]),
       h("span", { class: "turn-queue-label" }, label),
     ];
     if (msg.queueStatus === "queued" && msg.queueCallbacks?.onCancel) {
@@ -264,7 +265,7 @@ export function mountChatUi() {
     if (item.compaction) classes.push("tool-step-compaction");
     if (!item.finished) classes.push("running");
     if (item.finished) classes.push(doneClass);
-    const icon = item.finished ? (item.compaction ? "✦" : "✓") : "⟳";
+    const icon = item.finished ? (item.compaction ? "spark" : "check") : "refresh";
     const attrs = {
       key: item.id,
       class: classes.join(" "),
@@ -296,7 +297,7 @@ export function mountChatUi() {
         ]));
       }
       return h("div", attrs, [
-        h("span", { class: iconClass }, icon),
+        h("span", { class: iconClass }, [iconVNode(h, icon, { size: 16 })]),
         h("div", { class: "compaction-progress-body" }, body),
       ]);
     }
@@ -307,7 +308,7 @@ export function mountChatUi() {
       onToggle: e => { item.open = e.currentTarget.open; },
     }, [
       h("summary", { class: "tool-step-head" }, [
-        h("span", { class: iconClass }, icon),
+        h("span", { class: iconClass }, [iconVNode(h, icon, { size: 16 })]),
         h("span", { class: "tool-step-text" }, item.summary),
       ]),
       h("div", { class: "tool-step-detail" }, item.detail),
@@ -320,7 +321,7 @@ export function mountChatUi() {
       class: "tool-step tool-step-activity running",
       "data-step-id": item.id,
     }, [
-      h("span", { class: "spin" }, "⟳"),
+      h("span", { class: "spin" }, [iconVNode(h, "refresh", { size: 16 })]),
       h("span", { class: "tool-step-text" }, item.text),
     ]);
   }
@@ -440,8 +441,9 @@ export function mountChatUi() {
         class: "chart-expand-btn",
         type: "button",
         title: "在新标签页打开",
+        "aria-label": "在新标签页打开",
         onClick: () => window.open(`/api/chart/${item.chartId}`, "_blank"),
-      }, "⛶"),
+      }, [iconVNode(h, "external", { size: 15 })]),
       h("iframe", {
         "data-src": `/api/chart/${item.chartId}`,
         sandbox: "allow-scripts allow-same-origin",
@@ -491,9 +493,9 @@ export function mountChatUi() {
     const href = artifact.url || artifact.download_url || "";
     const attrs = { class: "job-artifact", key: `${name}-${index}` };
     if (href) {
-      return h("a", { ...attrs, href, target: "_blank", rel: "noopener noreferrer" }, `↗ ${name}`);
+      return h("a", { ...attrs, href, target: "_blank", rel: "noopener noreferrer" }, [iconVNode(h, "external", { size: 13 }), h("span", null, name)]);
     }
-    return h("span", attrs, `✓ ${name}`);
+    return h("span", attrs, [iconVNode(h, "check", { size: 13 }), h("span", null, name)]);
   }
 
   function _renderJobCard(job) {
@@ -505,7 +507,7 @@ export function mountChatUi() {
     const children = [
       h("div", { class: "job-card-head" }, [
         h("div", { class: "job-card-title" }, [
-          h("span", { class: "job-card-icon", "aria-hidden": "true" }, terminal ? (job.status === "succeeded" ? "✓" : "!") : "⟳"),
+          h("span", { class: "job-card-icon", "aria-hidden": "true" }, [iconVNode(h, terminal ? (job.status === "succeeded" ? "check" : "circleHelp") : "refresh", { size: 17 })]),
           h("span", null, job.label || job.jobType || _jobText("job.default_label", "Background job")),
         ]),
         h("span", { class: `job-status job-status-${job.status}` }, statusText),
@@ -617,7 +619,7 @@ export function mountChatUi() {
   function _renderOutlineCard(item) {
     const children = [
       h("div", { class: "ppt-outline-header" }, [
-        h("span", { class: "ppt-outline-icon" }, item.icon),
+        h("span", { class: "ppt-outline-icon" }, [iconVNode(h, "presentation", { size: 17 })]),
         h("span", null, item.headerTitle),
       ]),
       h("div", {
@@ -664,7 +666,7 @@ export function mountChatUi() {
             _renderCardsFor(item._msg);
             if (item.callbacks && item.callbacks.onConfirm) item.callbacks.onConfirm();
           },
-        }, "✅ 确认生成"),
+        }, [iconVNode(h, "check", { size: 14 }), h("span", null, "确认生成")]),
         h("button", {
           class: "ppt-btn ppt-btn-revise",
           type: "button",
@@ -674,7 +676,7 @@ export function mountChatUi() {
             item.editOpen = !item.editOpen;
             _renderCardsFor(item._msg);
           },
-        }, "✏️ 修改大纲"),
+        }, [iconVNode(h, "edit", { size: 14 }), h("span", null, "修改大纲")]),
         h("button", {
           class: "ppt-btn ppt-btn-cancel",
           type: "button",
@@ -686,7 +688,7 @@ export function mountChatUi() {
             _renderCardsFor(item._msg);
             if (item.callbacks && item.callbacks.onCancel) item.callbacks.onCancel();
           },
-        }, "✕ 取消"),
+        }, [iconVNode(h, "close", { size: 14 }), h("span", null, "取消")]),
       ]));
     }
 
@@ -972,11 +974,12 @@ export function mountChatUi() {
     bubble.innerHTML = "";
     const span = document.createElement("span");
     span.className = "stream-error";
-    span.textContent = `⚠ ${msg.error}`;
+    span.innerHTML = svgMarkup("circleHelp", { size: 16 }) + '<span></span>';
+    span.querySelector("span").textContent = msg.error;
     bubble.appendChild(span);
     const retryBtn = document.createElement("button");
     retryBtn.className = "stream-retry-btn";
-    retryBtn.textContent = "↺ 重试";
+    retryBtn.innerHTML = svgMarkup("refresh", { size: 14 }) + '<span>重试</span>';
     retryBtn.addEventListener("click", () => globalThis.PFS.chatStream?.retryLast?.());
     bubble.appendChild(retryBtn);
     return true;
@@ -994,7 +997,7 @@ export function mountChatUi() {
     block.className = "reasoning-block";
     const toggle = document.createElement("div");
     toggle.className = "reasoning-toggle";
-    toggle.innerHTML = `<span class="reasoning-arrow">▶</span> ${window.t ? t('reasoning_toggle') : "Reasoning"}`;
+    toggle.innerHTML = `${svgMarkup("chevronRight", { className: "reasoning-arrow", size: 12 })}<span>${window.t ? t('reasoning_toggle') : "Reasoning"}</span>`;
     const body = document.createElement("div");
     body.className = "reasoning-body";
     body.textContent = text;
@@ -1314,7 +1317,7 @@ export function mountChatUi() {
     const card = {
       id: `card-${++cardSeq}`,
       kind: "outline",
-      icon: data.icon || "📄",
+      icon: data.icon || "file",
       headerTitle: data.headerTitle || "",
       markdown: data.markdown || "",
       editOpen: false,

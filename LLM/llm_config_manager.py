@@ -130,6 +130,50 @@ class LLMConfigManager:
             "prompt_cache_mode": "deepseek",
             "prompt_cache_retention": "in_memory",
         },
+        "kimi": {
+            "base_url": "https://api.moonshot.cn/v1",
+            "model": "kimi-k3",
+            "env_var": "MOONSHOT_API_KEY",
+            "is_custom": False,
+            "context_window": 1_000_000,
+            "max_output_tokens": 131_072,
+            "supports_prompt_cache": True,
+            "prompt_cache_mode": "kimi",
+            "prompt_cache_retention": "in_memory",
+        },
+        "kimi_coding": {
+            "base_url": "https://api.moonshot.cn/v1",
+            "model": "kimi-k2.7-code",
+            "env_var": "KIMI_CODING_API_KEY",
+            "is_custom": False,
+            "context_window": 262_144,
+            "max_output_tokens": 65_536,
+            "supports_prompt_cache": True,
+            "prompt_cache_mode": "kimi",
+            "prompt_cache_retention": "in_memory",
+        },
+        "glm": {
+            "base_url": "https://open.bigmodel.cn/api/paas/v4",
+            "model": "glm-5.2",
+            "env_var": "GLM_API_KEY",
+            "is_custom": False,
+            "context_window": 1_000_000,
+            "max_output_tokens": 131_072,
+            "supports_prompt_cache": False,
+            "prompt_cache_mode": "none",
+            "prompt_cache_retention": "in_memory",
+        },
+        "glm_coding": {
+            "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+            "model": "glm-5.2",
+            "env_var": "GLM_CODING_API_KEY",
+            "is_custom": False,
+            "context_window": 1_000_000,
+            "max_output_tokens": 131_072,
+            "supports_prompt_cache": False,
+            "prompt_cache_mode": "none",
+            "prompt_cache_retention": "in_memory",
+        },
         "openai": {
             "base_url": "https://api.openai.com/v1",
             "model": "gpt-4o-mini",
@@ -166,6 +210,19 @@ class LLMConfigManager:
             "prompt_cache_retention": "in_memory",
             "input_price_per_million": 5.0,
             "output_price_per_million": 5.0,
+        },
+        "minimax_coding": {
+            "base_url": "https://api.minimax.cn/v1",
+            "model": "MiniMax-M3",
+            "env_var": "MINIMAX_CODING_API_KEY",
+            "is_custom": False,
+            "context_window": 1_000_000,
+            "max_output_tokens": 384_000,
+            "enable_thinking": True,
+            "thinking_budget": 8000,
+            "supports_prompt_cache": False,
+            "prompt_cache_mode": "none",
+            "prompt_cache_retention": "in_memory",
         },
         "ollama": {
             # Ollama 提供 OpenAI 兼容端点：http://localhost:11434/v1
@@ -486,7 +543,11 @@ class LLMConfigManager:
         ]
 
     def get_default_provider(self) -> Optional[str]:
-        priority = ["deepseek", "minimax", "openai", "atlascloud", "ollama", "claude"]
+        priority = [
+            "deepseek", "kimi", "glm", "minimax",
+            "kimi_coding", "glm_coding", "minimax_coding",
+            "openai", "atlascloud", "ollama", "claude",
+        ]
         for provider in priority:
             if provider in self.configs and self.configs[provider].enabled:
                 return provider
@@ -588,11 +649,14 @@ class LLMConfigManager:
         try:
             from openai import OpenAI
             client = OpenAI(api_key=effective_key, base_url=effective_url)
-            client.chat.completions.create(
+            test_kwargs = dict(
                 model=effective_model,
                 messages=[{"role": "user", "content": "Hello"}],
-                max_tokens=10
+                max_tokens=10,
             )
+            if self.DEFAULT_CONFIGS.get(provider, {}).get("prompt_cache_mode") == "kimi":
+                test_kwargs["prompt_cache_key"] = "pfs-config-test"
+            client.chat.completions.create(**test_kwargs)
             return {"success": True, "message": "配置有效", "provider": provider, "model": effective_model}
         except Exception as e:
             return {"success": False, "message": f"测试失败: {str(e)}", "provider": provider, "model": effective_model}
@@ -660,7 +724,12 @@ def get_llm_client_with_fallback(
 
     priority = [
         "deepseek",
+        "kimi",
+        "glm",
         "minimax",
+        "kimi_coding",
+        "glm_coding",
+        "minimax_coding",
         "openai",
         "atlascloud",
         "ollama",

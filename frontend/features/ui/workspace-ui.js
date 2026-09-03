@@ -1,4 +1,5 @@
 import { registerUiIsland } from "../../core/ui-registry.js";
+import { iconVNode } from "../../core/icons.js";
 
 const pfs = () => globalThis.PFS;
 
@@ -56,7 +57,7 @@ export function mountWorkspaceUi() {
       h("div", { class: "ws-state-row" }, [
         h("span", { class: "ws-state-label" }, window.t("workspace.state_label")),
         h("span", { class: "ws-state-value" }, [
-          h("span", { style: "color: var(--color-success); font-weight: 600" }, "● "),
+          h("span", { class: "ws-state-status-icon", "aria-hidden": "true" }, iconVNode(h, "checkCircle", { size: 15 })),
           window.t("workspace.mounted_short"),
         ]),
       ]),

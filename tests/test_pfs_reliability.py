@@ -197,12 +197,27 @@ class PfsDurableRecoveryTests(unittest.TestCase):
                     graph_hash=sha256(repr(graph).encode()).hexdigest(),
                 )
                 attempts = []
+                execution_contexts = []
+                terminal_runs = []
 
                 def execute(_node, _materials, _context):
                     attempts.append(len(attempts) + 1)
+                    execution_contexts.append(_node.get("__pfs_workflow_context__"))
                     if len(attempts) == 1:
                         raise RuntimeError("temporary node failure")
-                    return {"answer": "retry succeeded"}
+                    return {
+                        "answer": "retry succeeded",
+                        "__workflow_usage__": {
+                            "model": "deepseek-chat",
+                            "provider": "deepseek",
+                            "model_calls": 2,
+                            "input_tokens": 80,
+                            "output_tokens": 20,
+                            "cached_input_tokens": 8,
+                            "tool_calls": 1,
+                            "cost_usd": 0.001,
+                        },
+                    }
 
                 jobs = ImmediateJobs()
                 scheduler = WorkflowScheduler(
@@ -210,6 +225,9 @@ class PfsDurableRecoveryTests(unittest.TestCase):
                     run_store=run_store,
                     job_runner=jobs,
                     executor=execute,
+                    on_run_terminal=lambda run_id, status: terminal_runs.append(
+                        (run_id, status)
+                    ),
                     limiter=WorkflowConcurrencyLimiter(
                         global_limit=10,
                         workspace_limit=10,
@@ -230,6 +248,7 @@ class PfsDurableRecoveryTests(unittest.TestCase):
                 self.assertEqual("succeeded", final["run"]["status"])
                 self.assertEqual({"answer": "retry succeeded"}, final["outputs"])
                 self.assertEqual([1, 2], attempts)
+                self.assertTrue(all(item["run_id"] == first["run"]["id"] for item in execution_contexts))
                 node_attempts = [
                     (node["status"], node["attempt"])
                     for node in final["nodes"]
@@ -238,6 +257,10 @@ class PfsDurableRecoveryTests(unittest.TestCase):
                     [("failed", 1), ("succeeded", 2)],
                     node_attempts,
                 )
+                succeeded_node = final["nodes"][-1]
+                self.assertEqual(2, succeeded_node["model_calls"])
+                self.assertEqual("deepseek", succeeded_node["provider_name"])
+                self.assertEqual([(first["run"]["id"], "succeeded")], terminal_runs)
                 events = run_store.list_events(first["run"]["id"])
                 self.assertIn(
                     "workflow_node_retry_created",

@@ -1,5 +1,6 @@
 // Slash command registry + popup logic + input handlers.
 import { $, state } from "../core/runtime.js";
+import { iconSpan } from "../core/icons.js";
 
 const pfs = () => globalThis.PFS;
 
@@ -120,7 +121,7 @@ const pfs = () => globalThis.PFS;
       div.title = availability.reason || "";
       const icon = document.createElement("span");
       icon.className = "slash-icon";
-      icon.textContent = c.icon;
+      icon.innerHTML = iconSpan("spark", { className: "pfs-icon", size: 17 });
       const info = document.createElement("div");
       info.className = "slash-info";
       const name = document.createElement("div");
@@ -189,12 +190,12 @@ const pfs = () => globalThis.PFS;
 
   function selectCommand(cmd) {
     pfs()?.skills?.clearSkill?.();
-    const c = getCommand(cmd) || { cmd, icon: "⌘" };
+    const c = getCommand(cmd) || { cmd, icon: "spark" };
     if (!getAvailability(c).available) return;
     cmd = c.cmd;
     state.activeCommand = cmd;
     const badge = $("cmd-badge");
-    $("cmd-badge-text").textContent = `${c.icon} /${cmd}`;
+    $("cmd-badge-text").innerHTML = iconSpan("spark", { className: "pfs-icon", size: 14 }) + ` <span>/${cmd}</span>`;
     badge.classList.add("show");
     const input = $("msg-input");
     input.value = input.value.replace(/^\/\S*\s*/, "");
@@ -336,7 +337,7 @@ const pfs = () => globalThis.PFS;
       COMMANDS.splice(0, COMMANDS.length, ...(payload.commands || []).map(command => ({
         cmd: command.name,
         aliases: command.aliases || [],
-        icon: command.icon || "⌘",
+        icon: command.icon || "spark",
         description: command.description || command.name,
         groupKey: GROUP_KEYS[command.category] || "group.custom",
         available: command.available !== false,

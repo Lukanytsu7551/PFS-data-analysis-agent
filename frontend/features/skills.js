@@ -1,5 +1,6 @@
 // Independent Skill picker. Skills never enter the slash-command catalog.
 import { $, state } from "../core/runtime.js";
+import { iconSpan, svgMarkup } from "../core/icons.js";
 
 const pfs = () => globalThis.PFS;
   const SKILLS = [];
@@ -59,7 +60,7 @@ const pfs = () => globalThis.PFS;
         </span>
         <span class="skill-picker-actions">
           <span class="skill-picker-source">${esc(sourceLabel(skill.source))}</span>
-          <span class="skill-picker-view" data-skill-view="${esc(skill.name)}" title="查看/编辑">📝</span>
+          ${iconSpan("edit", { className: "skill-picker-view", size: 14 })}
         </span>`;
       button.addEventListener("click", (e) => {
         if (e.target.closest("[data-skill-view]")) {
@@ -126,7 +127,7 @@ const pfs = () => globalThis.PFS;
   }
 
   function selectSkill(name) {
-    const skill = SKILLS.find(item => item.name === name) || { name, icon: "🧩" };
+    const skill = SKILLS.find(item => item.name === name) || { name };
     pfs()?.slash?.clearCmd?.();
     state.activeSkill = skill.name;
     $("skill-badge-text").textContent = displaySkillName(skill);
@@ -157,7 +158,7 @@ const pfs = () => globalThis.PFS;
    */
   function activateSkill(name) {
     if (!name) return;
-    const skill = SKILLS.find(item => item.name === name) || { name, icon: "🧩" };
+    const skill = SKILLS.find(item => item.name === name) || { name };
     state.activeSkill = skill.name;
     $("skill-badge-text").textContent = displaySkillName(skill);
     $("skill-badge")?.classList.add("show");
@@ -302,7 +303,7 @@ const pfs = () => globalThis.PFS;
       const div = document.createElement("div");
       div.className = "skill-tool-option" + (_selectedTools.has(t.name) ? " checked" : "");
       div.dataset.tool = t.name;
-      div.innerHTML = `<span class="skill-tool-checkbox"><svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 5.5L4.5 8L9 3" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="skill-tool-name">${t.name}</span><span class="skill-tool-cat">${t.cat}</span>`;
+      div.innerHTML = `<span class="skill-tool-checkbox">${svgMarkup("check", { className: "skill-tool-checkbox-icon", size: 11, strokeWidth: 1.5 })}</span><span class="skill-tool-name">${t.name}</span><span class="skill-tool-cat">${t.cat}</span>`;
       div.addEventListener("click", () => {
         if (_selectedTools.has(t.name)) _selectedTools.delete(t.name);
         else _selectedTools.add(t.name);
@@ -445,7 +446,7 @@ const pfs = () => globalThis.PFS;
     msgEl.textContent = "";
     const name = $("skill-form-name").value.trim();
     const description = $("skill-form-desc").value.trim();
-    const icon = $("skill-form-icon").value.trim() || "🧩";
+    const icon = $("skill-form-icon").value.trim() || "spark";
     const allowed_tools = [..._selectedTools];
     const prompt = $("skill-form-prompt").value.trim();
 

@@ -21,7 +21,6 @@ from .prompts      import (
     build_temp_prompt_section,
     get_system_prompt,
     message_needs_chart_rules,
-    message_needs_diagram_rules,
     message_needs_hooks_rules,
     message_needs_knowledge,
     message_needs_workspace_rules,
@@ -335,45 +334,6 @@ def _decode_tool_call_args(
     if not isinstance(value, dict):
         return {}, f"[ARG ERROR] '{tool_name}' arguments must be a JSON object."
     return value, ""
-
-
-# Tools whose tool-call the model sometimes emits as pseudo-XML text tags
-# (e.g. MiniMax-M3 writing <display_diagram><parameter name="xml">...</parameter>).
-# When finish_reason=='stop' but such tags appear in the text, parse them back
-# into native tool calls so the dispatcher actually executes them.
-_TEXT_FALLBACK_TOOL_NAMES = {"display_diagram", "edit_diagram", "append_diagram"}
-
-_PARAM_TAG_RE = re.compile(
-    r'<parameter\s+name\s*=\s*"([^"]+)"\s*>([\s\S]*?)</parameter>',
-    re.IGNORECASE,
-)
-_TOOL_BLOCK_RE = re.compile(
-    r'<(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)\b[^>]*>(?P<body>[\s\S]*?)</(?P=name)>',
-    re.IGNORECASE,
-)
-
-
-def _parse_text_fallback_tool_calls(content: str) -> list[tuple[str, Dict[str, Any]]]:
-    """Extract pseudo-XML tool calls a model wrote into its text response.
-
-    Returns a list of (tool_name, args). Only matches names in
-    _TEXT_FALLBACK_TOOL_NAMES so stray XML in normal prose isn't misread.
-    """
-    calls: list[tuple[str, Dict[str, Any]]] = []
-    if not content or "<" not in content:
-        return calls
-    for match in _TOOL_BLOCK_RE.finditer(content):
-        name = match.group("name")
-        if name not in _TEXT_FALLBACK_TOOL_NAMES:
-            continue
-        body = match.group("body")
-        args: Dict[str, Any] = {}
-        for pm in _PARAM_TAG_RE.finditer(body):
-            args[pm.group(1)] = pm.group(2)
-        if not args:
-            continue
-        calls.append((name, args))
-    return calls
 
 
 def _sanitize_rejected_tool_call_history(
@@ -833,6 +793,7 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
         usage_summary = {
             "model": self.model,
             "provider": str(getattr(self, "_provider", "") or ""),
+            "model_calls": 0,
             "input_tokens": 0,
             "output_tokens": 0,
             "cached_input_tokens": 0,
@@ -857,6 +818,7 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
             usage = getattr(response_obj, "usage", None)
             if usage is None:
                 return
+            usage_summary["model_calls"] += 1
             usage_summary["model"] = str(
                 getattr(response_obj, "model", "") or usage_summary["model"]
             )
@@ -1429,6 +1391,7 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
         discovered_mcp_tools: list[str] | tuple[str, ...] | None = None,
         mcp_catalog_version_seen: str = "",
         tool_result_artifacts: list[dict] | None = None,
+        run_id: str = "",
     ) -> Iterator[Dict]:
         """
         Yields event dicts consumed by the Flask SSE stream:
@@ -1445,6 +1408,11 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
           {"type": "done"}
           {"type": "error",         "message": str}
         """
+        active_run_id = str(run_id or "").strip()[:160]
+        if active_run_id:
+            current_metadata = dict(getattr(self, "_artifact_metadata", None) or {})
+            current_metadata["run_id"] = active_run_id
+            self._artifact_metadata = current_metadata
         if activation is None:
             legacy = (command or "").strip()
             activation = ActivationContext(
@@ -1737,16 +1705,6 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
             has_knowledge=True,
             has_unnamed_columns=schema_has_unnamed_columns(
                 self._combined_schema or self._schema_cache or ""
-            ),
-            needs_diagram=(
-                bool(_requested_tools.intersection({"display_diagram", "edit_diagram"}))
-                or message_needs_diagram_rules(
-                    user_message,
-                    has_canvas_skill=trusted_skill_name in {
-                        "business-model-canvas", "bcg-matrix", "swot-analysis",
-                        "value-proposition",
-                    },
-                )
             ),
         )
         # RAG: build skill keyword index, retrieve top-N matching user query
@@ -2367,9 +2325,22 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
             call_kwargs["stream_options"] = {"include_usage": True}
             _t0 = time.monotonic()
             yield {"type": "agent_activity", "message": "正在分析…"}
+            _retry_events: list[dict[str, Any]] = []
             try:
-                stream = _call_with_retry(self.client.chat.completions.create, **call_kwargs)
+                stream = _call_with_retry(
+                    self.client.chat.completions.create,
+                    **call_kwargs,
+                    on_retry=_retry_events.append,
+                )
             except Exception as exc:
+                for retry_event in _retry_events:
+                    yield {
+                        "type": "retry",
+                        "provider": str(self._provider or ""),
+                        "model": str(self.model or ""),
+                        **retry_event,
+                    }
+                _retry_events.clear()
                 log.error("[llm] API call failed after retries: %s", exc)
                 fallback_succeeded = False
                 if _is_provider_switchable(exc):
@@ -2416,9 +2387,11 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                             "message": "当前模型暂时不可用，已切换备用模型，正在重试…",
                         }
                         try:
+                            _retry_events.clear()
                             stream = _call_with_retry(
                                 self.client.chat.completions.create,
                                 **fallback_kwargs,
+                                on_retry=_retry_events.append,
                             )
                         except Exception as fallback_exc:
                             log.error(
@@ -2434,6 +2407,14 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                                 old_provider or "(unset)",
                                 fallback_provider,
                             )
+                        for retry_event in _retry_events:
+                            yield {
+                                "type": "retry",
+                                "provider": str(self._provider or ""),
+                                "model": str(self.model or ""),
+                                **retry_event,
+                            }
+                        _retry_events.clear()
                 if not fallback_succeeded:
                     if _is_context_length_error(exc) and not _emergency_compaction_used:
                         _emergency_compaction_used = True
@@ -2474,6 +2455,15 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                         yield {"type": "error", "message": f"LLM 调用失败: {exc}"}
                     yield {"type": "done"}
                     return
+            else:
+                for retry_event in _retry_events:
+                    yield {
+                        "type": "retry",
+                        "provider": str(self._provider or ""),
+                        "model": str(self.model or ""),
+                        **retry_event,
+                    }
+                _retry_events.clear()
 
             tc_acc: Dict[int, Dict[str, str]] = {}
             content_parts: List[str] = []
@@ -2579,6 +2569,10 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                 )
                 yield {
                     "type": "usage",
+                    "run_id": active_run_id,
+                    "provider": str(getattr(self, "_provider", "") or ""),
+                    "model": str(self.model or ""),
+                    "model_calls": 1,
                     "prompt_tokens": usage_data.prompt_tokens,
                     "completion_tokens": usage_data.completion_tokens,
                     "total_tokens": usage_data.total_tokens,
@@ -2903,10 +2897,6 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                         "send_message":         f"发送团队消息: {args.get('recipient', '?')}",
                         "agent_delegate":       f"委派分析任务: {args.get('description', '')[:40]}",
                         "plan_complete":        "提交结构化计划",
-                        "display_diagram":      f"生成图表画布：{args.get('title', '分析框架')}",
-                        "edit_diagram":         f"编辑图表画布：{args.get('project_id', '?')}",
-                        "get_diagram":          "获取当前图表",
-                        "get_shape_library":    f"查询形状库：{args.get('library', '?')}",
                     }
                     full_display = display_map.get(name, name)
                     expanded_detail = _format_tool_detail(
@@ -4581,34 +4571,6 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                                 "summary": args.get("summary", ""),
                                 "steps": args.get("steps", []),
                             }
-                        elif name == "display_diagram":
-                            from agent.tools.business.diagram import handle_display_diagram
-                            result = handle_display_diagram(args, session_id=self._session_id)
-                            tool_result = result
-                            if result.get("ok"):
-                                yield {
-                                    "type": "canvas_event",
-                                    "canvas_action": "diagram_update",
-                                    "xml": result.get("xml", ""),
-                                    "project_id": (result.get("project") or {}).get("id", ""),
-                                }
-                        elif name == "edit_diagram":
-                            from agent.tools.business.diagram import handle_edit_diagram
-                            result = handle_edit_diagram(args, session_id=self._session_id)
-                            tool_result = result
-                            if result.get("ok"):
-                                yield {
-                                    "type": "canvas_event",
-                                    "canvas_action": "diagram_update",
-                                    "xml": result.get("xml", ""),
-                                    "project_id": args.get("project_id", ""),
-                                }
-                        elif name == "get_diagram":
-                            from agent.tools.business.diagram import handle_get_diagram
-                            tool_result = handle_get_diagram(args, session_id=self._session_id)
-                        elif name == "get_shape_library":
-                            from agent.tools.business.diagram import handle_get_shape_library
-                            tool_result = handle_get_shape_library(args, session_id=self._session_id)
                         elif name.startswith("mcp__"):
                             tool_result = self._mcp_manager.call_tool(name, args)
                             recorder = getattr(self, "_mcp_discovery_recorder", None)
@@ -4703,68 +4665,6 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
 
             # ── Final text response ───────────────────────────────────────────
             else:
-                # Text fallback: some providers (e.g. MiniMax-M3) emit the
-                # display_diagram tool call as pseudo-XML inside the reply text
-                # instead of via native tool_calls. Parse and execute it here so
-                # the canvas still renders.
-                _fallback_calls = _parse_text_fallback_tool_calls(full_content)
-                if _fallback_calls and not tc_acc:
-                    from agent.tools.business.diagram import (
-                        handle_display_diagram,
-                        handle_edit_diagram,
-                    )
-                    log.info(
-                        "[tool] text-fallback recovered %d tool call(s) from reply text: %s",
-                        len(_fallback_calls),
-                        [n for n, _ in _fallback_calls],
-                    )
-                    for fb_name, fb_args in _fallback_calls:
-                        _fb_t0 = time.monotonic()
-                        yield {"type": "tool_start", "tool": fb_name, "display": fb_name}
-                        try:
-                            if fb_name == "display_diagram":
-                                fb_result = handle_display_diagram(fb_args, session_id=self._session_id)
-                            elif fb_name == "edit_diagram":
-                                fb_result = handle_edit_diagram(fb_args, session_id=self._session_id)
-                            else:
-                                fb_result = {"ok": False, "error": f"unknown fallback tool {fb_name}"}
-                        except Exception as exc:
-                            fb_result = {"ok": False, "error": str(exc)}
-                            log.error("[tool] text-fallback %s FAILED: %s", fb_name, exc)
-                        if isinstance(fb_result, dict) and fb_result.get("ok"):
-                            yield {
-                                "type": "canvas_event",
-                                "canvas_action": "diagram_update",
-                                "xml": fb_result.get("xml", ""),
-                                "project_id": (fb_result.get("project") or {}).get("id", "")
-                                or fb_args.get("project_id", ""),
-                            }
-                        yield {
-                            "type": "tool_result",
-                            "tool": fb_name,
-                            "ok": bool(isinstance(fb_result, dict) and fb_result.get("ok")),
-                            "error": fb_result.get("error") if isinstance(fb_result, dict) else "",
-                            "content": str(fb_result)[:500],
-                            "elapsed_seconds": round(time.monotonic() - _fb_t0, 3),
-                        }
-                        log.info(
-                            "[tool] text-fallback %s OK  %.2fs  ok=%s",
-                            fb_name,
-                            time.monotonic() - _fb_t0,
-                            bool(isinstance(fb_result, dict) and fb_result.get("ok")),
-                        )
-                    # Strip the pseudo-XML tool tags from the visible reply
-                    # so the user only sees the diagram + any plain commentary.
-                    _stripped = full_content
-                    for _tn in _TEXT_FALLBACK_TOOL_NAMES:
-                        _stripped = re.sub(
-                            rf"<{_tn}\b[^>]*>[\s\S]*?</{_tn}>",
-                            "",
-                            _stripped,
-                            flags=re.IGNORECASE,
-                        )
-                    full_content = _stripped.strip()
-
                 if reasoning_content:
                     all_reasoning.append(reasoning_content)
 

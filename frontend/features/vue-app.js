@@ -23,10 +23,6 @@ const islandLoaders = Object.freeze({
     const { mountWorkspaceUi } = await import("./ui/workspace-ui.js");
     mountWorkspaceUi();
   },
-  businessCanvas: async () => {
-    const { mountBusinessCanvasUi } = await import("./ui/business-canvas-ui.js");
-    mountBusinessCanvasUi();
-  },
 });
 
 const pendingIslands = new Map();

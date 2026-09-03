@@ -27,8 +27,8 @@
 ## 当前边界
 
 - 当前只交付桌面端；手机端不是完成条件。
-- 最新本地基线为 161 项 Python 测试通过，Ruff、Dashboard/Chat production build 和发布 staging 审计通过。
-- 固定/上传 CSV/XLSX 分析、JSON/CSV 下载、Excel/Word/PPT/Dashboard 交付和会话 Artifact 历史已有本地证据；跨进程关联和复杂 Office 视觉未完成。
+- 最新本地基线为 196 项 Python 测试通过，Ruff、ESLint、Dashboard/Chat production build 和差异格式检查通过；当前发布 staging 为 489 个文件且 artifact audit 为 0 findings、0 symlink。
+- 固定/上传 CSV/XLSX 分析、JSON/CSV 下载、Excel/Word/PPT/Dashboard 交付和会话 Artifact 历史已有本地证据；工作区 Artifact 已验证独立应用进程重开关联，复杂 Office 视觉仍未完成。
 - GitHub 私有仓库 `main` 已建立并接收当前提交；仍须分别验证后续 commit、push、deploy 和 live 状态。
 
 ## 工作约定

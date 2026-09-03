@@ -2,6 +2,7 @@
 import { getUiIsland } from "../core/ui-registry.js";
 import { ensureUiIsland } from "./vue-app.js";
 import { toast } from "../core/overlay.js";
+import { iconSpan } from "../core/icons.js";
 
 const pfs = () => globalThis.PFS;
 
@@ -330,7 +331,7 @@ async function scanLocalMcp() {
       statusEl.textContent = data.error || "扫描失败";
       statusEl.style.color = "#ef4444";
       if (data.hint) {
-        warnEl.innerHTML = `💡 ${_esc(data.hint)}`;
+        warnEl.innerHTML = `${iconSpan("lightbulb", { className: "pfs-icon", size: 15 })}<span>${_esc(data.hint)}</span>`;
         warnEl.style.color = "#64748b";
         warnEl.style.background = "#f8fafc";
         warnEl.classList.remove('hidden');
@@ -344,15 +345,14 @@ async function scanLocalMcp() {
     const pct = data.confidence ?? 0;
     const confColor = pct >= 80 ? "#10b981" : pct >= 50 ? "#f59e0b" : "#ef4444";
     statusEl.innerHTML =
-      `✓ 已识别 <strong style="color:${confColor}">${_esc(data.pkg_name)}</strong>` +
+      `<strong style="color:${confColor}">已识别</strong> <strong style="color:${confColor}">${_esc(data.pkg_name)}</strong>` +
       `（置信度 ${pct}%）— 请检查命令预览`;
     statusEl.style.color = "#475569";
 
     if (data.warnings && data.warnings.length) {
       warnEl.style.color = "#f59e0b";
       warnEl.style.background = "#fef3c7";
-      warnEl.innerHTML = "⚠️ 注意：<br>" +
-        data.warnings.map(w => `• ${_esc(w)}`).join("<br>");
+      warnEl.innerHTML = `<strong>注意</strong><ul>${data.warnings.map(w => `<li>${_esc(w)}</li>`).join("")}</ul>`;
       warnEl.classList.remove('hidden');
     }
 
@@ -431,7 +431,7 @@ async function parseMcpConfig() {
       statusEl.style.color = "#ef4444";
       // If LLM not configured, show hint
       if (res.status === 503) {
-        hintEl.textContent = "💡 请先在「模型设置」中配置 LLM，再使用智能填充功能";
+        hintEl.innerHTML = `${iconSpan("lightbulb", { className: "pfs-icon", size: 15 })}<span>请先在「模型设置」中配置 LLM，再使用智能填充功能</span>`;
         hintEl.classList.remove('hidden');
       }
       return;
@@ -441,12 +441,11 @@ async function parseMcpConfig() {
 
     // Show warnings if any
     if (data.warnings && data.warnings.length) {
-      warnEl.innerHTML = "⚠️ 注意：<br>" +
-        data.warnings.map(w => `• ${_esc(w)}`).join("<br>");
+      warnEl.innerHTML = `<strong>注意</strong><ul>${data.warnings.map(w => `<li>${_esc(w)}</li>`).join("")}</ul>`;
       warnEl.classList.remove('hidden');
     }
 
-    statusEl.textContent = "✓ 已填充，请检查并补全标红的必填项";
+    statusEl.textContent = "已填充，请检查并补全标红的必填项";
     statusEl.style.color = "#10b981";
 
     // Scroll form into view so user sees the filled fields

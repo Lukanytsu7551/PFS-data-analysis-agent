@@ -75,7 +75,7 @@
 .sb-status-row {
   display: flex; align-items: center; gap: 9px;
   width: 100%;
-  padding: 9px 10px;            /* was 7px×9px — taller rows */
+  padding: 9px 10px;            /* was 7px by 9px — taller rows */
   border: none; background: transparent;
   border-radius: var(--radius-sm);
   font-family: inherit; font-size: var(--fs-sm);
@@ -100,6 +100,22 @@
 }
 .sb-status-dot--info { background: var(--color-primary); box-shadow: 0 0 6px rgba(0, 47, 167, .35); }
 
+/* Shared icon primitive: explicit geometry prevents flex compression and glyph drift. */
+.pfs-icon, .pfs-icon-box, .source-item-icon-box {
+  width: 18px; height: 18px; min-width: 18px; min-height: 18px;
+  flex: 0 0 18px; display: inline-flex; align-items: center; justify-content: center;
+  line-height: 0; vertical-align: middle;
+}
+.pfs-icon { display: block; overflow: visible; }
+.pfs-icon-box .pfs-icon, .source-item-icon-box .pfs-icon { width: 100%; height: 100%; }
+.source-item-icon-box { color: var(--color-text-mute); }
+.sb-nav-icon, .composer-icon-box, .job-card-icon, .turn-queue-icon, .ppt-outline-icon {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  line-height: 0;
+}
+.sb-nav-icon .pfs-icon, .composer-icon-box .pfs-icon { width: 18px; height: 18px; }
+.sb-status-row > .sb-status-dot { flex: 0 0 8px; }
+
 .sb-status-label {
   color: var(--color-sidebar-fg-dim);
   font-size: var(--fs-xs); font-weight: 500;
@@ -119,7 +135,7 @@
   color: var(--color-sidebar-fg-mute); transform: translateX(2px);
 }
 
-/* Model row — single-line: dot · MODEL · [select grows] · ⚙
+/* Model row — single-line: status / MODEL / selector grows / settings
    Tighter gap (6px) and the label drops its 48px min-width so the <select>
    snuggles up to the caption instead of floating in the middle of the row. */
 .sb-status-row--select { cursor: default; gap: 6px; }
@@ -163,16 +179,18 @@
 .sb-status-iconbtn {
   border: none; background: transparent;
   color: var(--color-sidebar-fg-dim);
+  width: 28px; min-width: 28px; height: 28px;
   font-size: var(--fs-lg); line-height: 1;
-  padding: 3px 6px; border-radius: var(--radius-sm);
-  cursor: pointer; flex-shrink: 0;
+  padding: 0; border-radius: var(--radius-sm);
+  cursor: pointer; flex: 0 0 28px;
   display: inline-flex; align-items: center; justify-content: center;
   transition: color var(--t-fast), background var(--t-fast);
 }
 .sb-status-iconbtn svg {
-  width: 14px; height: 14px;
+  width: 16px; height: 16px; flex: 0 0 16px;
+  display: block; overflow: visible;
   stroke: currentColor; fill: none;
-  stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
 }
 .sb-status-iconbtn:hover {
   color: var(--color-sidebar-fg); background: var(--color-sidebar-hover);
@@ -201,7 +219,7 @@
   opacity: .75;
 }
 .sb-autosave-row::before {
-  content: '💾';
+  content: ''; width: 12px; height: 12px; border: 1.5px solid currentColor; border-radius: 2px;
   font-size: 10px;
   opacity: .8;
 }
@@ -249,7 +267,7 @@
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   border: 1px solid transparent; cursor: pointer;
   border-radius: var(--radius-sm);
-  padding: 9px 13px;                  /* was 8×12 — bigger touch target */
+  padding: 9px 13px;                  /* was 8 by 12 — bigger touch target */
   font-family: inherit; font-size: var(--fs-md); font-weight: 500;
   transition: all var(--t-fast);
 }
@@ -411,7 +429,7 @@
   color: var(--color-primary);
   background: var(--color-sidebar-bg-2);
 }
-.sb-iconbtn-wide { flex: 1; }   /* "🔄 检查更新" expands to fill row */
+.sb-iconbtn-wide { flex: 1; }   /* The labeled update action expands to fill the row. */
 
 body.focus-mode .sidebar {
   display: none;
@@ -573,6 +591,10 @@ body.focus-mode #btn-focus-mode,
 }
 .sidebar-hub .sb-footer-actions .sb-footer-settings {
   padding-inline: 6px;
+}
+.sidebar-hub .sb-footer-actions .sb-footer-settings svg {
+  width: 17px; height: 17px; flex: 0 0 17px;
+  display: block; overflow: visible;
 }
 .sidebar-hub .sb-footer-actions .sb-footer-update {
   grid-column: 1 / -1;
@@ -888,8 +910,11 @@ body.focus-mode #btn-focus-mode,
   display: flex; align-items: center; gap: 6px; margin-left: auto;
 }
 .skill-picker-view {
-  cursor: pointer; font-size: 13px; opacity: .6;
+  cursor: pointer; opacity: .6; display: inline-flex; align-items: center; justify-content: center;
 }
+.skill-picker-view .pfs-icon { width: 14px; height: 14px; }
+.update-state-icon { display: inline-flex; align-items: center; justify-content: center; }
+.update-state-icon .pfs-icon { width: 20px; height: 20px; }
 .skill-picker-view:hover { opacity: 1; }
 
 /* ── Skill detail / editor — right drawer (sidebar dark theme) ──── */
@@ -1538,6 +1563,7 @@ body.focus-mode #btn-focus-mode,
   flex-shrink: 0;
   line-height: 1;
 }
+.source-item-btn .pfs-icon, .saved-del .pfs-icon, .saved-rename .pfs-icon { width: 14px; height: 14px; }
 
 .source-item-info {
   flex: 1;
@@ -1594,7 +1620,13 @@ body.focus-mode #btn-focus-mode,
 .required-mark { color: var(--color-danger); }
 
 /* Inline icon vertically aligned next to button label */
-.icon-inline { vertical-align: -2px; margin-right: 4px; }
+.icon-inline {
+  width: 16px; height: 16px; flex: 0 0 16px;
+  display: inline-block; overflow: visible;
+  vertical-align: -3px; margin-right: 4px;
+  stroke: currentColor; fill: none; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+}
 
 /* Full-width input inside a flex row */
 .input-fill { width: 100%; }

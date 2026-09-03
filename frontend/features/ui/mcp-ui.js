@@ -1,4 +1,5 @@
 import { registerUiIsland } from "../../core/ui-registry.js";
+import { iconSpan, iconVNode } from "../../core/icons.js";
 
 // Progressive Vue island #6: MCP settings modal (server list + form fields).
 // Mount points: #mcp-server-list, #mcp-form-fields.
@@ -14,7 +15,7 @@ export function mountMcpUi() {
 
   const { h, render, reactive, Fragment } = Vue;
   const STATUS_ICON = {
-    connected: "🟢", connecting: "🟡", disconnected: "⚪", error: "🔴",
+    connected: "check", connecting: "activity", disconnected: "plug", error: "circleHelp",
   };
 
   const state = reactive({
@@ -64,14 +65,14 @@ export function mountMcpUi() {
   }
 
   function _renderServerCard(s) {
-    const icon = STATUS_ICON[s.status] || "⚪";
+    const icon = STATUS_ICON[s.status] || "plug";
     const toolCount = s.tool_count != null ? `${s.tool_count} 个工具` : "";
     const canShowTools = s.status === "connected" && s.tool_count > 0;
     const showConnect = s.status !== "connected" && s.status !== "connecting";
 
     // ── Row 1: icon + name + id badge + transport ──────────────────
     const metaRow = h("div", { style: "display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0" }, [
-      h("span", { style: "font-size:16px;flex-shrink:0" }, icon),
+      h("span", { class: "mcp-status-icon", "aria-hidden": "true" }, [iconVNode(h, icon, { size: 16 })]),
       h("strong", { style: "font-size:13px;min-width:0;word-break:break-all" }, s.label || ""),
       h("code", { style: "font-size:10px;padding:1px 5px;border-radius:4px;flex-shrink:0" }, s.server_id || ""),
       h("span", { style: "font-size:11px;color:var(--color-text-mute);flex-shrink:0" }, s.transport || ""),
@@ -108,7 +109,7 @@ export function mountMcpUi() {
         class: "btn-sm btn-sm-ghost",
         style: "padding:2px 8px;font-size:11px;white-space:nowrap",
         onClick: () => callbacks.onToggleTools && callbacks.onToggleTools(s.server_id),
-      }, s.toolsOpen ? "收起工具 ▴" : "查看工具 ▾"));
+      }, [iconVNode(h, s.toolsOpen ? "chevronUp" : "chevronDown", { size: 13 }), h("span", null, s.toolsOpen ? "收起工具" : "查看工具")]));
     }
     actionChildren.push(h("button", {
       class: "btn-sm btn-sm-ghost",
@@ -191,7 +192,11 @@ export function mountMcpUi() {
       formWrap.classList.toggle('hidden', false);   // 始终移除 hidden 避免 !important 干扰
       formWrap.classList.toggle('show', state.form.open);
     }
-    if (toggleEl) toggleEl.textContent = state.form.open ? "▲ 折叠" : "＋ 添加 MCP 服务器";
+    if (toggleEl) {
+      const icon = state.form.open ? "chevronUp" : "plus";
+      const label = state.form.open ? "折叠" : "添加 MCP 服务器";
+      toggleEl.innerHTML = iconSpan(icon, { className: "pfs-icon", size: 16 }) + `<span>${label}</span>`;
+    }
 
     if (!state.form.open) {
       render(null, root2);
@@ -262,8 +267,10 @@ export function mountMcpUi() {
     // stdio fields
     if (F.transport === "stdio") {
       const stdioChildren = [
-        h("div", { class: "f-warn-chip" },
-          "⚠️ 安全提示：仅允许运行 uvx / uv / npx / node / python / python3 / deno 命令。args 和 env 中不得含有 Shell 元字符或危险环境变量。"),
+        h("div", { class: "f-warn-chip" }, [
+          iconVNode(h, "shield", { size: 15 }),
+          h("span", null, "安全提示：仅允许运行 uvx / uv / npx / node / python / python3 / deno 命令。args 和 env 中不得含有 Shell 元字符或危险环境变量。"),
+        ]),
         h("input", {
           type: "text", id: "mcp-command",
           placeholder: "命令，例如 npx 或 uvx",

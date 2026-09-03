@@ -15,7 +15,6 @@ from data.sources import (
     ExcelDataSource,
     CSVDataSource,
     SQLDataSource,
-    GoogleSheetsDataSource,
     HTTPAPIDataSource,
 )
 
@@ -25,6 +24,5 @@ __all__ = [
     "ExcelDataSource",
     "CSVDataSource",
     "SQLDataSource",
-    "GoogleSheetsDataSource",
     "HTTPAPIDataSource",
 ]

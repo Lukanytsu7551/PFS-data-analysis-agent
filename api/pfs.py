@@ -13,6 +13,7 @@ import csv
 import hashlib
 import io
 import json
+import logging
 from pathlib import Path
 import re
 from urllib.parse import unquote, urlparse
@@ -38,9 +39,15 @@ from pfs_agent.reporting import (
     load_tabular_snapshot,
 )
 from pfs_agent.query import QueryInterpretationError, parse_report_question
+from pfs_agent.runs import (
+    AnalysisRunAlreadyActive,
+    AnalysisRunCanceled,
+    analysis_run_registry,
+)
 
 
 bp = Blueprint("pfs", __name__)
+log = logging.getLogger(__name__)
 
 _FIXTURE_METRIC = MetricContract(
     metric_id="sales_amount",
@@ -219,6 +226,15 @@ def _governance_result(result: object, sid: str = "") -> dict:
             source_type="tabular_snapshot",
             trust_level="computed",
             content_sha256=str(item.get("content_sha256") or payload["snapshot"].get("content_sha256") or ""),
+            publisher="PFS 本地上传数据",
+            source_id=str(item.get("source_id") or payload["snapshot"].get("source_id") or ""),
+            file_name=str(item.get("file_name") or payload["snapshot"].get("file_name") or ""),
+            worksheet=str(item.get("worksheet") or payload["snapshot"].get("worksheet") or ""),
+            included_rows=int(item.get("included_rows") or 0),
+            locator=str(item.get("locator") or ""),
+            date_from=str(item.get("date_from") or ""),
+            date_to=str(item.get("date_to") or ""),
+            columns=tuple(item.get("columns") or payload["snapshot"].get("columns") or ()),
         ))
         ledger_entries.append(entry)
     entry_by_report_id = {item.get("evidence_id"): entry for item, entry in zip(evidence, ledger_entries)}
@@ -262,7 +278,15 @@ def _governance_result(result: object, sid: str = "") -> dict:
     payload["evidence"] = [
         {**item, "evidence_id": entry.evidence_id, "source_url": entry.source_url,
          "title": entry.title, "captured_at": entry.captured_at,
-         "publisher": entry.publisher, "published_at": entry.published_at}
+         "publisher": entry.publisher, "published_at": entry.published_at,
+         "source_id": entry.source_id or item.get("source_id", ""),
+         "file_name": entry.file_name or item.get("file_name", ""),
+         "worksheet": entry.worksheet or item.get("worksheet", ""),
+         "included_rows": entry.included_rows or item.get("included_rows", 0),
+         "locator": entry.locator or item.get("locator", ""),
+         "date_from": entry.date_from or item.get("date_from", ""),
+         "date_to": entry.date_to or item.get("date_to", ""),
+         "columns": list(entry.columns or item.get("columns", ())) }
         for item, entry in zip(evidence, ledger_entries)
     ]
     return payload
@@ -557,25 +581,45 @@ def _delivery_artifacts(result: object, data_source: object, sid: str, output_fo
         "evidence_ids": [item.get("evidence_id") for item in payload.get("evidence", [])],
         "claim_details": list(payload.get("claims", [])),
         "evidence_details": list(payload.get("evidence", [])),
+        "cost": {
+            "amount": 0.0,
+            "currency": "USD",
+            "estimated": False,
+            "source": "deterministic_no_model",
+            "model_calls": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        },
         "download_count": 0,
         "download_history": [],
     }
-    if output_format == "xlsx":
-        tool_result = agent._tool_export_excel([selected_table], f"pfs-report-{run_id}")
-    elif output_format == "docx":
-        tool_result = agent._tool_export_report(f"PFS {metric['label']}分析报告", _report_sections(result))
-    elif output_format == "pptx":
-        tool_result = agent._tool_generate_ppt(
-            f"PFS {metric['label']}分析",
-            _ppt_slides(result),
-            f"pfs-report-{run_id}",
-        )
-    else:
-        tool_result = agent._tool_generate_dashboard(
-            f"PFS {metric['label']}分析看板",
-            chart_specs,
-            "pfs",
-        )
+    try:
+        if output_format == "xlsx":
+            tool_result = agent._tool_export_excel([selected_table], f"pfs-report-{run_id}")
+        elif output_format == "docx":
+            tool_result = agent._tool_export_report(
+                f"PFS {metric['label']}分析报告", _report_sections(result)
+            )
+        elif output_format == "pptx":
+            tool_result = agent._tool_generate_ppt(
+                f"PFS {metric['label']}分析",
+                _ppt_slides(result),
+                f"pfs-report-{run_id}",
+            )
+        else:
+            tool_result = agent._tool_generate_dashboard(
+                f"PFS {metric['label']}分析看板",
+                chart_specs,
+                "pfs",
+            )
+    except ReportingContractError:
+        raise
+    except Exception as exc:
+        log.warning("[pfs-delivery] artifact generation failed: %s", exc)
+        raise ReportingContractError(
+            "交付物生成失败",
+            code="delivery_generation_failed",
+        ) from exc
     if str(tool_result).startswith("❌"):
         raise ReportingContractError(
             str(tool_result).removeprefix("❌").strip(),
@@ -626,6 +670,7 @@ def _delivery_artifacts(result: object, data_source: object, sid: str, output_fo
                 "evidence_ids": agent._artifact_metadata["evidence_ids"],
                 "claim_details": agent._artifact_metadata["claim_details"],
                 "evidence_details": agent._artifact_metadata["evidence_details"],
+                "cost": agent._artifact_metadata["cost"],
             }
         )
     if not artifacts:
@@ -686,6 +731,7 @@ def _session_export_result(sid: str, payload: Mapping[str, object]) -> object:
             request=parsed.request,
             source_id=source_id,
             worksheet=worksheet,
+            file_name=str(getattr(_source, "name", "") or ""),
         )
 
     date_column = _bounded(payload.get("date_column") or "month", "date_column", limit=120, required=True)
@@ -708,6 +754,7 @@ def _session_export_result(sid: str, payload: Mapping[str, object]) -> object:
         ),
         source_id=source_id,
         worksheet=worksheet,
+        file_name=str(getattr(_source, "name", "") or ""),
     )
 
 
@@ -725,6 +772,7 @@ def capabilities():
                 "report_export_json": "implemented_server_recomputed",
                 "report_export_csv": "implemented_server_recomputed",
                 "delivery_xlsx_docx_pptx_dashboard": "implemented_deterministic_desktop_slice",
+                "analysis_cancel": "implemented_single_process_cooperative",
             },
             "models": {
                 "deepseek_chat": "verified_local_http",
@@ -754,7 +802,7 @@ def export_fixture_report():
         output_format = _export_format(payload)
         return _export_response(_fixture_export_result(payload), output_format)
     except QueryInterpretationError as exc:
-        return jsonify({"ok": False, "error": str(exc), "code": "pfs_query_failed"}), 400
+        return _error(exc)
     except (TypeError, ValueError, OSError) as exc:
         return _error(exc)
 
@@ -768,7 +816,7 @@ def export_session_report(sid: str):
         output_format = _export_format(payload)
         return _export_response(_session_export_result(sid, payload), output_format)
     except QueryInterpretationError as exc:
-        return jsonify({"ok": False, "error": str(exc), "code": "pfs_query_failed"}), 400
+        return _error(exc)
     except (TypeError, ValueError, OSError) as exc:
         return _error(exc)
 
@@ -796,7 +844,7 @@ def deliver_fixture_report():
             )
         )
     except QueryInterpretationError as exc:
-        return jsonify({"ok": False, "error": str(exc), "code": "pfs_query_failed"}), 400
+        return _error(exc)
     except (TypeError, ValueError, OSError) as exc:
         return _error(exc)
 
@@ -821,7 +869,7 @@ def deliver_session_report(sid: str):
             )
         )
     except QueryInterpretationError as exc:
-        return jsonify({"ok": False, "error": str(exc), "code": "pfs_query_failed"}), 400
+        return _error(exc)
     except (TypeError, ValueError, OSError) as exc:
         return _error(exc)
 
@@ -870,8 +918,10 @@ def session_pfs_sources(sid: str):
             continue
         source_id = str(entry.get("id") or "")
         worksheets = []
+        validation_error = None
         try:
             if path.suffix.lower() == ".xlsx":
+                worksheet_snapshots = {}
                 for worksheet in list_xlsx_worksheets(path):
                     try:
                         sheet_snapshot = load_tabular_snapshot(
@@ -881,10 +931,51 @@ def session_pfs_sources(sid: str):
                             worksheet=worksheet,
                         )
                     except ReportingContractError as exc:
-                        worksheets.append(
-                            {"name": worksheet, "columns": [], "row_count": 0, "error": str(exc)}
-                        )
+                        if exc.code == "source_date_invalid":
+                            try:
+                                sheet_snapshot = load_tabular_snapshot(
+                                    path,
+                                    source_id=source_id,
+                                    date_column="",
+                                    worksheet=worksheet,
+                                )
+                            except ReportingContractError as fallback_exc:
+                                worksheets.append(
+                                    {
+                                        "name": worksheet,
+                                        "columns": [],
+                                        "row_count": 0,
+                                        "error": str(fallback_exc),
+                                        "error_code": fallback_exc.code,
+                                    }
+                                )
+                            else:
+                                worksheet_snapshots[worksheet] = sheet_snapshot
+                                worksheets.append(
+                                    {
+                                        "name": worksheet,
+                                        "columns": list(sheet_snapshot.columns),
+                                        "row_count": sheet_snapshot.row_count,
+                                        "min_date": "",
+                                        "max_date": "",
+                                        "validation_error": {
+                                            "code": exc.code,
+                                            "message": str(exc),
+                                        },
+                                    }
+                                )
+                        else:
+                            worksheets.append(
+                                {
+                                    "name": worksheet,
+                                    "columns": [],
+                                    "row_count": 0,
+                                    "error": str(exc),
+                                    "error_code": exc.code,
+                                }
+                            )
                     else:
+                        worksheet_snapshots[worksheet] = sheet_snapshot
                         worksheets.append(
                             {
                                 "name": worksheet,
@@ -895,32 +986,39 @@ def session_pfs_sources(sid: str):
                             }
                         )
                 usable = [item for item in worksheets if item["columns"]]
-                snapshot = (
-                    load_tabular_snapshot(
-                        path,
-                        source_id=source_id,
-                        date_column="month",
-                        worksheet=usable[0]["name"],
-                    )
-                    if len(usable) == 1
-                    else None
-                )
+                snapshot = worksheet_snapshots[usable[0]["name"]] if len(usable) == 1 else None
+                if len(usable) == 1:
+                    validation_error = usable[0].get("validation_error")
             else:
-                snapshot = load_tabular_snapshot(path, source_id=source_id, date_column="month")
+                try:
+                    snapshot = load_tabular_snapshot(
+                        path, source_id=source_id, date_column="month"
+                    )
+                except ReportingContractError as exc:
+                    if exc.code != "source_date_invalid":
+                        raise
+                    snapshot = load_tabular_snapshot(path, source_id=source_id, date_column="")
+                    validation_error = {"code": exc.code, "message": str(exc)}
         except ReportingContractError:
             continue
-        sources.append(
-            {
-                "source_id": source_id,
-                "name": str(getattr(source, "name", "") or path.name),
-                "file_name": path.name,
-                "columns": list(snapshot.columns) if snapshot else [],
-                "row_count": snapshot.row_count if snapshot else sum(item["row_count"] for item in worksheets),
-                "min_date": snapshot.min_date if snapshot else "",
-                "max_date": snapshot.max_date if snapshot else "",
-                "worksheets": worksheets,
-            }
-        )
+        source_payload = {
+            "source_id": source_id,
+            "name": str(getattr(source, "name", "") or path.name),
+            # Keep the physical path private.  Consumers of the source
+            # listing should receive the filename the user uploaded, just as
+            # the report snapshot and Ledger do.
+            "file_name": str(getattr(source, "name", "") or path.name),
+            "columns": list(snapshot.columns) if snapshot else [],
+            "row_count": snapshot.row_count
+            if snapshot
+            else sum(item["row_count"] for item in worksheets),
+            "min_date": snapshot.min_date if snapshot else "",
+            "max_date": snapshot.max_date if snapshot else "",
+            "worksheets": worksheets,
+        }
+        if validation_error:
+            source_payload["validation_error"] = validation_error
+        sources.append(source_payload)
     return jsonify({"ok": True, "sources": sources})
 
 
@@ -928,8 +1026,19 @@ def session_pfs_sources(sid: str):
 @require_session_ownership
 def session_pfs_analysis(sid: str):
     """Analyze one uploaded CSV/XLSX with an explicit metric contract."""
+    run_id = ""
+    registered = False
     try:
         payload = _body()
+        run_id = _bounded(
+            payload.get("run_id") or f"pfs-{uuid.uuid4().hex[:16]}",
+            "run_id",
+            limit=120,
+            required=True,
+        )
+        analysis_run_registry.begin(sid, run_id)
+        registered = True
+        analysis_run_registry.checkpoint(sid, run_id)
         source_id = _bounded(payload.get("source_id"), "source_id", limit=160, required=True)
         path, source = _session_tabular_source(sid, source_id)
         worksheet = _worksheet_from_payload(payload)
@@ -942,13 +1051,8 @@ def session_pfs_analysis(sid: str):
         snapshot = load_tabular_snapshot(
             path, source_id=source_id, date_column=date_column, worksheet=worksheet
         )
+        analysis_run_registry.checkpoint(sid, run_id)
         metric = _metric_from_payload(payload, snapshot.columns)
-        run_id = _bounded(
-            payload.get("run_id") or f"pfs-{uuid.uuid4().hex[:16]}",
-            "run_id",
-            limit=120,
-            required=True,
-        )
         result = analyze_file(
             path,
             metric=metric,
@@ -961,11 +1065,21 @@ def session_pfs_analysis(sid: str):
             ),
             source_id=source_id,
             worksheet=worksheet,
+            file_name=str(getattr(source, "name", "") or ""),
         )
+        analysis_run_registry.begin_commit(sid, run_id)
+        governed_result = _governance_result(result, sid)
+    except AnalysisRunCanceled as exc:
+        return _error(exc, 409)
+    except AnalysisRunAlreadyActive as exc:
+        return _error(exc, 409)
     except QueryInterpretationError as exc:
-        return jsonify({"ok": False, "error": str(exc), "code": "pfs_query_failed"}), 400
+        return _error(exc)
     except (TypeError, ValueError, OSError) as exc:
         return _error(exc)
+    finally:
+        if registered:
+            analysis_run_registry.finish(sid, run_id)
     return jsonify(
         {
             "ok": True,
@@ -973,7 +1087,7 @@ def session_pfs_analysis(sid: str):
                 "source_id": source_id,
                 "name": str(getattr(source, "name", "") or path.name),
             },
-            "result": _governance_result(result, sid),
+            "result": governed_result,
         }
     )
 
@@ -982,8 +1096,19 @@ def session_pfs_analysis(sid: str):
 @require_session_ownership
 def session_pfs_query(sid: str):
     """Route one explicit natural-language question to deterministic analysis."""
+    run_id = ""
+    registered = False
     try:
         payload = _body()
+        run_id = _bounded(
+            payload.get("run_id") or f"pfs-query-{uuid.uuid4().hex[:16]}",
+            "run_id",
+            limit=120,
+            required=True,
+        )
+        analysis_run_registry.begin(sid, run_id)
+        registered = True
+        analysis_run_registry.checkpoint(sid, run_id)
         question = _bounded(payload.get("question"), "question", limit=500, required=True)
         source_id = _bounded(payload.get("source_id"), "source_id", limit=160, required=True)
         path, source = _session_tabular_source(sid, source_id)
@@ -991,35 +1116,65 @@ def session_pfs_query(sid: str):
         snapshot = load_tabular_snapshot(
             path, source_id=source_id, date_column="month", worksheet=worksheet
         )
+        analysis_run_registry.checkpoint(sid, run_id)
         parsed = parse_report_question(
             question,
             snapshot.columns,
-            run_id=_bounded(
-                payload.get("run_id") or f"pfs-query-{uuid.uuid4().hex[:16]}",
-                "run_id",
-                limit=120,
-                required=True,
-            ),
+            run_id=run_id,
         )
+        analysis_run_registry.checkpoint(sid, run_id)
         result = analyze_file(
             path,
             metric=parsed.metric,
             request=parsed.request,
             source_id=source_id,
             worksheet=worksheet,
+            file_name=str(getattr(source, "name", "") or ""),
         )
+        analysis_run_registry.begin_commit(sid, run_id)
+        governed_result = _governance_result(result, sid)
+    except AnalysisRunCanceled as exc:
+        return _error(exc, 409)
+    except AnalysisRunAlreadyActive as exc:
+        return _error(exc, 409)
     except QueryInterpretationError as exc:
-        return jsonify({"ok": False, "error": str(exc), "code": "pfs_query_failed"}), 400
+        return _error(exc)
     except (TypeError, ValueError, OSError) as exc:
         return _error(exc)
+    finally:
+        if registered:
+            analysis_run_registry.finish(sid, run_id)
     return jsonify(
         {
             "ok": True,
             "source": {"source_id": source_id, "name": str(getattr(source, "name", "") or path.name)},
             "interpretation": parsed.to_dict(),
-            "result": _governance_result(result, sid),
+            "result": governed_result,
         }
     )
+
+
+@bp.post("/api/session/<sid>/pfs/runs/<run_id>/cancel")
+@require_session_ownership
+def cancel_session_pfs_run(sid: str, run_id: str):
+    """Request cooperative cancellation for one active run in this session."""
+    try:
+        bounded_run_id = _bounded(run_id, "run_id", limit=120, required=True)
+    except (TypeError, ValueError, OSError) as exc:
+        return _error(exc)
+    accepted = analysis_run_registry.request_cancel(sid, bounded_run_id)
+    if not accepted:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "analysis run is not active in this session",
+                    "code": "pfs_analysis_run_not_active",
+                }
+            ),
+            404,
+        )
+    return jsonify({"ok": True, "run_id": bounded_run_id, "status": "cancel_requested"}), 202
 
 
 @bp.get("/api/pfs/ledger")

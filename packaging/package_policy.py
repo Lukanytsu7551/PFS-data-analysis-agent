@@ -35,7 +35,7 @@ IGNORED_CACHE_PARTS = frozenset({
     "__pycache__", ".ruff_cache", ".pytest_cache", ".mypy_cache",
 })
 FORBIDDEN_PARTS = frozenset({
-    "mcp", "node_modules", "uploads", "outputs", ".uploads", ".pfs",
+    "mcp", "drawio", "node_modules", "uploads", "outputs", ".uploads", ".pfs",
     ".git", ".github", ".agents", ".claude", ".idea", ".vscode",
     ".venv", "venv", "build", "dist", "releases",
 })

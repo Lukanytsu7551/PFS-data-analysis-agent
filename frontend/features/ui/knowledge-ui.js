@@ -1,4 +1,5 @@
 import { registerUiIsland } from "../../core/ui-registry.js";
+import { iconSpan, iconVNode } from "../../core/icons.js";
 
 // Progressive Vue island #5: Knowledge base modal (tabs + 3 list panels + form body).
 // Mount points: #kb-tabs, #kb-panel-metrics, #kb-panel-rules, #kb-panel-notes, #kb-form-body.
@@ -27,10 +28,10 @@ export function mountKnowledgeUi() {
   const { h, render, Fragment, reactive } = Vue;
 
   const TABS = [
-    { key: "metrics", icon: "📐", label: "指标定义" },
-    { key: "rules",   icon: "🛡", label: "业务规则" },
-    { key: "notes",   icon: "📝", label: "背景知识" },
-    { key: "import",  icon: "⬆", label: "导入文件", importTab: true },
+    { key: "metrics", icon: "ruler", label: "指标定义" },
+    { key: "rules",   icon: "shield", label: "业务规则" },
+    { key: "notes",   icon: "file", label: "背景知识" },
+    { key: "import",  icon: "upload", label: "导入文件", importTab: true },
   ];
 
   const TYPE_LABELS = {
@@ -111,7 +112,7 @@ export function mountKnowledgeUi() {
             }, [
               h("span", { class: "kb-category-select-label" }, activeCategory ? activeCategory.name : "请选择业务分类"),
               activeCategory && !activeCategory.enabled ? h("span", { class: "kb-category-select-off" }, "停用") : null,
-              h("span", { class: "kb-category-caret" }, "▾"),
+              h("span", { class: "kb-category-caret pfs-icon-slot" }, iconVNode(h, "chevronDown", { size: 16 })),
             ]),
             state.categoryMenuOpen ? _renderCategoryMenu() : null,
           ]),
@@ -131,7 +132,7 @@ export function mountKnowledgeUi() {
       return h("button", {
         class: cls,
         onClick: () => callbacks.onSwitchTab && callbacks.onSwitchTab(tb.key),
-      }, `${tb.icon} ${tb.label}`);
+      }, [h("span", { class: "pfs-icon-box", innerHTML: iconSpan(tb.icon, { className: "pfs-icon", size: 16 }) }), h("span", null, tb.label)]);
     }));
     render(h(Fragment, null, [categoryBar, tabs]), root1);
   }
@@ -156,7 +157,7 @@ export function mountKnowledgeUi() {
             callbacks.onSelectCategory && callbacks.onSelectCategory(cat.id);
           },
         }, [
-          h("span", { class: "kb-category-check" }, active ? "✓" : ""),
+          h("span", { class: "kb-category-check", innerHTML: active ? iconSpan("check", { className: "pfs-icon", size: 14 }) : "", "aria-hidden": "true" }),
           h("span", { class: "kb-category-option-name" }, cat.name),
           h("button", {
             class: ["kb-category-toggle", enabled ? "on" : "off"],
@@ -174,7 +175,7 @@ export function mountKnowledgeUi() {
               e.stopPropagation();
               callbacks.onDeleteCategory && callbacks.onDeleteCategory(cat.id);
             },
-          }, "×"),
+          }, iconVNode(h, "close", { size: 14 })),
         ]);
       })),
       h("div", { class: "kb-category-menu-add" }, [
@@ -209,11 +210,11 @@ export function mountKnowledgeUi() {
           class: "btn-sm btn-sm-ghost",
           title: "刷新列表",
           onClick: () => callbacks.onSwitchTab && callbacks.onSwitchTab(type),
-        }, "↻ 刷新"),
+        }, [iconVNode(h, "refresh", { size: 14 }), h("span", null, "刷新")]),
         h("button", {
           class: "btn-sm btn-sm-primary",
           onClick: () => callbacks.onOpenForm && callbacks.onOpenForm(type, null),
-        }, `＋ 新增${TYPE_LABELS[type]}`),
+        }, [iconVNode(h, "plus", { size: 14 }), h("span", null, `新增${TYPE_LABELS[type]}`)]),
       ]),
     ]);
 

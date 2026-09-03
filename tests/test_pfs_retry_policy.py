@@ -62,9 +62,12 @@ class PfsRetryPolicyTests(unittest.TestCase):
             output_price_per_million=10,
             max_cost_usd=0.001,
         )
-        events = list(agent.run("生成摘要", history=[]))
+        events = list(agent.run("生成摘要", history=[], run_id="run-cost-budget"))
         self.assertEqual(1, completions.calls)
         usage = next(event for event in events if event.get("type") == "usage")
+        self.assertEqual("run-cost-budget", usage["run_id"])
+        self.assertEqual("pfs-cost-budget-test", usage["model"])
+        self.assertEqual(1, usage["model_calls"])
         self.assertEqual(0.001, usage["cost_usd"])
         self.assertEqual(0.001, usage["run_total_cost_usd"])
         self.assertIn("run_cost_budget_exceeded", [event.get("code") for event in events])
@@ -297,6 +300,7 @@ class PfsRetryPolicyTests(unittest.TestCase):
 
     def test_transient_service_error_retries_with_exponential_backoff(self):
         calls = []
+        retries = []
 
         def flaky_call(value):
             calls.append(value)
@@ -305,11 +309,15 @@ class PfsRetryPolicyTests(unittest.TestCase):
             return "ok"
 
         with patch("agent.retry.time.sleep") as sleep:
-            result = call_with_retry(flaky_call, "payload", max_retries=2)
+            result = call_with_retry(
+                flaky_call, "payload", max_retries=2, on_retry=retries.append,
+            )
 
         self.assertEqual("ok", result)
         self.assertEqual(["payload", "payload", "payload"], calls)
         self.assertEqual([3.0, 6.0], [call.args[0] for call in sleep.call_args_list])
+        self.assertEqual([1, 2], [item["attempt"] for item in retries])
+        self.assertTrue(all(item["reason"] == "provider_unavailable" for item in retries))
 
     def test_non_retryable_error_is_returned_without_waiting(self):
         calls = []
@@ -426,6 +434,7 @@ class PfsRetryPolicyTests(unittest.TestCase):
         )
 
         def invoke_without_sleep(fn, *args, **kwargs):
+            kwargs.pop("on_retry", None)
             return fn(*args, **kwargs)
 
         with patch(

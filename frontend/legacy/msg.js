@@ -2,6 +2,7 @@
 import { state } from "../core/app-store.js";
 import { $, scrollBottom } from "../core/dom.js";
 import { getUiIsland } from "../core/ui-registry.js";
+import { svgMarkup } from "../core/icons.js";
 import { renderMd } from "./markdown.js";
 
   // ── 气泡内图片：no-referrer 策略绕过 OSS 防盗链 ─────────────────
@@ -52,7 +53,7 @@ import { renderMd } from "./markdown.js";
     link.href   = src;
     link.target = "_blank";
     link.rel    = "noopener";
-    link.textContent = "🖼️ " + (img.alt || "查看图片（点击打开原链接）");
+    link.textContent = img.alt || "查看图片（点击打开原链接）";
     link.style.cssText = "display:inline-block;padding:6px 10px;background:#f1f5f9;" +
       "border-radius:6px;font-size:13px;color:#3b82f6;text-decoration:none;";
     img.replaceWith(link);
@@ -74,7 +75,7 @@ import { renderMd } from "./markdown.js";
     div.className = `msg ${role}`;
     if (options.variant) div.classList.add(`msg-${options.variant}`);
     const avatar = role === "user"
-      ? "👤"
+      ? svgMarkup("users", { className: "pfs-icon", size: 18 })
       : `<img class="assistant-avatar-img" src="/static/Images/pfs-mark.svg" alt="PFS">`;
     div.innerHTML = `
       <div class="msg-avatar">${avatar}</div>

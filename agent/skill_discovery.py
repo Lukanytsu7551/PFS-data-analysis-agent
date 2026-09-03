@@ -215,7 +215,7 @@ def search_skill_catalog(
     # RRF alone can bury a strong match if the item only appears in 1-2
     # channels.  Adding vector_score * 1.0 ensures high-confidence neural
     # matches surface; adding name_score * 0.5 ensures exact-name hits
-    # (e.g. SWOT -> swot-analysis) are not buried by competitors that
+    # (e.g. a short alias matching a longer skill name) are not buried by competitors that
     # rank higher in vector/lexical but lack the name signal.
     fused = _rrf_fuse(vec_list, lex_list, name_list, limit=len(catalog))
 

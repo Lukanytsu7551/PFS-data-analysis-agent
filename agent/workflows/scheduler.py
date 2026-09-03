@@ -32,6 +32,7 @@ from .models import (
 
 NodeExecutor = Callable[[dict[str, Any], dict[str, Any], Any], Any]
 NodePreflight = Callable[[Mapping[str, Any]], None]
+RunTerminalHook = Callable[[str, str], None]
 
 
 class WorkflowConcurrencyLimiter:
@@ -92,6 +93,7 @@ class WorkflowScheduler:
         job_runner,
         executor: NodeExecutor,
         preflight: NodePreflight | None = None,
+        on_run_terminal: RunTerminalHook | None = None,
         limiter: WorkflowConcurrencyLimiter | None = None,
     ):
         self.workflow_store = workflow_store
@@ -99,9 +101,18 @@ class WorkflowScheduler:
         self.job_runner = job_runner
         self.executor = executor
         self.preflight = preflight
+        self.on_run_terminal = on_run_terminal
         self.limiter = limiter or GLOBAL_WORKFLOW_LIMITER
         self._locks: dict[str, threading.RLock] = {}
         self._locks_guard = threading.Lock()
+
+    def _notify_run_terminal(self, run_id: str) -> None:
+        hook = getattr(self, "on_run_terminal", None)
+        if hook is None:
+            return
+        run = self.run_store.get_run(run_id)
+        if run and RunStatus(run["status"]) in RUN_TERMINAL_STATUSES:
+            hook(run_id, str(run["status"]))
 
     def _run_lock(self, run_id: str) -> threading.RLock:
         with self._locks_guard:
@@ -218,6 +229,7 @@ class WorkflowScheduler:
                     failure_code=WorkflowErrorCode.RESOURCE_NOT_FOUND.value,
                     failure_message="published workflow version is missing",
                 )
+                self._notify_run_terminal(run_id)
                 return self.detail(run_id)
 
             if self._expire_timed_out_run(run, version["graph"]):
@@ -366,6 +378,7 @@ class WorkflowScheduler:
             failure_code="workflow_run_timeout",
             failure_message="workflow run exceeded max_run_minutes",
         )
+        self._notify_run_terminal(run_id)
         return True
 
     def _expire_token_budget(self, run_id: str, graph: Mapping[str, Any]) -> bool:
@@ -382,6 +395,7 @@ class WorkflowScheduler:
             if NodeRunStatus(node_run["status"]) is NodeRunStatus.READY:
                 self.run_store.transition_node(node_run["id"], NodeRunStatus.CANCELED, error="workflow token budget exceeded")
         self.run_store.transition_run(run_id, RunStatus.FAILED, failure_code="workflow_token_budget_exceeded", failure_message=f"workflow consumed {used} tokens, above max_total_tokens={limit}")
+        self._notify_run_terminal(run_id)
         return True
 
     def _expire_cost_budget(self, run_id: str, graph: Mapping[str, Any]) -> bool:
@@ -414,6 +428,7 @@ class WorkflowScheduler:
             failure_code="workflow_cost_budget_exceeded",
             failure_message=f"workflow consumed {used:.8f} USD, at or above max_total_cost_usd={float(limit):.8f}",
         )
+        self._notify_run_terminal(run_id)
         return True
 
     def _reconcile_jobs(self, run_id: str, graph: Mapping[str, Any]) -> None:
@@ -818,8 +833,15 @@ class WorkflowScheduler:
                     self.preflight(node)
                 inputs = self._node_inputs(run, node_run, graph)
                 self.run_store.set_node_input(node_run["id"], inputs)
+                execution_node = {
+                    **node,
+                    "__pfs_workflow_context__": {
+                        "run_id": run_id,
+                        "node_run_id": str(node_run["id"]),
+                    },
+                }
                 job_id = self.job_runner.create(
-                    lambda ctx, item=node, material=inputs: self.executor(
+                    lambda ctx, item=execution_node, material=inputs: self.executor(
                         item,
                         material,
                         ctx,
@@ -1120,6 +1142,7 @@ class WorkflowScheduler:
             for item in nodes
         ):
             self.run_store.transition_run(run_id, RunStatus.CANCELED)
+            self._notify_run_terminal(run_id)
 
     def decide_approval(
         self,
@@ -1346,3 +1369,4 @@ class WorkflowScheduler:
                 )
             else:
                 self.run_store.transition_run(run_id, RunStatus.SUCCEEDED)
+        self._notify_run_terminal(run_id)

@@ -1,4 +1,4 @@
-"""Persistent storage for SQL / Google Sheets / HTTP API connection configs."""
+"""Persistent storage for SQL and HTTP API connection configs."""
 import logging
 log = logging.getLogger(__name__)
 
@@ -15,9 +15,11 @@ _CONFIG_DIR = _CONFIG_FILE.parent
 
 _SENSITIVE_KEYS = {
     "sql": "connection_string",
+    # Kept only to redact legacy on-disk records from older releases.
     "gsheets": "creds_json",
     "api": "auth_value",
 }
+_RETIRED_TYPES = {"gsheets"}
 
 
 class DataSourceConfigManager:
@@ -40,6 +42,8 @@ class DataSourceConfigManager:
         )
 
     def save(self, ds_type: str, config: dict):
+        if ds_type in _RETIRED_TYPES:
+            raise ValueError(f"retired data source type: {ds_type}")
         self._configs[ds_type] = config
         self._save()
 
@@ -54,6 +58,8 @@ class DataSourceConfigManager:
         """Return configs with sensitive fields replaced by has_* boolean flags."""
         result = {}
         for ds_type, cfg in self._configs.items():
+            if ds_type in _RETIRED_TYPES:
+                continue
             pub = dict(cfg)
             sensitive_key = _SENSITIVE_KEYS.get(ds_type)
             if sensitive_key and sensitive_key in pub:

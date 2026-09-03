@@ -1,6 +1,7 @@
 // Compatibility data-preview modal with lazy table loading.
 // Multi-source aware: tables grouped by source with sheet-count badge.
 import { esc } from "../core/dom.js";
+import { svgMarkup } from "../core/icons.js";
 import { $, state } from "../core/runtime.js";
 import { closeOverlay, openOverlay, toast } from "../core/overlay.js";
 
@@ -230,7 +231,7 @@ import { closeOverlay, openOverlay, toast } from "../core/overlay.js";
         selectBtn.setAttribute("aria-pressed", String(selected));
         selectBtn.setAttribute("aria-label", `选择 ${tb.name} 用于分析`);
         selectBtn.title = selected ? "取消选择" : "选择用于分析";
-        selectBtn.innerHTML = '<span aria-hidden="true">✓</span>';
+        selectBtn.innerHTML = selected ? svgMarkup("check", { size: 14 }) : svgMarkup("plus", { size: 14 });
         selectBtn.addEventListener("click", () => _toggleTableSelection(tb, selectBtn));
         row.append(selectBtn);
       }

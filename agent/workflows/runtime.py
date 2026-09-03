@@ -47,7 +47,25 @@ class WorkflowRuntime:
             job_runner=self.session.job_runner,
             executor=self._execute_node,
             preflight=self._preflight_node,
+            on_run_terminal=self._finalize_workflow_artifact_cost,
         )
+
+    def _finalize_workflow_artifact_cost(self, run_id: str, status: str) -> None:
+        """Refresh every export from this Run after its final node settles."""
+        from infrastructure.artifact_lifecycle import update_artifact_run_usage
+
+        try:
+            update_artifact_run_usage(
+                session_id=self.session_id,
+                run_id=run_id,
+                cost=self._workflow_run_cost(run_id, status=status),
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            self.run_store.record_event(
+                run_id,
+                "workflow_artifact_cost_update_failed",
+                {"run_id": run_id, "status": status, "error": str(exc)},
+            )
 
     def _preflight_node(self, node: Mapping[str, Any]) -> None:
         """Reject disallowed side effects before a workflow Job is created."""
@@ -538,9 +556,35 @@ class WorkflowRuntime:
         else:
             content = json.dumps(value, ensure_ascii=False, indent=2, default=str)
         target.write_text(content, encoding="utf-8")
-        from infrastructure.artifact_lifecycle import register_artifact
-        register_artifact(target, artifact_type="workflow_export", session_id=self.session_id, workspace_id=self.workspace.workspace_id)
+        from infrastructure.artifact_lifecycle import (
+            register_artifact,
+            update_artifact_run_usage,
+        )
+        execution_context = node.get("__pfs_workflow_context__") or {}
+        run_id = str(execution_context.get("run_id") or "")
+        metadata = {
+            "workflow_node_run_id": str(
+                execution_context.get("node_run_id") or ""
+            ),
+        }
+        if run_id:
+            metadata["run_id"] = run_id
+            metadata["workflow_run_id"] = run_id
+        artifact_id = register_artifact(
+            target,
+            artifact_type="workflow_export",
+            session_id=self.session_id,
+            workspace_id=self.workspace.workspace_id,
+            metadata=metadata,
+        )
+        if run_id:
+            update_artifact_run_usage(
+                session_id=self.session_id,
+                run_id=run_id,
+                cost=self._workflow_run_cost(run_id, status="running"),
+            )
         result = {
+            "artifact_id": artifact_id,
             "path": str(target),
             "filename": target.name,
             "uri": f"workspace://artifacts/{target.name}",
@@ -550,6 +594,54 @@ class WorkflowRuntime:
         }
         output_names = list(node.get("output_contract") or [])
         return {name: result for name in output_names} or {"export": result}
+
+    def _workflow_run_cost(
+        self, run_id: str, *, status: str,
+    ) -> dict[str, Any]:
+        """Aggregate persisted Workflow model usage without inventing a price."""
+        nodes = self.run_store.list_node_runs(run_id)
+        measured = [
+            node for node in nodes
+            if int(node.get("model_calls") or 0)
+            or int(node.get("input_tokens") or 0)
+            or int(node.get("output_tokens") or 0)
+        ]
+        unknown_price = bool(measured) and any(
+            node.get("cost_usd") is None for node in measured
+        )
+        if not measured:
+            amount = None
+            estimated = None
+            source = "provider_usage_unavailable"
+        elif unknown_price:
+            amount = None
+            estimated = None
+            source = "provider_usage_price_unknown"
+        else:
+            amount = round(sum(float(node["cost_usd"]) for node in measured), 8)
+            estimated = True
+            source = "provider_usage_configured_pricing"
+        return {
+            "amount": amount,
+            "currency": "USD",
+            "estimated": estimated,
+            "source": source,
+            "model_calls": sum(int(node.get("model_calls") or 0) for node in measured),
+            "input_tokens": sum(int(node.get("input_tokens") or 0) for node in measured),
+            "output_tokens": sum(int(node.get("output_tokens") or 0) for node in measured),
+            "cached_input_tokens": sum(
+                int(node.get("cached_input_tokens") or 0) for node in measured
+            ),
+            "providers": sorted({
+                str(node.get("provider_name") or "").strip()
+                for node in measured if str(node.get("provider_name") or "").strip()
+            }),
+            "models": sorted({
+                str(node.get("model_name") or "").strip()
+                for node in measured if str(node.get("model_name") or "").strip()
+            }),
+            "status": status,
+        }
 
     def delete_run(self, run_id: str) -> dict[str, Any]:
         if self.workspace.permission != "read_write":

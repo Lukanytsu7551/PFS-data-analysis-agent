@@ -12,32 +12,9 @@ from infrastructure.startup_requirements import (
 
 
 class StartupRequirementsTests(unittest.TestCase):
-    def test_google_auth_uses_real_import_namespace(self):
-        imported = []
-        google_auth = next(
-            spec
-            for spec in OPTIONAL_FEATURE_DEPENDENCIES["external_data"]
-            if spec.package_name == "google-auth"
-        )
-
-        def record_import(name):
-            imported.append(name)
-            return object()
-
-        report = inspect_startup_dependencies(
-            core=(),
-            optional={"external_data": (google_auth,)},
-            importer=record_import,
-        )
-
-        self.assertEqual("google.auth", google_auth.import_name)
-        self.assertEqual(["google.auth"], imported)
-        self.assertFalse(report.missing_core)
-        self.assertFalse(report.missing_optional)
-
     def test_optional_import_and_load_failures_are_categorized_and_do_not_block(self):
         optional = {
-            "external_data": (DependencySpec("gspread", "gspread", "external_data"),),
+            "external_data": (DependencySpec("lark-oapi", "lark_oapi", "external_data"),),
             "database": (DependencySpec("pyodbc", "pyodbc", "database"),),
         }
 
@@ -52,7 +29,7 @@ class StartupRequirementsTests(unittest.TestCase):
         self.assertEqual((), dependency_install_targets(report, {}))
         self.assertEqual(
             [
-                ("gspread", "external_data", "import_error"),
+                ("lark-oapi", "external_data", "import_error"),
                 ("pyodbc", "database", "load_error"),
             ],
             [

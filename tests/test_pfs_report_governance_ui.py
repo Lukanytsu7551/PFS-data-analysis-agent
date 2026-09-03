@@ -37,6 +37,7 @@ class PfsReportGovernanceUiTests(unittest.TestCase):
     def test_report_delivery_area_exposes_structured_formats(self):
         source = PREVIEW.read_text(encoding="utf-8")
         template = (ROOT / "templates" / "agent_chat.html").read_text(encoding="utf-8")
+        styles = STYLES.read_text(encoding="utf-8")
         for output_format in ("xlsx", "docx", "pptx", "dashboard"):
             self.assertIn(f'data-pfs-delivery-format="{output_format}"', template)
         self.assertIn("async function generateDelivery(format)", source)
@@ -44,6 +45,10 @@ class PfsReportGovernanceUiTests(unittest.TestCase):
         self.assertIn("renderDeliveryArtifacts();", source)
         self.assertIn("pfs-report-delivery-lineage", source)
         self.assertIn("artifact.source_sha256", source)
+        delivery_head = styles[styles.index(".pfs-report-delivery-head {") :]
+        delivery_status = styles[styles.index(".pfs-report-delivery-status {") :]
+        self.assertIn("grid-template-columns: minmax(0, 1fr);", delivery_head)
+        self.assertIn("overflow-wrap: anywhere;", delivery_status)
 
     def test_multi_sheet_selector_and_actionable_errors_are_wired(self):
         source = PREVIEW.read_text(encoding="utf-8")
@@ -59,9 +64,40 @@ class PfsReportGovernanceUiTests(unittest.TestCase):
             "source_columns_missing",
             "source_date_invalid",
             "date_filter_invalid",
+            "date_range_invalid",
             "metric_value_not_numeric",
         ):
             self.assertIn(code, source)
+        self.assertIn('translate("pfs_report.needs_repair", "需修复")', source)
+        self.assertIn("source.validation_error", source)
+
+        i18n = (ROOT / "frontend" / "legacy" / "i18n.js").read_text(encoding="utf-8")
+        for key in (
+            "pfs_report.error_columns_missing",
+            "pfs_report.error_date_invalid",
+            "pfs_report.error_date_filter_invalid",
+            "pfs_report.error_delivery_table",
+            "pfs_report.error_file_too_large",
+            "pfs_report.error_model_not_configured",
+            "pfs_report.error_delivery_generation",
+            "pfs_report.error_delivery_ambiguous",
+        ):
+            self.assertGreaterEqual(i18n.count(key), 2)
+
+    def test_report_analysis_has_real_cancel_request_and_canceled_state(self):
+        source = PREVIEW.read_text(encoding="utf-8")
+        template = (ROOT / "templates" / "agent_chat.html").read_text(encoding="utf-8")
+        self.assertIn('id="pfs-report-cancel"', template)
+        self.assertIn('class="btn-sm btn-sm-danger hidden" id="pfs-report-cancel"', template)
+        self.assertIn("async function cancelCurrentRun()", source)
+        self.assertIn("async function requestServerCancel(run)", source)
+        self.assertIn("const retryDelays = [0, 50, 100, 200, 400, 800]", source)
+        self.assertIn("response.status !== 404", source)
+        self.assertIn('button.classList.toggle("hidden", !available)', source)
+        self.assertIn("new AbortController()", source)
+        self.assertIn("/pfs/runs/${encodeURIComponent(run.runId)}/cancel", source)
+        self.assertIn('error?.code === "pfs_analysis_canceled"', source)
+        self.assertIn("renderCanceled();", source)
 
     def test_job_history_loads_session_artifacts_separately_from_jobs(self):
         history = (ROOT / "frontend/legacy/job_history.js").read_text(encoding="utf-8")
@@ -72,7 +108,20 @@ class PfsReportGovernanceUiTests(unittest.TestCase):
         self.assertIn("job-history-registered-artifact-lineage", ui)
         self.assertIn("读取完整详情", ui)
         self.assertIn("governance_audit", ui)
+        self.assertIn("分析成本", ui)
+        self.assertIn("deterministic_no_model", ui)
+        self.assertIn("所属工作区", ui)
+        self.assertIn("workspace?.name", ui)
+        self.assertNotIn("workspace?.path", ui)
         self.assertIn("下载交付物", ui)
+
+    def test_job_history_dialog_closes_on_escape_from_internal_controls(self):
+        ui = (ROOT / "frontend/features/ui/job-history-ui.js").read_text(encoding="utf-8")
+
+        self.assertIn("onKeydown: event => {", ui)
+        self.assertIn('event.key !== "Escape" || event.defaultPrevented', ui)
+        self.assertIn("event.stopPropagation();", ui)
+        self.assertIn("setOpen(false);", ui)
 
     def test_chat_model_error_has_actionable_configuration_guidance(self):
         source = (ROOT / "frontend/features/chat-stream.js").read_text(encoding="utf-8")

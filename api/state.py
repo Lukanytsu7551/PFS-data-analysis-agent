@@ -1,6 +1,5 @@
 """Shared singletons — import from here, never instantiate elsewhere."""
 import logging
-import os
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -14,6 +13,7 @@ from LLM.mcp_config_manager import get_mcp_config_manager
 from data.datasource_config_manager import get_datasource_config_manager
 from data.workspace import workspace_manager
 from infrastructure.paths import data_path
+from infrastructure.compat import cloud_login_enabled
 
 
 class _ChartStore:
@@ -86,7 +86,7 @@ def check_session_ownership(sid: str) -> tuple[bool, str]:
     Callers that already have the ChatSession object should compare
     ``sess.owner_user_id`` directly rather than going through this helper.
     """
-    is_cloud = bool(os.environ.get("RAILWAY_PROJECT_ID")) or os.environ.get("VERCEL") == "1"
+    is_cloud = cloud_login_enabled()
     if not is_cloud:
         return True, ""
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from flask import Blueprint, request, jsonify, send_from_directory
 
 from .state import session_manager, config_manager, require_session_ownership
-from infrastructure.compat import request_user_id
+from infrastructure.compat import cloud_login_enabled, request_user_id
 from infrastructure.paths import data_path
 
 log = logging.getLogger(__name__)
@@ -38,8 +38,7 @@ def _scope_context() -> tuple[str, str]:
     )
     # Cloud mode: fall back to authenticated user
     if not user_id:
-        import os as _os
-        if bool(_os.environ.get("RAILWAY_PROJECT_ID")) or _os.environ.get("VERCEL") == "1":
+        if cloud_login_enabled():
             from .auth import current_user
             auth_user = current_user()
             if auth_user:

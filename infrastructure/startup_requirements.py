@@ -89,9 +89,6 @@ OPTIONAL_FEATURE_DEPENDENCIES = MappingProxyType(
             DependencySpec("sqlglot", "sqlglot", "database"),
         ),
         "external_data": (
-            DependencySpec("gspread", "gspread", "external_data"),
-            # The distribution name differs from its real Python namespace.
-            DependencySpec("google-auth", "google.auth", "external_data"),
             DependencySpec("lark-oapi", "lark_oapi", "external_data"),
         ),
         "knowledge": (

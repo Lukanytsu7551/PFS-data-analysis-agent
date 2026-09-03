@@ -65,10 +65,6 @@ pyodbc>=5.0.0         # SQL Server driver (requires Microsoft ODBC Driver 17/18 
 # SQL parsing (AST-level validation & table-name extraction)
 sqlglot>=23.0.0
 
-# External data sources
-gspread>=6.0.0
-google-auth>=2.0.0
-
 # Knowledge base (RAG — Chinese FTS5 tokenization)
 jieba>=0.42.1
 

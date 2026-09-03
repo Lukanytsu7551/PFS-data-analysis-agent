@@ -5,12 +5,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from infrastructure.compat import (
+    cloud_login_enabled,
     env_from,
+    optional_feature_enabled,
     request_user_id,
     workspace_hidden_dir,
     workspace_metadata_dir,
 )
-from data.business_canvas_store import business_canvas_db_path
 from agent.workflows.features import workflow_feature_flags
 from data.workspace_metadata import WorkspaceMetadataStore
 from LLM.prompt_cache import PromptCachePolicy, apply_prompt_cache_policy, stable_prompt_cache_key
@@ -38,6 +39,19 @@ class PfsIdentityMigrationTests(unittest.TestCase):
         self.assertTrue(updated["prompt_cache_key"].startswith("pfs-"))
         self.assertTrue(metadata["scope_isolated"])
 
+    def test_kimi_coding_cache_uses_supported_key_without_openai_retention(self):
+        updated, metadata = apply_prompt_cache_policy(
+            {},
+            policy=PromptCachePolicy(enabled=True, mode="kimi"),
+            cache_key="pfs-kimi-coding",
+            user_id="user-1",
+            workspace_id="workspace-1",
+        )
+        self.assertTrue(updated["prompt_cache_key"].startswith("pfs-"))
+        self.assertNotIn("prompt_cache_retention", updated)
+        self.assertEqual("kimi", metadata["mode"])
+        self.assertTrue(metadata["scope_isolated"])
+
     def test_first_party_runtime_labels_use_pfs_names(self):
         checks = {
             ROOT / "infrastructure" / "cleanup.py": "name=\"pfs-cleanup\"",
@@ -54,9 +68,17 @@ class PfsIdentityMigrationTests(unittest.TestCase):
         self.assertEqual("/pfs", env_from(environ, "PFS_DATA_DIR", "/default"))
         self.assertEqual("/default", env_from({}, "PFS_DATA_DIR", "/default"))
 
-    def test_business_canvas_pfs_path_has_precedence(self):
-        with patch.dict(os.environ, {"PFS_BUSINESS_CANVAS_DB": "/tmp/pfs-canvas.sqlite"}, clear=False):
-            self.assertEqual(Path("/tmp/pfs-canvas.sqlite"), business_canvas_db_path())
+    def test_cloud_login_is_retained_but_opt_in(self):
+        self.assertFalse(cloud_login_enabled({"RAILWAY_PROJECT_ID": "project"}))
+        self.assertTrue(cloud_login_enabled({
+            "PFS_ENABLE_CLOUD_LOGIN": "1",
+            "RAILWAY_PROJECT_ID": "project",
+        }))
+
+    def test_retained_optional_features_are_opt_in(self):
+        self.assertFalse(optional_feature_enabled("HOOKS", {}))
+        self.assertFalse(optional_feature_enabled("FEISHU_BOT", {}))
+        self.assertTrue(optional_feature_enabled("HOOKS", {"PFS_ENABLE_HOOKS": "1"}))
 
     def test_embedding_configuration_exposes_pfs_primary_names(self):
         source = (ROOT / "Function" / "Knowledge" / "neural_embedder.py").read_text(encoding="utf-8")
@@ -166,7 +188,6 @@ class PfsIdentityMigrationTests(unittest.TestCase):
             ROOT / "frontend" / "features" / "knowledge.js",
             ROOT / "frontend" / "features" / "workspace.js",
             ROOT / "frontend" / "features" / "teams.js",
-            ROOT / "frontend" / "features" / "ui" / "business-canvas-ui.js",
             ROOT / "frontend" / "features" / "ui" / "chat-ui.js",
             ROOT / "frontend" / "legacy" / "autosave.js",
             ROOT / "frontend" / "legacy" / "pfs-report-preview.js",
@@ -208,7 +229,6 @@ class PfsIdentityMigrationTests(unittest.TestCase):
             "frontend/features/ui/mcp-ui.js",
             "frontend/features/ui/knowledge-ui.js",
             "frontend/features/ui/settings-ui.js",
-            "frontend/features/ui/business-canvas-ui.js",
         ):
             source = (ROOT / relative).read_text(encoding="utf-8")
             with self.subTest(source=relative):

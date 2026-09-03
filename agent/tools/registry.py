@@ -467,46 +467,6 @@ BUILTIN_TOOL_REGISTRY = ToolRegistry([
         discovery_summary="Read and reconcile a durable Workflow Run.",
         requires_runtime=True, requires_workspace=True,
     ),
-    # ── Diagram / Canvas tools ──
-    # Exposed via skills, but also discoverable so the agent can use them
-    # when the user mentions canvas/diagram keywords without manually
-    # selecting a skill.
-    _spec(
-        "display_diagram", "output", default_exposed=False, discoverable=True,
-        skills=("business-model-canvas", "bcg-matrix", "swot-analysis", "value-proposition"),
-        discovery_keywords=(
-            "商业模式画布", "价值主张", "bcg", "swot", "画布", "canvas",
-            "diagram", "图表", "矩阵", "四象限", "画图", "绘制",
-        ),
-        discovery_summary="Render a draw.io diagram (business model canvas, BCG, SWOT, value proposition) to the canvas drawer.",
-        concurrency_safe=False,
-    ),
-    _spec(
-        "edit_diagram", "write", default_exposed=False, discoverable=True,
-        skills=("business-model-canvas", "bcg-matrix", "swot-analysis", "value-proposition"),
-        discovery_keywords=(
-            "商业模式画布", "价值主张", "bcg", "swot", "画布", "canvas",
-            "diagram", "图表", "矩阵", "四象限", "修改图",
-        ),
-        discovery_summary="Edit an existing draw.io diagram in the canvas drawer.",
-    ),
-    _spec(
-        "get_diagram", "read", default_exposed=False, discoverable=True,
-        skills=("business-model-canvas", "bcg-matrix", "swot-analysis", "value-proposition"),
-        discovery_keywords=(
-            "商业模式画布", "价值主张", "bcg", "swot", "画布", "canvas",
-            "diagram", "查看图",
-        ),
-        discovery_summary="Retrieve the current draw.io XML from the canvas drawer.",
-    ),
-    _spec(
-        "get_shape_library", "read", default_exposed=False, discoverable=True,
-        discovery_keywords=(
-            "shape", "icon", "AWS", "Azure", "GCP", "图标", "形状库",
-            "draw.io", "diagram", "图表", "画图",
-        ),
-        discovery_summary="Discover available draw.io shape/icon libraries before creating diagrams.",
-    ),
     _spec(
         "memory_read", "read", default_exposed=False, discoverable=True,
         discovery_keywords=(

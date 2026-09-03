@@ -8,6 +8,7 @@ import {
   setSrc,
 } from "./datasource.js";
 import { setLoadedName } from "./autosave.js";
+import { iconSpan } from "../core/icons.js";
 
 const pfs = () => globalThis.PFS;
 
@@ -95,9 +96,9 @@ const pfs = () => globalThis.PFS;
             <div class="saved-meta">${meta}</div>
           </div>
           <button class="saved-rename" title="${t('saved.rename')}" data-action="renameSession"
-                  data-filename="${escAttr(s.filename)}" data-name="${escAttr(s.name)}">✎</button>
+                  data-filename="${escAttr(s.filename)}" data-name="${escAttr(s.name)}">${iconSpan("edit", { className: "pfs-icon", size: 14 })}</button>
           <button class="saved-del" title="${t('saved.delete') || '归档'}" data-action="deleteSession"
-                  data-filename="${escAttr(s.filename)}" data-name="${escAttr(s.name)}">✕</button>
+                  data-filename="${escAttr(s.filename)}" data-name="${escAttr(s.name)}">${iconSpan("close", { className: "pfs-icon", size: 14 })}</button>
         </div>`;
     }).join("");
   }
@@ -211,7 +212,7 @@ const pfs = () => globalThis.PFS;
         const sources = sd.sources || [];
         renderSourceList(sources);
         // If backend restored a source, sync the status bar to match the list.
-        // If the list is empty (e.g. SQL/GSheets can't be auto-restored),
+        // If the list is empty (for example, an external source can't be auto-restored),
         // the status bar text set above (setSrc) already reflects ds_lost/none,
         // so we only override when there actually are sources to show.
         if (sources.length > 0) {

@@ -1,4 +1,5 @@
 import { registerUiIsland } from "../../core/ui-registry.js";
+import { iconVNode } from "../../core/icons.js";
 
 // Progressive Vue island #4: Settings modal (built-in providers + custom models + add-custom form).
 // Mount points: #builtin-providers, #custom-list, #add-custom-form (three roots, one state).
@@ -14,20 +15,24 @@ export function mountSettingsUi() {
   // 立即清空 providers 和 customs 的原始静态 HTML（这两个用 Vue render 管理没问题）
   root1.innerHTML = "";
   root2.innerHTML = "";
-  // ⚠️ 不清空 root3！#add-custom-form 保留模板中的静态 HTML，
+  // 不清空 root3：#add-custom-form 保留模板中的静态 HTML，
   //    用 class 切换控制显隐，避免 Vue render 到该容器时的不可见问题。
 
   const { h, render, Fragment, reactive } = Vue;
 
   const COMMON_ICON = "/static/Images/pfs-mark.svg";
   const BUILTIN_META = {
-    deepseek:   { label: "DeepSeek",         icon: COMMON_ICON },
-    openai:     { label: "OpenAI / ChatGPT", icon: COMMON_ICON },
-    atlascloud: { label: "AtlasCloud",       icon: COMMON_ICON },
-    ollama:     { label: "Ollama (本地)",     icon: COMMON_ICON, local: true },
+    deepseek:       { label: "DeepSeek",            icon: COMMON_ICON },
+    kimi:           { label: "Kimi",                icon: COMMON_ICON },
+    kimi_coding:    { label: "Kimi Coding Plan",    icon: COMMON_ICON },
+    glm:            { label: "GLM",                 icon: COMMON_ICON },
+    glm_coding:     { label: "GLM Coding Plan",     icon: COMMON_ICON },
+    minimax:        { label: "MiniMax",             icon: COMMON_ICON },
+    minimax_coding: { label: "MiniMax Coding Plan", icon: COMMON_ICON },
   };
-  // 内置提供商排序：Ollama 作为本地模型放在最后，与普通在线提供商区分开。
-  const BUILTIN_ORDER = ["deepseek", "openai", "atlascloud", "ollama"];
+  const BUILTIN_ORDER = [
+    "deepseek", "kimi", "kimi_coding", "glm", "glm_coding", "minimax", "minimax_coding",
+  ];
 
   // 判断 base_url 是否本地地址（与后端 _is_local_base_url 保持一致）
   function _isLocalUrl(url) {
@@ -128,7 +133,7 @@ export function mountSettingsUi() {
         class: `provider-status ${p.hasKey ? "set" : "unset"}`,
       }, p.hasKey ? t('settings.configured') : t('settings.not_configured')),
       h("span", { class: `provider-toggle ${isExpanded ? "open" : ""}` },
-        isExpanded ? "\u25BE" : "\u25B8"),  /* ▾ / ▸ */
+        iconVNode(h, isExpanded ? "chevronDown" : "chevronRight", { size: 14 })),
     ]);
 
     if (!isExpanded) {
@@ -301,7 +306,8 @@ export function mountSettingsUi() {
   function setProviders(configs, defaults) {
     // 保留现有 fields（用户正在输入的未保存值），仅刷新 hasKey/cfg。
     // 例外：hasKey 从 true→false（刚清除）时重置 fields 为 defaults。
-    const newProviders = Object.entries(defaults).map(([key, def]) => {
+    const newProviders = BUILTIN_ORDER.map((key) => {
+      const def = defaults[key] || {};
       const meta = BUILTIN_META[key] || { label: key, icon: COMMON_ICON };
       const cfg = configs[key] || {};
       const newHasKey = !!cfg.has_api_key;
@@ -320,15 +326,7 @@ export function mountSettingsUi() {
         expanded: existing ? existing.expanded : false,
       };
     });
-    // 按 BUILTIN_ORDER 排序，确保 Ollama 始终在最底部。
-    state.providers = newProviders.sort((a, b) => {
-      const ia = BUILTIN_ORDER.indexOf(a.key);
-      const ib = BUILTIN_ORDER.indexOf(b.key);
-      if (ia !== -1 && ib !== -1) return ia - ib;
-      if (ia !== -1) return -1;
-      if (ib !== -1) return 1;
-      return a.label.localeCompare(b.label);
-    });
+    state.providers = newProviders;
     _renderProviders();
   }
 

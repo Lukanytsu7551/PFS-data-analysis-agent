@@ -1,13 +1,13 @@
 # PFS 数据分析 Agent · 图表说明
 
-> 面向商业分析师的智能数据分析平台 — 上传 Excel / 连接数据库 / 调用 Google Sheets / 自定义 API，然后用自然语言提问，AI 自动写 SQL、跑分析、画图、生成报告。
+> 面向商业分析师的智能数据分析平台 — 上传 Excel / CSV、连接数据库或 HTTP API，然后用自然语言提问，AI 自动写 SQL、跑分析、画图、生成报告。
 
 ---
 
 ## 🚀 快速开始
 
-1. **配置一个模型**：右上角侧栏 → 模型行右侧的 ⚙ → 填入 API Key（DeepSeek / OpenAI / Claude 任选一个，或添加自定义 OpenAI 兼容模型）
-2. **添加数据源**：侧栏「＋ 添加数据源」→ 选择 Excel / SQL / Google Sheets / 自定义 API
+1. **配置一个模型**：打开左侧模型面板，配置 DeepSeek、Kimi、GLM、MiniMax 或对应 Coding Plan；也可添加自定义 OpenAI 兼容模型
+2. **添加数据源**：打开左侧数据源面板，选择 Excel / CSV、SQL 数据库或 HTTP API
 3. **开始提问**：在底部输入框直接用自然语言问，例如：
    - `各品类的销售额是多少？`
    - `近 12 个月的销售趋势如何？`
@@ -68,7 +68,6 @@
 |------|------|---------|
 | **Excel / CSV** | 本地文件上传，calamine 引擎解析 | `.xlsx` `.xls` `.csv` |
 | **SQL 数据库** | SQLAlchemy 连接字符串 | 例如 `mysql+pymysql://user:pass@host:3306/db` |
-| **Google Sheets** | 服务账号 JSON + 表格 URL/ID | 需将服务账号邮件加为表格协作者 |
 | **HTTP API** | 任意 REST 端点 | URL + 可选认证（Bearer / X-API-Key） |
 
 ---

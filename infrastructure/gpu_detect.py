@@ -232,14 +232,14 @@ def detect_cuda() -> Dict:
 # ── 「启用 GPU 算力」总开关 ────────────────────────────────────────────────
 
 def get_gpu_enabled() -> bool:
-    """读取总开关状态，默认开启。文件缺失/损坏时返回 True（不抛错）。"""
+    """读取总开关状态，默认关闭。文件缺失/损坏时返回 False（不抛错）。"""
     try:
         if GPU_CONFIG_FILE.exists():
             data = json.loads(GPU_CONFIG_FILE.read_text(encoding="utf-8"))
-            return bool(data.get("gpu_enabled", True))
+            return bool(data.get("gpu_enabled", False))
     except Exception as exc:  # noqa: BLE001
-        log.warning("[gpu] 读取开关失败，回退默认开启: %s", exc)
-    return True
+        log.warning("[gpu] 读取开关失败，回退默认关闭: %s", exc)
+    return False
 
 
 def set_gpu_enabled(enabled: bool) -> None:

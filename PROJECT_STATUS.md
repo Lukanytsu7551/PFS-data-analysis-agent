@@ -1,7 +1,7 @@
 # 报表数据分析 Agent：研究与验证台账
 
-> 文档日期：2026-08-30  
-> 当前状态：PFS 源码边界、产品身份、只读策略门、固定/上传 CSV/XLSX 报表分析、多工作表显式选择、受限自然语言报表问题路由、JSON/CSV 下载、Excel/Word/PPT/Dashboard 统一交付区、证据 Ledger 第一段、本地真实 HTTP 回读和报表核验状态摘要已实现；完整功能迁移仍在进行
+> 文档日期：2026-09-01
+> 当前状态：PFS 源码边界、产品身份、只读策略门、固定/上传 CSV/XLSX 报表分析、多工作表显式选择、受限自然语言报表问题路由、JSON/CSV 下载、Excel/Word/PPT/Dashboard 统一交付区、动态 Evidence/Claim 登记与回链、会话统一审计、本地真实 HTTP/桌面浏览器回读和报表核验状态摘要已实现；完整功能迁移仍在进行
 > 现役交接、发布状态和剩余改造顺序以 [`docs/HANDOFF.md`](docs/HANDOFF.md) 为准。本文保留研究取证、分阶段验证和历史边界，不作为第二份现役待办。
 > 2026-08-30 范围决策：PFS 当前只交付桌面端工作台；手机端适配、移动端完整分析流程和移动端下载不再作为完成条件。此前已经完成的 390×844 验收仅作为历史质量证据保留。
 
@@ -21,7 +21,7 @@
 - 本轮移除了真实工作台中原项目遗留的社群运营入口：侧栏社群按钮、QQ、Telegram、Discord 链接及其弹窗样式和国际化键；没有替换为虚构的 PFS 社群地址。身份回归测试 8/8 通过，重建后的 Chat bundle 也未发现这些旧入口标识。
 - 本轮验证：`tests.test_release_identity` 与 `tests.test_startup_scripts` 共 16 项通过；`pnpm run build:chat`、`pnpm run build:check` 和 `git diff --check` 通过。该结果只证明当前发布源和构建产物的社群入口清理，不代表所有旧作者归属、第三方版权或全部内部标识已经完成审计。
 
-- 当前完整质量门已通过：前端 Dashboard/Chat production build、Python 全量回归和 Ruff 均通过；最新全量 Python 回归为 161 项通过、无跳过。随后完成真实桌面复杂 XLSX 验收：工作表选择、字段刷新、空表禁用、非数字指标错误和 Excel/Word/PPT/Dashboard 四类交付均通过；Dashboard 无横向溢出。
+- 当前完整质量门已通过：前端 Dashboard/Chat production build、Python 全量回归和 Ruff 均通过；最新全量 Python 回归为 167 项通过、无跳过。随后完成真实桌面复杂 XLSX 验收：工作表选择、字段刷新、空表禁用、非数字指标错误和 Excel/Word/PPT/Dashboard 四类交付均通过；Dashboard 无横向溢出。报表同步分析的单进程协作式取消已通过并发 HTTP 回归，真实桌面点击仍待验收。
 - 复杂 XLSX 使用 `说明`、`空表`、`销售明细`、`异常指标` 四张工作表。选择 `销售明细` 后按 3 行计算得到总额 3,600、华东 2,700、华南 900，Evidence 回读 `worksheet:销售明细` 与 `included_rows:3`；选择 `异常指标` 后明确提示 `metric value is not numeric: '待确认'`，并禁用全部下载和交付按钮。
 - 首次验收曾因浏览器连接旧服务进程且 Chat bundle 未重建而只读到第一张表；重启当前工作树服务并重新执行前端 production build 后复验通过。该故障说明源码存在不能替代当前运行进程和构建产物回读。
 - DeepSeek 已用本地 Waitress 真实 HTTP 复验：`deepseek-chat` 实际读取 CSV schema、执行只读 SQL 和汇总，得到华东 42,000、华南 33,000、华北 25,000、总额 100,000；最新一次记录 3 次调用、输入 12,676、输出 410 Tokens，约 5.09 秒。
@@ -38,7 +38,7 @@
 - 当时 GitHub 回读确认仓库尚无远程分支；随后网络恢复并已成功建立远端 `main`。部署和线上验收仍未开始。
 - 交付方式已确定为双入口：普通用户通过 `install.sh`、`start.command` 或 `start.bat` 使用本地 Python 环境；开发/部署人员通过 `Dockerfile` 构建和运行 PFS。普通用户不被要求安装 Docker。
 
-当前最主要的未完成项是：原项目全部能力的逐项真实复验、多轮/长任务/跨进程工作流恢复、真实多 provider 成本对账、外部数据源和 MCP/飞书、完整证据治理与审批 UI、复杂报表的 Office 视觉与跨平台打开验收、Artifact 跨进程工作区关联、桌面安装包、Docker 多服务和真实部署。单个 Agent、委托节点和工作流图级费用硬阻断已完成本地回归，但不等于真实供应商账单或完整生产成本治理已完成。详见功能矩阵。
+当前最主要的未完成项是：原项目全部能力的逐项真实复验、多轮/长任务/跨进程工作流恢复、真实多 provider 成本对账、外部数据源和 MCP/飞书、完整审批/语义核验、复杂报表的 Office 视觉与跨平台打开验收、桌面安装包、Docker 多服务和真实部署。单个 Agent、委托节点和工作流图级费用硬阻断、Agent/Workflow Artifact 成本关联、Artifact 本地跨进程工作区关联与会话统一审计 Escape 交互已完成本地验证，但不等于真实供应商账单、分布式恢复或完整生产治理已完成。详见功能矩阵。
 
 ### 2026-08-30 报表下载闭环（当前迭代）
 
@@ -163,11 +163,11 @@
 以下内容本轮没有验证，必须继续保持“待验证”：
 
 - Flask 服务启动后的完整 API 链路（目前只回读 PFS 垂直切片）。
-- 真实业务 Excel/数据库/Google Sheets/API 数据源连接；PFS fixture、上传 CSV/XLSX 和临时 PostgreSQL 已验证。
+- 真实业务 Excel/数据库/API 数据源连接；PFS fixture、上传 CSV/XLSX 和临时 PostgreSQL 已验证。Google Sheets 已于 2026-09-02 按范围决策退役。
 - 多轮真实模型调用、跨 provider 费用对账、SSE 长任务和工具循环恢复；DeepSeek 单轮、Token 记录和停止路径已验证。
 - Redis、Temporal、外部 MCP、Feishu、权限和多用户状态。
 - Docker 全栈、PyInstaller/Inno/macOS 桌面安装包最终产物、完整重启恢复、真实部署和线上登录后的分析流程。
-- 当前环境仍缺少具体厂商 ODBC 驱动，`pyodbc.drivers()` 为空，因此 SQL Server/ODBC 仍待真实连接验证。流程图能力由进程内 diagram 工具和内置 draw.io 提供，不依赖独立 `MCP.flowchart_server`；创建、读取、编辑、图形库和路径穿越防护已完成本地回归，真实 MCP 连接仍待验证。
+- 当前环境仍缺少具体厂商 ODBC 驱动，`pyodbc.drivers()` 为空，因此 SQL Server/ODBC 仍待真实连接验证。流程图/商业画布链路的历史回归仅保留为验证记录；该能力已于 2026-09-02 退役，真实 MCP 连接仍待验证。
 
 ### 3.4 外部演示站验证边界
 
@@ -203,7 +203,7 @@
 |---|---|---|
 | 服务入口 | `app.py`、`api/__init__.py`、Flask blueprints | 本地 Waitress、健康检查、首页和 PFS 垂直切片已真实回读 |
 | Agent Loop | `agent/agent.py`，含迭代上限、运行时限、重试、压缩和工具事件 | DeepSeek 单任务真实通过；重试策略已有替身回归，失败切换和恢复待验证 |
-| 数据接入 | Excel/CSV、DuckDB、SQLAlchemy、Google Sheets、HTTP API、Feishu Bitable、跨源合并 | CSV/XLSX、HTTP fixture 和临时 PostgreSQL 已验证；其余连接和权限待验证 |
+| 数据接入 | Excel/CSV、DuckDB、SQLAlchemy、HTTP API、Feishu Bitable、跨源合并 | CSV/XLSX、HTTP fixture 和临时 PostgreSQL 已验证；其余连接和权限待验证；Google Sheets 已退役 |
 | 查询与分析 | schema、SQL、派生分析表、数据 profile、清洗、14 类统计/机器学习分析 | 固定夹具和 DeepSeek 只读主链路已验证；真实业务结果待验证 |
 | 图表 | 选择器、生成器和 41 个图表目录 | 41 个注册图表已用固定夹具生成冒烟；视觉和真实业务数据待验证 |
 | 输出 | Excel、报告、PPT、Dashboard | 固定 fixture 已在统一桌面交付区生成；Office 结构解析、HTTP 下载和 Dashboard 浏览器打开通过，复杂内容、原生应用视觉和跨平台待验证 |
@@ -298,7 +298,7 @@
 
 1. CSV/XLSX → schema/profile → 自然语言问题 → SQL/计算 → 图表 → 结果解释。
 2. 数据预览、质量检查、字段筛选、清洗和派生表。
-3. DuckDB/SQL 数据源与跨源查询；再接入 Google Sheets、HTTP API 和 Feishu 等外部源。
+3. DuckDB/SQL 数据源与跨源查询；再接入 HTTP API 和 Feishu 等外部源。Google Sheets 不再属于产品范围。
 4. 高级分析：回归、聚类、分类、时间序列、漏斗、分层/筛选等，每类都配固定输入、期望输出和失败样例。
 5. Excel/Word/PPT/Dashboard 导出，并验证产物内容、图表可读性和数据口径。
 6. SSE、停止、后台任务、会话历史、工作区和恢复。
@@ -387,14 +387,14 @@
 - 命令：.venv/bin/python -m unittest -v tests.test_pfs_exports tests.test_pfs_agent_vertical_slice；6/6 通过；完整回归 .venv/bin/python -m unittest discover -s tests -q 为 73 项通过、1 项可选 Torch 测试跳过。
 - 窄范围修复：Dashboard HTML 导出页脚的旧产品文案改为 PFS 数据分析 Agent；测试产物放在受控 outputs/exports 目录并在结束时清理。
 - 本地 HTTP：PFS_WSGI=flask PFS_PORT=5123 .venv/bin/python app.py 启动真实 Flask 服务；GET /api/health、GET /api/pfs/capabilities、GET /api/pfs/fixture 均返回 200。固定夹具返回销售额合计 100000、华东 42000、状态 completed。
-- 启动限制：本机尚未安装具体数据库厂商 ODBC 驱动；流程图已改为内置 draw.io/diagram 链路并完成本地回归，真实 MCP 服务连接仍未验收。
+- 启动限制：本机尚未安装具体数据库厂商 ODBC 驱动；内置 draw.io/diagram 链路的本地回归属于历史记录，该能力现已退役，真实 MCP 服务连接仍未验收。
 - 边界：这次证明 PFS 的本地确定性 API 和四类导出产物可运行，不证明真实模型、外部连接器、SSE 长任务、重启恢复、Docker 全栈、浏览器视觉、部署或线上验收。
 
 ### 2026-08-29 工作区元数据身份迁移
 
 - 窄范围修改：新增 `workspace_metadata_dir()`，新工作区的元数据、DuckDB、记忆、知识库和工作流存储以 `.pfs/` 为主目录。
 - 兼容边界：检测到已有 `.zhixi/` 时继续原地读取和写入，不自动搬移、删除或覆盖旧历史；因此旧目录名称仍会出现在兼容代码和数据扫描黑名单中。
-- 运行时旧键：draw.io 缓存刷新参数已从 `baa_reload` 改为 `pfs_reload`；浏览器高频键、模型缓存、桌面配置和工作区路径的上一轮迁移测试仍通过。
+- 历史运行时迁移：draw.io 缓存刷新参数曾从旧键迁移为 `pfs_reload`；该前端链路现已退役。浏览器高频键、模型缓存、桌面配置和工作区路径的上一轮迁移测试仍通过。
 - 验证：`tests.test_pfs_identity_migration` 19 项通过；相关 Python 模块 `py_compile` 通过；`node --check` 和 `pnpm run build:check` 通过。
 - 未完成：仍有少量 BAA 兼容环境变量/存储键、legacy 文案、原作者版权头和 `.zhixi` 兼容说明待分类；不能写成内部命名已清零，也未进行 Git、push、deploy 或 live 验收。
 - 后续回归：完整 `unittest discover` 为 78 项通过、1 项可选 Torch 测试跳过；旧路径定向复查未发现新的运行时 `.zhixi` 直接存储路径或 `_baa_query_count` 计数别名；`pnpm run build:check` 再次通过。测试中的统计模型告警来自固定夹具的秩亏/非平稳输入，不影响测试退出状态，但不应被当作统计质量验收。
@@ -406,7 +406,7 @@
 - 覆盖：CSV 加载、字段和行数、只读聚合查询、预览；Excel 双工作表加载、工作表集合、工作簿顺序预览和查询；HTTP JSON/CSV 加载、查询、预览、Bearer 请求头；空响应和 HTTP 500 失败。
 - 命令：`.venv/bin/python -m unittest tests.test_pfs_data_sources -v`。
 - 结果：4/4 通过。
-- 结论：CSV、Excel 和 HTTP 适配器在固定本地输入/本地替身服务下达到“本地真实通过”；这不代表外部 HTTP、Google Sheets、SQL 数据库、飞书或浏览器上传全链路完成。Excel 的 `list_tables()` 按 DuckDB 表名排序，工作簿原始顺序由 `get_preview()` 保留，测试已按实际公共契约断言。
+- 结论：CSV、Excel 和 HTTP 适配器在固定本地输入/本地替身服务下达到“本地真实通过”；这不代表外部 HTTP、SQL 数据库、飞书或浏览器上传全链路完成。Google Sheets 后续已按范围决策退役。Excel 的 `list_tables()` 按 DuckDB 表名排序，工作簿原始顺序由 `get_preview()` 保留，测试已按实际公共契约断言。
 
 ### 2026-08-29 分析结果数值契约回归
 
@@ -474,7 +474,7 @@
 - 容器验收：镜像启动后 `/api/health`、首页、会话创建、CSV 上传和确定性分析均真实回读；新增 Docker `HEALTHCHECK` 后重建，容器状态为 `healthy`、FailingStreak=0。该结论只覆盖 PFS 应用单容器，不代表 PostgreSQL、Redis、Temporal、外部模型或多服务全栈。
 - 本机真实 HTTP：在 `127.0.0.1:5188` 启动 Waitress，健康接口与首页返回 200，首页显示 PFS 品牌；真实创建会话、上传 `pfs_sales.csv`、执行“按地区统计 2026年1月到2026年3月的销售额”，返回合计 100000、华东 42000、华南 33000、华北 25000、2 条 Claim 和 1 条 Evidence。
 - 真实模型：当前 `LLM/llm_config.json` 不存在，环境变量中没有已配置模型密钥，Ollama `127.0.0.1:11434` 也未运行。真实聊天 SSE 实际返回“未配置任何 LLM 模型”，Token 统计为 0；因此真实模型任务仍未通过，不能用确定性分析替代。
-- 本机依赖：已通过 Homebrew 安装 `unixodbc 2.3.14`，`pyodbc 5.3.0` 可正常导入；当前 `pyodbc.drivers()` 为空，尚未安装具体数据库厂商驱动，也未连接真实数据库，因此 SQL Server 等连接仍待验证。流程图采用内置 draw.io/diagram 工具，不依赖 `MCP.flowchart_server`；真实 MCP 连接仍待验证。
+- 本机依赖：已通过 Homebrew 安装 `unixodbc 2.3.14`，`pyodbc 5.3.0` 可正常导入；当前 `pyodbc.drivers()` 为空，尚未安装具体数据库厂商驱动，也未连接真实数据库，因此 SQL Server 等连接仍待验证。内置 draw.io/diagram 能力已退役；真实 MCP 连接仍待验证。
 
 ### 2026-08-30 DeepSeek 真实 Agent 任务
 
@@ -541,3 +541,93 @@
 - 安全修复：SQL 表引用识别现在保留未知/系统表引用；`pg_catalog.pg_tables`、未选择表和无法解析表引用会在远端执行前被拒绝，避免越过选表范围。
 - 回归：`tests.test_sql_source_scope` 2/2 通过；Flask API 连接/选表/预览回读通过；完整 `unittest discover` 为 124 项通过、无跳过；相关 Ruff 检查通过。临时容器已删除。
 - 边界：这证明了临时 PostgreSQL 的连接和选表范围，不代表 SQL Server 厂商驱动、生产数据库权限/网络、连接池压力、浏览器端到端或线上部署已完成。
+
+### 2026-08-31 PFS 同步报表分析取消回归
+
+- 实现：新增会话作用域的内存运行登记表；上传 CSV/XLSX 的显式口径分析和受限问句分析都会使用唯一 Run ID，并在读取、解释、计算和治理登记之间检查取消状态。前端运行中显示“取消分析”，同时中止浏览器等待并请求服务端取消。
+- 并发验证：测试线程在 `analyze_file` 内等待，另一客户端请求 `/api/session/<sid>/pfs/runs/<run_id>/cancel`；接口返回 202，原分析最终返回 409 / `pfs_analysis_canceled`，`_governance_result` 未被调用。不存在的运行返回 `pfs_analysis_run_not_active`。
+- 质量门：取消专项与相关 HTTP/UI 共 31 项通过；完整 Python 回归 167 项通过、无跳过；Ruff、`git diff --check`、`pnpm run build:chat` 和 `pnpm run build:check` 均通过。
+- 边界：这是单 Python 进程内的协作式取消。它会在分析阶段间阻断后续处理和 Claim/Evidence 登记，但不能强制打断 pandas 正在运行的单个函数，也未覆盖多进程共享状态、重启恢复或分布式队列。
+
+#### 真实桌面补充验收
+
+- 环境：本地 Waitress `127.0.0.1:5012`；Ego Browser 隔离空间；桌面视口 1200×900；临时生成并通过页面上传 54,732,526 字节、2,500,000 行 CSV。
+- 首次发现：取消按钮可早于服务端 Run 登记出现，第一次请求可能返回 404 后继续运行；并且按钮的 `hidden=true` 被通用按钮 CSS 覆盖，取消完成后视觉上仍残留禁用按钮。
+- 修复：取消请求对“Run 尚未激活”的 404 做 0/50/100/200/400/800 ms 有界重试；其他错误不重试。按钮同时使用 DOM `hidden` 属性和项目 `.hidden` 类，避免 CSS 覆盖。
+- 最终回读：运行约 6.2 秒后取消按钮出现，点击后约 1.2 秒进入“已取消”；正文显示“分析已取消，未生成结论或证据记录”，JSON/CSV 和四类交付均禁用，取消按钮 `display:none`。从浏览器资源记录取回 Run ID 后查询 Ledger，Claims、Evidence 和 pending conflicts 均为空。
+- 边界：本次是本机单进程真实桌面验收；测试上传副本和临时 CSV 未在本轮删除，未验证多进程、重启恢复、分布式状态或部署环境取消。
+
+### 2026-08-31 日期异常与超限上传桌面验收
+
+- 环境：本地 Waitress `localhost:5012`；Ego Browser 隔离空间；桌面视口 1200×717。
+- 日期异常：真实上传含 `2026-02-30` 的 CSV。首次验收发现 `/pfs/sources` 在预读日期失败后会静默跳过整份文件，且错误建议显示内部翻译键。修复后，文件保留在选择器并标记“需修复”；运行返回 `source_date_invalid`，页面显示中文 YYYY-MM / YYYY-MM-DD 修复建议，JSON、CSV 和四类交付均禁用。
+- 超限上传：真实选择 104,857,601 字节 CSV 并点击上传；弹窗显示单文件 100 MB 上限和压缩/拆分建议，上传按钮恢复可重试状态。服务端上传目录回读未发现该超限文件。
+- 质量证据：新增 HTTP 回归确认异常日期数据源仍返回字段和行数、携带 `validation_error`，实际分析仍按稳定错误码拒绝；中英文结构化错误词条补齐并由 UI 契约测试覆盖。
+- 截图：`/tmp/pfs-error-qa.vCxRwy/pfs-invalid-date-fixed.png`、`/tmp/pfs-error-qa.vCxRwy/pfs-too-large-final.png`。临时输入和合法上传副本未在本轮清理。
+- 边界：缺字段、模型未配置和交付失败尚未完成真实桌面回读；本次不代表部署或线上验收。
+
+### 2026-08-31 剩余桌面错误态验收
+
+- 隔离环境：本地 Waitress `localhost:5013`，空白 `PFS_DATA_DIR`，关闭自动清理，不读取或修改现役 DeepSeek 配置；Ego Browser 隔离空间，桌面视口 1200×717。
+- 缺字段：上传仅含 `month / region / orders` 的 CSV，以“按地区统计销售额”运行受限问句。修复前所有解析错误会被覆盖成 `pfs_query_failed`；修复后无匹配指标列保留 `source_columns_missing`，页面同时解释缺少指标字段并提示核对指标/日期/分组列，下载和四类交付禁用。
+- 模型未配置：空白模型配置下从真实聊天输入发送请求，SSE 返回 `model_not_configured`；页面显示“未配置任何 LLM 模型”以及打开模型设置、配置 DeepSeek 或其他模型的建议，流正常结束，没有内部错误码泄漏。
+- 交付失败：先完成固定报表，再临时将隔离输出目录切为只读并点击 Excel。意外导出异常现在统一包装为 `delivery_generation_failed`；页面显示输出目录权限建议，四类按钮恢复可重试，无 Artifact 产生。验收后恢复隔离目录权限。
+- 视觉与安全修复：长交付错误曾将标题挤成竖排并产生横向截断；交付头改为单列网格，错误状态允许任意位置换行。意外异常详细内容只写服务端日志，页面不再暴露 `/private/tmp/...` 等绝对路径。最终 DOM 回读标题 462×17、错误状态 462×31，弹窗 `scrollWidth <= clientWidth`。
+- 截图：`/tmp/pfs-isolated-errors.xQXBci/missing-field.png`、`/tmp/pfs-isolated-errors.xQXBci/model-not-configured.png`、`/tmp/pfs-isolated-errors.xQXBci/delivery-failure-final.png`。
+- 边界：以上是本地隔离错误注入，不是现役模型配置失效，也不代表线上故障、跨进程恢复或生产权限策略已验收。
+
+### 2026-08-31 Artifact 成本与跨进程恢复契约
+
+- 固定报表的 Excel、Word、PPT、Dashboard 交付响应和生命周期登记新增结构化成本：确定性计算、模型调用 0 次、输入/输出 0 Token、0 USD、`estimated=false`。这表示该路径没有调用模型，不是 provider 账单估算。
+- 任务历史完整详情新增成本来源展示；生命周期安全字段允许按会话查询成本，但仍不返回本地文件路径。
+- 恢复回归先下载一次 Artifact，再回收并恢复；回读确认原 Artifact ID、Run ID、源快照、Claim/Evidence、成本和下载历史保持不变，第二次恢复返回 404，不重复恢复文件。
+- 测试启动独立 Python 应用进程并重开同一临时 `PFS_DATA_DIR`，通过会话 Artifact 详情与下载 HTTP 入口读取同一对象和文件，证明本地 registry 可跨应用进程重开关联。
+- 专项验证：`tests.test_pfs_delivery_artifacts` 7 项通过，目标 Ruff、ESLint 和 `git diff --check` 通过。
+- 边界：这是本地 JSON registry 和受控文件目录的跨进程重开，不是多服务/分布式恢复；真实 Agent 生成 Artifact 时的模型 usage 归集、工作区关联和 provider 账单对账仍待完成。
+
+### 2026-08-31 Artifact 工作区关联契约
+
+- 生命周期登记现支持 PFS 数据目录与已知工作区 `artifacts/` 两种受控边界；工作区外文件、缺少 Workspace ID 的外部文件和越界路径仍被拒绝。
+- 工作区 Artifact 记录稳定 Workspace ID；切换/卸载后和独立应用进程重开同一 `PFS_DATA_DIR` 后，仍可通过会话 Artifact 详情和下载入口读取同一文件。
+- 任务历史展示工作区名称、短 ID 和可用状态，不返回或悬浮显示绝对路径；同一 Artifact ID 只能幂等复用同一文件，不能静默覆盖另一产物。
+- 工作区 Artifact 回收后恢复到原工作区目录，并保持原 Artifact ID；会话归档不会把用户项目内的 Artifact 搬出工作区。
+- 数据目录 TTL 清扫器只裁剪 data-scope 登记，即使工作区 Artifact 与数据目录文件具有相同相对路径，也不会误删工作区登记。
+- 本轮完整门禁为 171 项 Python 测试通过，Ruff、ESLint、Chat production build、Dashboard/Chat build check 和 `git diff --check` 通过；发布 staging 为 3,871 个文件、183,313,961 bytes，artifact audit 为 0 findings。
+- 边界：这是单机已知工作区索引和本地文件系统契约，不证明分布式存储、跨主机迁移、生产故障恢复或真实 Agent 成本归集完成。
+
+### 2026-08-31 Run → Artifact 用量关联与文档收口
+
+- 实现：主 Agent 聊天链路以会话级 `conversation_job_id` 作为稳定 Run ID；模型 usage 事件记录 `run_id`、provider、model、调用次数和输入/输出/缓存 Token。该 Run 生成的所有 Artifact 会按 `session_id + run_id` 回填聚合用量，取消、失败或中断时保留已经发生的用量。
+- 费用边界：配置完整模型单价时，Artifact 记录基于配置单价的估算并标记 `estimated=true`、`billing_verified=false`；价格未知时保留 Token/调用次数但费用为 unknown；确定性报表明确为 0 次模型调用、0 Token、0 USD 且非估算。没有供应商账单对账，也没有将 Workflow 图级费用自动关联到 Artifact。
+- 安全边界：用量回填只匹配 `session_id + run_id` 和 active Artifact，只更新结构化 cost 字段，不改变 Artifact 身份、路径、快照哈希、大小或 Workspace ID；未知价格不以 0 假装完成计费。
+- 验证：完整 Python 回归 `175` 项通过、无失败、无跳过；真实上传 CSV/XLSX 的动态 Evidence/Claim 登记、按 `session_id + run_id` Ledger 回读和 Artifact lineage 专项回归通过；Ruff、ESLint、Chat/Dashboard production build、`git diff --check` 均通过。
+- 发布边界：本轮文档和代码仍未 commit、push、deploy 或 live 验收；GitHub 私有仓库的既有远端状态不代表本轮改动已发布。
+- 本轮门禁：Ruff、ESLint、Chat production build、Dashboard/Chat build check 和 `git diff --check` 全部通过；重新生成的临时发布 staging 为 3,871 个文件、183,325,640 bytes，manifest 与文件系统回读一致，artifact audit 为 0 findings、0 symlink。
+- 动态回链边界：真实上传 CSV/XLSX 的直接分析、受限问句和确定性聊天均写入本地 JSON Ledger；Claim 保存 `evidence_ids`，Claim 与 Evidence 建立 `supports` 关系，Evidence 保留原始文件名、来源 ID、工作表、纳入行数、日期范围、内容哈希、locator 和来源 URL。报表预览、SSE `pfs_result` 和会话 Artifact 详情可以按同一 `session_id + run_id` 回读这些 lineage。该结果是本地 HTTP/前端/Artifact 回归，不代表自动语义核验、核心事件自动消费、分布式 Ledger 或线上验收。
+
+### 2026-09-01 会话统一审计中心：隔离本地真实桌面验收
+
+- 新增会话所有权保护的 `GET /api/session/<sid>/audit`。接口聚合当前会话 Job、可回放事件、模型调用、工具步骤、模型重试、错误、Artifact、Claim、Evidence、人工裁决、Token、成本、耗时和命令指标，并支持对象、状态、关键词和起止时间筛选。
+- 新增与 Flask 解耦的 `pfs_agent/audit.py` 聚合契约。响应只投影固定安全字段，不返回绝对路径、模型请求正文或完整工具参数；其他会话的 Job、Artifact、Claim、Evidence 和裁决不会进入当前响应。
+- Claim 会回链 supports/refutes Evidence 与片段；没有证据的 Claim 进入 `uncovered_claims`，同时存在支持和反驳关系的 Claim 进入 `conflicts`。人工决定单独进入审批时间线；未知模型单价保持 `amount=null`，不转成 0。
+- `agent/retry.py` 增加只含审计元数据的重试观察回调；主 Agent 会把重试次数、等待秒数、归类原因、provider 和 model 写入当前 conversation Job 事件，不保存请求正文或 provider 错误原文。任务历史内新增“本会话审计中心”，保留原 Job 与交付物区域，并提供统一时间线和核验待处理区。
+- 验证：隔离服务 `http://127.0.0.1:5217` 使用 `/private/tmp/pfs-audit-browser.soChCr` 数据目录，Session `1718cfc6-047a-4b2f-9fae-d353afc71fac`、Job `d251964a-98e`、Artifact `artifact-audit-browser-d251964a-98e`；1280×720 真实桌面回读满数据、工具类型筛选、关键词无匹配空态、重置筛选、`Failed to fetch` 错误态、弹窗内部滚动和显式关闭按钮。夹具包含 2 个 Claim、2 条 Evidence、1 个 supports/refutes 冲突、1 个无证据 Claim 和 1 条 `needs_review` 人工裁决，原因“业务口径不一致”。最终统计为 1 个成功任务、1 个交付物、2 个 Claim、1 个无证据结论、1 个冲突、1 次模型调用、120 input + 30 output Token，费用未知；安全投影未暴露绝对路径、完整 SQL 或完整工具参数。
+- 门禁：本轮重新运行的 Python 全量测试、Ruff、ESLint、Chat production build、Dashboard/Chat build check 和 `git diff --check` 结果以本轮实测为准；构建既有 500 kB chunk 提示不影响退出状态。
+- 边界：真实桌面验收发现关键词输入框按 Escape 不关闭审计弹窗，列为待修复缺陷；真实模型网络失败/重试注入、长会话性能、Docker/全栈、发布 staging、commit、push、deploy 或 live 验收仍未完成。Workflow 图级 Artifact 成本、供应商账单对账、语义核验和完整审批仍未完成。默认项目数据根另有一次误启动留下的 Job/Artifact/ledger 残留，本轮未清理。
+
+### 2026-09-01 P0 本地切片收口
+
+- 修复：动态任务历史/统一审计弹层在关键词等内部控件聚焦时响应 Escape，并由弹层自身消费事件后关闭。隔离本地工作台实测 `beforeEscape=true`、`afterEscape=false`。
+- Workflow 成本：委托模型调用新增 `model_calls` 计数并持久化到节点；调度器只向执行副本注入 Run/节点身份；导出 Artifact 记录 `run_id`、Workflow Run 与节点 Run 身份，导出时写入当前聚合用量，Run 成功/失败/取消后刷新终态总量。
+- 费用语义：总量汇总全部已记录节点 attempt/iteration；配置价格完整时记录估算 USD，任一已测量节点价格未知时 `amount=null`，无模型用量时标记 unavailable，均保持 `billing_verified=false`。
+- 边界：这是本地持久化和隔离桌面证据，不是供应商账单、多服务队列或分布式恢复；当前切片未 commit、push、deploy 或 live 验收。默认项目数据根的既有误启动残留仍未清理。
+- 门禁：196 项 Python 测试通过；Ruff、ESLint、Chat production build、Dashboard/Chat build check 和 `git diff --check` 通过。当前源码发布 staging 为 3,872 个文件，artifact audit 的 0 findings、0 symlink 是上一轮记录，本切片未重跑 staging；既有 500 kB chunk 提示不影响构建退出状态。
+
+### 2026-09-03 P0 退役范围与发布 staging 收口
+
+- 范围修复：删除此前仍被跟踪的 3,332 个 `static/drawio/` 静态文件和 30 个 `data/shape_libs/` 图形库文件，移除 draw.io 专用安全响应头、过期 Google Sheets 用户说明和残留注释；退役回归增加可执行静态资产缺失断言。
+- 本地数据边界：`static/drawio/` 下仍有 8 个被 Git 忽略的 secret/配置文件，`business_canvas/business_canvas.sqlite` 仍是本地运行数据。它们未获凭据/数据清场授权，因此保留现场；发布策略新增整个 `drawio` 路径拒绝规则，防止本地残留进入制品。
+- 门禁：2026-09-03 实跑 196 项 Python 测试，全部通过、无失败、无跳过；Ruff、ESLint、Chat production build、Dashboard/Chat build check 和 `git diff --check` 全部通过。Chat 主 bundle 为 511.80 kB，保留既有 500 kB 体积提示。
+- 发布预演：独立临时 staging 为 489 个文件、37,703,382 bytes；artifact audit 为 0 findings、0 symlink，路径回读未发现 draw.io、shape_libs、business_canvas 或 gsheets，文件回读未发现数据库和本地凭据。
+- 隔离运行：当前工作树在 `127.0.0.1:5023` 启动 Waitress，`/api/health` 和主工作台返回 200；`/static/drawio/index.html`、`/api/business-canvas` 和 `/api/connect-gsheets` 均返回 404。回读后测试服务已停止。
+- 清场与发布边界：用户在完整汇报后确认删除两份临时 staging、一份隔离运行目录和未跟踪的 `direction-approved.md`，清理后逐项回读为不存在。被忽略的本地凭据、数据库、上传、输出和参考快照继续保留且不进入发布包。当前切片仍未 commit、push、构建桌面安装包、部署或线上验收。

@@ -82,7 +82,16 @@ def is_provider_switchable(exc: Exception) -> bool:
     ))
 
 
-def call_with_retry(fn, *args, max_retries: int = 3, **kwargs):
+def _retry_reason(exc: Exception) -> str:
+    message = str(exc).lower()
+    if "429" in message or "rate limit" in message or "too many requests" in message:
+        return "rate_limit"
+    if any(code in message for code in ("500", "502", "503", "504")):
+        return "provider_unavailable"
+    return "transport_error"
+
+
+def call_with_retry(fn, *args, max_retries: int = 3, on_retry=None, **kwargs):
     """Call fn(*args, **kwargs) with exponential backoff on transient errors.
 
     Schedule (base_wait × 2**(attempt-1)):
@@ -102,4 +111,15 @@ def call_with_retry(fn, *args, max_retries: int = 3, **kwargs):
             wait = base_wait * (2 ** (attempt - 1))
             log.warning("[retry] attempt %d/%d failed (%s), waiting %.1fs",
                         attempt, max_retries, exc, wait)
+            if on_retry is not None:
+                try:
+                    on_retry({
+                        "attempt": attempt,
+                        "max_retries": max_retries,
+                        "wait_seconds": wait,
+                        "reason": _retry_reason(exc),
+                        "error_type": type(exc).__name__,
+                    })
+                except Exception:
+                    log.exception("[retry] observer failed")
             time.sleep(wait)

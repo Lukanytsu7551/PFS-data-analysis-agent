@@ -44,10 +44,6 @@ _ALWAYS_AVAILABLE = frozenset({
     "task_list",
     "task_update",
     "plan_complete",
-    "display_diagram",
-    "edit_diagram",
-    "get_diagram",
-    "get_shape_library",
 })
 
 _INSPECT_TOOLS = frozenset({

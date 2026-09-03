@@ -6,6 +6,7 @@
 import { getUiIsland } from "../core/ui-registry.js";
 import { toast } from "../core/overlay.js";
 import { state } from "../core/runtime.js";
+import { iconSpan } from "../core/icons.js";
 
 const pfs = () => globalThis.PFS;
 
@@ -280,7 +281,7 @@ async function kbSubmitForm() {
     vk.setFormBusy(false);
     // close inline form in panel too
     if (pfs()?.sidebar?.closeKbInlineForm) pfs().sidebar.closeKbInlineForm();
-    toast(mode === "edit" ? "已更新 ✓" : "已添加 ✓");
+    toast(mode === "edit" ? "已更新" : "已添加");
     loadByTab(type);  // 刷新当前类型列表
   } catch (e) {
     vk.setFormErr(`请求失败: ${e.message}`);
@@ -327,12 +328,12 @@ async function kbLoadFiles() {
         : Math.round(f.size / 1024) + " KB";
       return `
       <div class="kb-file-row">
-        <span class="kb-file-icon">${f.filename.endsWith(".docx") ? "📝" : "📊"}</span>
+        ${iconSpan(f.filename.endsWith(".docx") ? "file" : "chart", { className: "kb-file-icon", size: 16 })}
         <span class="kb-file-name" title="${esc(f.filename)}">${esc(f.filename)}</span>
         <span class="kb-file-meta">${kb} · ${date}</span>
         <button class="kb-file-delete" type="button" title="删除源文件"
                 aria-label="删除源文件 ${esc(f.filename)}"
-                data-action="kbDeleteFile" data-filename="${esc(f.filename)}">×</button>
+                data-action="kbDeleteFile" data-filename="${esc(f.filename)}">${iconSpan("close", { className: "pfs-icon-box", size: 14 })}</button>
       </div>`;
     }).join("");
   } catch (e) {
@@ -425,9 +426,9 @@ async function kbParseFile(file) {
 // ── Import: preview rendering ─────────────────────────────────────────────────
 
 const _KB_TABLE_LABELS = {
-  metrics:        "📐 指标",
-  business_rules: "🛡 规则",
-  context_notes:  "📝 背景",
+  metrics:        `${iconSpan("ruler", { className: "pfs-icon-box", size: 14 })} 指标`,
+  business_rules: `${iconSpan("shield", { className: "pfs-icon-box", size: 14 })} 规则`,
+  context_notes:  `${iconSpan("file", { className: "pfs-icon-box", size: 14 })} 背景`,
 };
 
 const _KB_FIELDS_META = {
@@ -496,7 +497,7 @@ function kbPreviewCard(rec, idx) {
   <div class="kb-prev-card" id="kb-prev-card-${idx}">
     <div class="kb-prev-card-head">
       <span class="kb-prev-card-type">${label}</span>
-      <button class="kb-prev-delete" title="移除此条" data-action="kbPreviewRemove" data-idx="${idx}">×</button>
+      <button class="kb-prev-delete" title="移除此条" aria-label="移除此条" data-action="kbPreviewRemove" data-idx="${idx}">${iconSpan("close", { className: "pfs-icon-box", size: 14 })}</button>
     </div>
     <div class="kb-prev-fields">${fieldsHtml}</div>
   </div>`;
@@ -543,7 +544,7 @@ async function kbConfirmImport() {
     const { inserted } = data;
     const ragChunks = data.rag?.chunks || 0;
     okEl.textContent =
-      `✓ 入库成功：指标 ${inserted.metrics} 条，规则 ${inserted.rules} 条，背景知识 ${inserted.notes} 条，RAG 分块 ${ragChunks} 条`;
+      `入库成功：指标 ${inserted.metrics} 条，规则 ${inserted.rules} 条，背景知识 ${inserted.notes} 条，RAG 分块 ${ragChunks} 条`;
     _kb.previewRecs = [];
     setTimeout(() => kbResetImport(), 1800);
   } catch (e) {

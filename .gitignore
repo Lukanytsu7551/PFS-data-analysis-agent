@@ -158,8 +158,8 @@ static/Images/icon.png
 static/Images/icon-sm.png
 static/favicon.ico
 
-# Bundled draw.io OAuth client-secret placeholders are local runtime material,
-# not required for the PFS source release.
+# Retired draw.io credentials are preserved as local-only residue until the
+# user explicitly authorizes credential cleanup; packaging rejects this tree.
 static/drawio/WEB-INF/*_client_secret
 static/drawio/WEB-INF/cloud_convert_api_key
 static/drawio/WEB-INF/pusher_properties

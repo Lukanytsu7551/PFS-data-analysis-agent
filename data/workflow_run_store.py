@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS workflow_node_runs (
     input_tokens INTEGER NOT NULL DEFAULT 0,
     output_tokens INTEGER NOT NULL DEFAULT 0,
     cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+    model_calls INTEGER NOT NULL DEFAULT 0,
     tool_calls INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL,
     UNIQUE(run_id, node_id, iteration, attempt),
@@ -376,6 +377,7 @@ class WorkflowRunStore:
             "input_tokens": "INTEGER NOT NULL DEFAULT 0",
             "output_tokens": "INTEGER NOT NULL DEFAULT 0",
             "cached_input_tokens": "INTEGER NOT NULL DEFAULT 0",
+            "model_calls": "INTEGER NOT NULL DEFAULT 0",
             "tool_calls": "INTEGER NOT NULL DEFAULT 0",
             "cost_usd": "REAL",
         }.items():
@@ -929,13 +931,14 @@ class WorkflowRunStore:
             self._conn.execute(
                 "UPDATE workflow_node_runs SET model_name = ?, provider_name = ?, "
                 "input_tokens = ?, output_tokens = ?, cached_input_tokens = ?, "
-                "tool_calls = ?, cost_usd = ?, updated_at = ? WHERE id = ?",
+                "model_calls = ?, tool_calls = ?, cost_usd = ?, updated_at = ? WHERE id = ?",
                 (
                     str(usage.get("model") or ""),
                     str(usage.get("provider") or ""),
                     input_tokens,
                     output_tokens,
                     max(0, int(usage.get("cached_input_tokens") or 0)),
+                    max(0, int(usage.get("model_calls") or 0)),
                     max(0, int(usage.get("tool_calls") or 0)),
                     cost_usd,
                     _now(),

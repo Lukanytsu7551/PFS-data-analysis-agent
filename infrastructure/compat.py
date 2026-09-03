@@ -19,6 +19,25 @@ def env_from(environ: Mapping[str, str], primary: str, default: str = "") -> str
     return value or default
 
 
+def optional_feature_enabled(
+    name: str,
+    environ: Mapping[str, str] | None = None,
+) -> bool:
+    """Return whether a retained optional feature is explicitly enabled."""
+    values = environ if environ is not None else os.environ
+    key = f"PFS_ENABLE_{str(name or '').strip().upper()}"
+    return env_from(values, key, "").lower() in {"1", "true", "yes", "on"}
+
+
+def cloud_login_enabled(environ: Mapping[str, str] | None = None) -> bool:
+    """Return whether the retained cloud-login mode is explicitly enabled."""
+    values = environ if environ is not None else os.environ
+    enabled = optional_feature_enabled("CLOUD_LOGIN", values)
+    return enabled and (
+        bool(values.get("RAILWAY_PROJECT_ID")) or values.get("VERCEL") == "1"
+    )
+
+
 def request_user_id(
     headers: Mapping[str, object],
     body: Mapping[str, object] | None = None,

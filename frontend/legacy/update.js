@@ -1,5 +1,6 @@
 // Check the explicitly configured PFS release channel.
 import { $, esc } from "../core/dom.js";
+import { iconSpan } from "../core/icons.js";
 
 function showReleaseButton(button, url, label) {
   if (!url) return;
@@ -30,7 +31,7 @@ export async function runUpdate() {
 
     if (!d.ok) {
       stateEl.className = "update-state update-err";
-      stateEl.innerHTML = `<span class="update-state-icon">❌</span><span class="update-state-text">${esc(d.error || t("update.check_fail"))}</span>`;
+      stateEl.innerHTML = `${iconSpan("circleHelp", { className: "update-state-icon", size: 20 })}<span class="update-state-text">${esc(d.error || t("update.check_fail"))}</span>`;
       outEl.textContent = d.code === "github_rate_limited"
         ? "GitHub 匿名 API 有访问次数限制。稍后重试，或直接打开 Releases 页面查看最新版本。"
         : (d.error || "");
@@ -51,10 +52,10 @@ export async function runUpdate() {
 
     if (!d.has_update) {
       stateEl.className = "update-state update-ok";
-      stateEl.innerHTML = `<span class="update-state-icon">✅</span><span class="update-state-text">${t("update.ok_latest")}</span>`;
+      stateEl.innerHTML = `${iconSpan("check", { className: "update-state-icon", size: 20 })}<span class="update-state-text">${t("update.ok_latest")}</span>`;
     } else {
       stateEl.className = "update-state update-ok";
-      stateEl.innerHTML = `<span class="update-state-icon">🆕</span><span class="update-state-text">${t("update.new_version")}</span>`;
+      stateEl.innerHTML = `${iconSpan("spark", { className: "update-state-icon", size: 20 })}<span class="update-state-text">${t("update.new_version")}</span>`;
 
       // Keep downloads on the configured PFS channel so users can review the release.
       if (d.release_notes) {
@@ -69,7 +70,7 @@ export async function runUpdate() {
       ? (t("update.req_timeout") || "Request timed out")
       : (t("update.req_fail") || "Request failed: ") + esc(String(e));
     stateEl.className = "update-state update-err";
-    stateEl.innerHTML = `<span class="update-state-icon">❌</span><span class="update-state-text">${msg}</span>`;
+    stateEl.innerHTML = `${iconSpan("circleHelp", { className: "update-state-icon", size: 20 })}<span class="update-state-text">${msg}</span>`;
   } finally {
     btn.disabled = false;
   }

@@ -5,6 +5,7 @@ import { uiRegistry } from "../core/ui-registry.js";
 import { workspace } from "../features/workspace.js";
 import { renderSourceList } from "./datasource.js";
 import { refresh as refreshJobHistory } from "./job_history.js";
+import { iconVNode } from "../core/icons.js";
 
   const Vue = window.Vue;
   const root = document.getElementById("checkpoint-root");
@@ -165,8 +166,8 @@ import { refresh as refreshJobHistory } from "./job_history.js";
       h("header", { class: "checkpoint-head" }, [
         h("div", null, [h("div", { class: "modal-title" }, "时光回退"),
           h("div", { class: "checkpoint-sub" }, "撤销之前的文件修改和对话")]),
-        h("button", { class: "job-history-close", type: "button",
-          onClick: () => { state.open = false; draw(); } }, "×"),
+        h("button", { class: "job-history-close", type: "button", "aria-label": "关闭",
+          onClick: () => { state.open = false; draw(); } }, iconVNode(h, "close", { size: 16 })),
       ]),
     ];
     if (state.loading) children.push(h("div", { class: "checkpoint-empty" }, "正在读取历史快照…"));

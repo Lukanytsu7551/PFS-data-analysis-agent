@@ -95,6 +95,14 @@ class EvidenceCandidate:
     source_type: str = "unknown"
     trust_level: str = "unknown"
     content_sha256: str = ""
+    source_id: str = ""
+    file_name: str = ""
+    worksheet: str = ""
+    included_rows: int = 0
+    locator: str = ""
+    date_from: str = ""
+    date_to: str = ""
+    columns: tuple[str, ...] = ()
 
     def to_entry(self) -> "EvidenceEntry":
         normalized_url = normalize_http_url(self.source_url)
@@ -121,6 +129,14 @@ class EvidenceCandidate:
             trust_level=str(self.trust_level or "unknown").strip() or "unknown",
             task_id=task_id,
             content_sha256=content_hash,
+            source_id=str(self.source_id or "").strip(),
+            file_name=str(self.file_name or "").strip(),
+            worksheet=str(self.worksheet or "").strip(),
+            included_rows=max(0, int(self.included_rows or 0)),
+            locator=str(self.locator or "").strip(),
+            date_from=str(self.date_from or "").strip(),
+            date_to=str(self.date_to or "").strip(),
+            columns=tuple(str(column).strip() for column in (self.columns or ()) if str(column).strip()),
         )
 
 
@@ -138,8 +154,16 @@ class EvidenceEntry:
     trust_level: str
     task_id: str
     content_sha256: str
+    source_id: str = ""
+    file_name: str = ""
+    worksheet: str = ""
+    included_rows: int = 0
+    locator: str = ""
+    date_from: str = ""
+    date_to: str = ""
+    columns: tuple[str, ...] = ()
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "evidence_id": self.evidence_id,
             "identity_sha256": self.identity_sha256,
@@ -153,6 +177,14 @@ class EvidenceEntry:
             "trust_level": self.trust_level,
             "task_id": self.task_id,
             "content_sha256": self.content_sha256,
+            "source_id": self.source_id,
+            "file_name": self.file_name,
+            "worksheet": self.worksheet,
+            "included_rows": self.included_rows,
+            "locator": self.locator,
+            "date_from": self.date_from,
+            "date_to": self.date_to,
+            "columns": list(self.columns),
         }
 
 
@@ -223,6 +255,7 @@ class ClaimRecord:
             "verification_reason": self.verification_reason,
             "human_decision": self.human_decision,
             "evidence_links": [link.to_dict() for link in self.evidence_links],
+            "evidence_ids": [link.evidence_id for link in self.evidence_links],
         }
 
 
@@ -447,7 +480,21 @@ class PersistentEvidenceLedger(EvidenceLedger):
             "content_sha256",
         )
         try:
-            entry = EvidenceEntry(**{field: str(raw.get(field) or "") for field in fields})
+            entry = EvidenceEntry(
+                **{field: str(raw.get(field) or "") for field in fields},
+                source_id=str(raw.get("source_id") or ""),
+                file_name=str(raw.get("file_name") or ""),
+                worksheet=str(raw.get("worksheet") or ""),
+                included_rows=max(0, int(raw.get("included_rows") or 0)),
+                locator=str(raw.get("locator") or ""),
+                date_from=str(raw.get("date_from") or ""),
+                date_to=str(raw.get("date_to") or ""),
+                columns=tuple(
+                    str(column).strip()
+                    for column in (raw.get("columns") or ())
+                    if str(column).strip()
+                ),
+            )
         except TypeError as exc:
             raise LedgerError("stored evidence entry is malformed") from exc
         if evidence_identity(entry.source_url, entry.snippet) != entry.identity_sha256:

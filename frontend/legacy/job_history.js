@@ -54,7 +54,7 @@ import { ensureUiIsland } from "../features/vue-app.js";
   function callbacks() {
     return {
       onCancel: cancelJob, onRefresh: refresh, onClearCompleted: clearCompleted,
-      onArtifactDetail: loadArtifactDetail,
+      onArtifactDetail: loadArtifactDetail, onAuditFilters: refreshAudit,
     };
   }
 
@@ -74,6 +74,34 @@ import { ensureUiIsland } from "../features/vue-app.js";
     if (!response.ok) throw new Error(`Artifact history request failed (${response.status})`);
     const data = await response.json();
     return Array.isArray(data.artifacts) ? data.artifacts : [];
+  }
+
+  async function fetchAudit(targetSid = sid, filters = {}) {
+    if (!targetSid) return null;
+    const params = new URLSearchParams({ limit: "300" });
+    for (const [key, value] of Object.entries(filters || {})) {
+      if (value && value !== "all") params.set(key, String(value));
+    }
+    const response = await fetch(
+      `/api/session/${encodeURIComponent(targetSid)}/audit?${params.toString()}`,
+    );
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `Audit request failed (${response.status})`);
+    return data;
+  }
+
+  async function refreshAudit(filters = {}) {
+    const vue = getUiIsland("jobHistory");
+    if (!sid || !vue) return;
+    vue.setAuditLoading?.(true);
+    vue.setAuditError?.("");
+    try {
+      vue.setAudit?.(await fetchAudit(sid, filters));
+    } catch (error) {
+      vue.setAuditError?.(error?.message || String(error));
+    } finally {
+      vue.setAuditLoading?.(false);
+    }
   }
 
   async function fetchArtifactDetail(artifactId) {
@@ -158,14 +186,27 @@ import { ensureUiIsland } from "../features/vue-app.js";
     if (!sid || !vue) return;
     vue.setLoading(true);
     vue.setError("");
+    vue.setAuditLoading?.(true);
+    vue.setAuditError?.("");
     try {
-      vue.setJobs(await fetchJobs(), callbacks());
-      vue.setRegisteredArtifacts?.(await fetchRegisteredArtifacts());
+      const [jobs, artifacts, auditResult] = await Promise.all([
+        fetchJobs(),
+        fetchRegisteredArtifacts(),
+        fetchAudit().catch(error => ({ __auditError: error })),
+      ]);
+      vue.setJobs(jobs, callbacks());
+      vue.setRegisteredArtifacts?.(artifacts);
+      if (auditResult?.__auditError) {
+        vue.setAuditError?.(auditResult.__auditError?.message || String(auditResult.__auditError));
+      } else {
+        vue.setAudit?.(auditResult);
+      }
       await replay();
     } catch (error) {
       vue.setError(error?.message || String(error));
     } finally {
       vue.setLoading(false);
+      vue.setAuditLoading?.(false);
     }
   }
 

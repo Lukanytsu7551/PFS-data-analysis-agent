@@ -3,7 +3,6 @@ import json
 import logging
 import traceback
 import uuid
-import os
 import re
 import threading
 from datetime import datetime
@@ -14,10 +13,11 @@ from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
 
 from .state import session_manager, datasource_config_manager, check_session_ownership, require_session_ownership
-from data.connector import ExcelDataSource, CSVDataSource, SQLDataSource, GoogleSheetsDataSource, HTTPAPIDataSource
+from data.connector import ExcelDataSource, CSVDataSource, SQLDataSource, HTTPAPIDataSource
 from data.sources.excel import excel_requires_job, parse_excel_job
 from data.sources.workspace_persistent import WorkspacePersistentSource
 from infrastructure.artifact_lifecycle import register_artifact
+from infrastructure.compat import cloud_login_enabled
 from infrastructure.paths import data_path
 
 log = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ _BASE_SESSION_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _is_cloud() -> bool:
-    return bool(os.environ.get("RAILWAY_PROJECT_ID")) or os.environ.get("VERCEL") == "1"
+    return cloud_login_enabled()
 
 
 def _scoped_dir(base: Path, user_id: str) -> Path:
@@ -70,6 +70,23 @@ MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 _finalize_lock = threading.RLock()
 
 
+def _upload_root() -> Path:
+    """Resolve the upload root at request time, not only at import time.
+
+    This keeps uploads and lifecycle registration on the same data root when
+    ``PFS_DATA_DIR`` is supplied by a packaged run, test, or process wrapper.
+    """
+    root = data_path("uploads")
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _warehouse_root() -> Path:
+    root = data_path("outputs", "DataWarehouse")
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 def _allowed(filename: str) -> bool:
     return Path(filename).suffix.lower() in ALLOWED_EXTS
 
@@ -77,7 +94,7 @@ def _allowed(filename: str) -> bool:
 def _friendly_conn_error(exc: Exception, service: str) -> str:
     """Translate a low-level connection exception into a user-readable message.
 
-    `service` is a short label like 'Google Sheets' / '外部 API' / '数据库'.
+    `service` is a short label like '外部 API' / '数据库'.
     Falls back to the raw message when the error is not a known network case.
     """
     # Walk the exception cause chain so a wrapped error is still recognised.
@@ -173,7 +190,7 @@ def _safe_stem(name: str) -> str:
 
 
 def _warehouse_file(filename: str, user_id: str = "") -> Path:
-    return _scoped_dir(_BASE_WAREHOUSE_DIR, user_id) / Path(filename).name
+    return _scoped_dir(_warehouse_root(), user_id) / Path(filename).name
 
 
 def _serialize_source(entry: dict, active_ids: set[str]) -> dict | None:
@@ -203,12 +220,6 @@ def _serialize_source(entry: dict, active_ids: set[str]) -> dict | None:
             "connection_string": conn,
             "analysis_tables": source.get_analysis_tables(),
         }
-    if isinstance(source, GoogleSheetsDataSource):
-        creds = getattr(source, "_creds_dict", None)
-        spreadsheet = getattr(source, "_spreadsheet_ref", "")
-        if not creds or not spreadsheet:
-            return None
-        return {**base, "kind": "gsheets", "creds_dict": creds, "spreadsheet": spreadsheet}
     if isinstance(source, HTTPAPIDataSource):
         return {
             **base,
@@ -251,12 +262,6 @@ def _restore_source(info: dict):
         if tables:
             source.set_analysis_tables([str(item) for item in tables])
         return source
-    if kind == "gsheets":
-        creds = info.get("creds_dict")
-        spreadsheet = str(info.get("spreadsheet") or "")
-        if not isinstance(creds, dict) or not spreadsheet:
-            raise ValueError("Google Sheets 凭证或表格地址为空")
-        return GoogleSheetsDataSource(creds, spreadsheet, name)
     if kind == "http":
         url = str(info.get("url") or "")
         if not url:
@@ -276,7 +281,7 @@ def _restore_source(info: dict):
 
 
 def _list_warehouses(user_id: str = "") -> list[dict]:
-    warehouse_dir = _scoped_dir(_BASE_WAREHOUSE_DIR, user_id)
+    warehouse_dir = _scoped_dir(_warehouse_root(), user_id)
     files = sorted(
         warehouse_dir.glob("*.json"),
         key=lambda p: p.stat().st_mtime,
@@ -322,7 +327,7 @@ def _save_current_warehouse(sess, sid: str, name: str, *, autosaved: bool = Fals
         "sources": sources,
         "skipped_sources": skipped,
     }
-    warehouse_dir = _scoped_dir(_BASE_WAREHOUSE_DIR, user_id)
+    warehouse_dir = _scoped_dir(_warehouse_root(), user_id)
     path = warehouse_dir / f"{_safe_stem(name)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     log.info(
@@ -362,8 +367,8 @@ def upload_file(sid: str):
         return jsonify({"error": "未选择文件"}), 400
 
     user_id = _resolve_user_id()
-    upload_dir = _scoped_dir(_BASE_UPLOAD_DIR, user_id)
-    parsed_excel_dir = _scoped_dir(_BASE_UPLOAD_DIR, user_id) / ".parsed_excel"
+    upload_dir = _scoped_dir(_upload_root(), user_id)
+    parsed_excel_dir = _scoped_dir(_upload_root(), user_id) / ".parsed_excel"
     parsed_excel_dir.mkdir(parents=True, exist_ok=True)
 
     sess = session_manager.get_or_create(sid)
@@ -456,7 +461,7 @@ SAMPLE_DIR = Path(__file__).resolve().parents[1] / "deploy" / "samples"
 @require_session_ownership
 def load_sample_data(sid: str):
     """Load a bundled sample Excel file into the session (cloud-managed only)."""
-    is_cloud = bool(os.environ.get("RAILWAY_PROJECT_ID")) or os.environ.get("VERCEL") == "1"
+    is_cloud = cloud_login_enabled()
     if not is_cloud:
         return jsonify({"error": "示例数据仅在云端演示环境可用"}), 403
 
@@ -465,8 +470,8 @@ def load_sample_data(sid: str):
         return jsonify({"error": "示例数据文件未找到"}), 404
 
     user_id = _resolve_user_id()
-    upload_dir = _scoped_dir(_BASE_UPLOAD_DIR, user_id)
-    parsed_excel_dir = _scoped_dir(_BASE_UPLOAD_DIR, user_id) / ".parsed_excel"
+    upload_dir = _scoped_dir(_upload_root(), user_id)
+    parsed_excel_dir = _scoped_dir(_upload_root(), user_id) / ".parsed_excel"
     parsed_excel_dir.mkdir(parents=True, exist_ok=True)
 
     sess = session_manager.get_or_create(sid)
@@ -520,7 +525,7 @@ def load_sample_data(sid: str):
 def finalize_upload_job(sid: str, jid: str):
     """Attach a completed Excel parse job to the session exactly once."""
     user_id = _resolve_user_id()
-    parsed_excel_dir = _scoped_dir(_BASE_UPLOAD_DIR, user_id) / ".parsed_excel"
+    parsed_excel_dir = _scoped_dir(_upload_root(), user_id) / ".parsed_excel"
     parsed_excel_dir.mkdir(parents=True, exist_ok=True)
 
     sess = session_manager.get_or_create(sid)
@@ -825,50 +830,6 @@ def disconnect_source(sid: str):
     sess = session_manager.get_or_create(sid)
     sess.data_source = None   # setter clears _sources list
     return jsonify({"ok": True})
-
-
-@bp.post("/api/session/<sid>/connect-gsheets")
-@require_session_ownership
-def connect_gsheets(sid: str):
-    import json as _json
-    d = request.json or {}
-    creds_raw = d.get("creds_json", "")
-    spreadsheet = (d.get("spreadsheet") or "").strip()
-    display_name = (d.get("name") or "").strip()
-
-    # Use saved creds if field left blank
-    if not creds_raw:
-        saved = datasource_config_manager.get("gsheets")
-        creds_raw = (saved or {}).get("creds_json", "")
-    if not spreadsheet:
-        saved = datasource_config_manager.get("gsheets")
-        spreadsheet = (saved or {}).get("spreadsheet", "")
-
-    if not creds_raw:
-        return jsonify({"error": "服务账号 JSON 不能为空"}), 400
-    if not spreadsheet:
-        return jsonify({"error": "电子表格 URL 或 ID 不能为空"}), 400
-
-    try:
-        creds_dict = _json.loads(creds_raw) if isinstance(creds_raw, str) else creds_raw
-    except Exception:
-        return jsonify({"error": "服务账号 JSON 格式无效"}), 400
-
-    try:
-        source = GoogleSheetsDataSource(creds_dict, spreadsheet, display_name)
-        sess = session_manager.get_or_create(sid)
-        source_id = sess.add_source(source)
-        datasource_config_manager.save("gsheets", {
-            "creds_json": creds_raw if isinstance(creds_raw, str) else _json.dumps(creds_raw),
-            "spreadsheet": spreadsheet, "name": display_name
-        })
-        return jsonify({"ok": True, "source_id": source_id,
-                        "source_name": source.name,
-                        "schema_preview": source.get_schema(),
-                        "sources": sess.list_sources()})
-    except Exception as exc:
-        log.error("[connect-gsheets] FAILED: %s\n%s", exc, traceback.format_exc())
-        return jsonify({"error": _friendly_conn_error(exc, "Google Sheets")}), 400
 
 
 @bp.post("/api/session/<sid>/connect-api")

@@ -461,7 +461,6 @@ class PromptContext:
     needs_hooks: bool = False
     has_knowledge: bool = False
     has_unnamed_columns: bool = False
-    needs_diagram: bool = False
     skill_catalog: str = ""
 
 
@@ -618,161 +617,6 @@ identifier in SQL. Cross-source JOIN and UNION are supported in the shared query
 Never strip, swap or guess a source prefix."""
 
 
-DIAGRAM_RULES = """## Draw.io diagram generation rules
-
-Use `display_diagram` to create visual business frameworks.
-
-### PREFERRED: Content-fill mode (template_id + content)
-
-When drawing a known framework (BMC, BCG, SWOT, VP), **ALWAYS use content-fill mode** instead of raw XML.
-This guarantees correct layout - you only provide the text content for each section.
-
-Parameters:
-- `template_id`: one of `business_model_canvas`, `bcg_matrix`, `swot_analysis`, `value_proposition`
-- `title`: diagram title
-- `content`: JSON object mapping section keys to text strings
-
-Do NOT pass `xml` when using content mode. Do NOT pass `content` without `template_id`.
-
-#### Template key reference:
-
-**business_model_canvas** content keys:
-`key_partners`, `key_activities`, `key_resources`, `value_proposition`, `customer_relationships`, `channels`, `customer_segments`, `cost_structure`, `revenue_streams`
-
-**bcg_matrix** content keys:
-`stars`, `question_marks`, `cash_cows`, `dogs`
-
-**swot_analysis** content keys:
-`strengths`, `weaknesses`, `opportunities`, `threats`
-
-**value_proposition** content keys:
-`product_service`, `customer_segments`, `customer_jobs`, `pain_relievers`, `gain_creators`, `competitors`
-
-#### Content formatting:
-- Use `\\n` for line breaks within a cell.
-- Use bullet prefix for list items.
-- Keep each cell text under 300 characters.
-- Each cell gets UNIQUE content - do NOT repeat across cells.
-
-#### Example (Business Model Canvas):
-```json
-{
-  "template_id": "business_model_canvas",
-  "title": "CATL BMC",
-  "content": {
-    "key_partners": "OEM: Tesla, BMW\\nSuppliers: Ganfeng",
-    "value_proposition": "High density Kirin battery\\n7s fast charge",
-    "customer_segments": "EV makers\\nEnergy storage",
-    "cost_structure": "Raw materials\\nR&D",
-    "revenue_streams": "Battery sales\\nRecycling"
-  }
-}
-```
-
-### Fallback: Raw XML mode
-
-Only use raw `xml` parameter for custom diagrams not matching any template.
-
-### XML structure
-
-Generate ONLY `mxCell` elements — no wrapper tags (`<mxfile>`, `<mxGraphModel>`, `<root>`).
-The system adds root cells `id="0"` and `id="1"` automatically; start your IDs from `"2"`.
-All `mxCell` elements must be siblings — NEVER nest one inside another.
-Set `parent="1"` for top-level shapes; set `parent="<container-id>"` for children of a swimlane/group.
-Keep all elements within x: 0–800, y: 0–600.
-
-Minimal valid cell:
-```
-<mxCell id="2" value="Label" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-  <mxGeometry x="100" y="100" width="120" height="60" as="geometry"/>
-</mxCell>
-```
-
-Edge:
-```
-<mxCell id="3" style="endArrow=block;html=1;" edge="1" parent="1" source="2" target="4">
-  <mxGeometry relative="1" as="geometry"/>
-</mxCell>
-```
-
-Escape special characters inside `value`: `&lt;` `&gt;` `&amp;` `&quot;` `&#xa;` (newline).
-
-### Style reference
-
-- Rounded box: `rounded=1;whiteSpace=wrap;html=1;`
-- Swimlane container: `swimlane;startSize=30;fontStyle=1;fontSize=12;html=1;`
-- Text label only: `text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;`
-- Fill colors (use consistently): blue `fillColor=#dae8fc;strokeColor=#6c8ebf;`, green `fillColor=#d5e8d4;strokeColor=#82b366;`, yellow `fillColor=#fff2cc;strokeColor=#d6b656;`, red `fillColor=#f8cecc;strokeColor=#b85450;`, purple `fillColor=#e1d5e7;strokeColor=#9673a6;`, grey `fillColor=#f5f5f5;strokeColor=#666666;`
-
-### Edge routing rules
-
-1. Specify `exitX`, `exitY`, `entryX`, `entryY` in the style for every edge.
-2. Two edges between the same pair must use different exit/entry Y values (e.g., 0.3 and 0.7).
-3. For bidirectional A↔B: A→B exits right (`exitX=1`), enters left (`entryX=0`); B→A is the reverse.
-4. Route edges around intermediate shapes — add waypoints to avoid crossing other shapes.
-5. For top-to-bottom flow: `exitY=1;entryY=0`. For left-to-right: `exitX=1;entryX=0`.
-
-### Framework layout guides
-
-**BCG Matrix** — 2×2 quadrant (800×620), four swimlane cells:
-- Stars (top-left, high growth + high share): x=20 y=60 w=370 h=260 blue
-- Question Marks (top-right, high growth + low share): x=410 y=60 w=370 h=260 yellow
-- Cash Cows (bottom-left, low growth + high share): x=20 y=340 w=370 h=260 green
-- Dogs (bottom-right, low growth + low share): x=410 y=340 w=370 h=260 red
-- Axis labels at top/bottom of each column. Place product names as child text cells inside each quadrant.
-
-**SWOT Analysis** — 2×2 quadrant (820×620):
-- Strengths (top-left, internal positive): x=20 y=20 w=380 h=280 green
-- Weaknesses (top-right, internal negative): x=420 y=20 w=380 h=280 red
-- Opportunities (bottom-left, external positive): x=20 y=320 w=380 h=280 blue
-- Threats (bottom-right, external negative): x=420 y=320 w=380 h=280 yellow
-- Add bullet-point text content as child cells inside each quadrant.
-
-**Porter's Five Forces** — hub-and-spoke, central box + 4 surrounding + directional arrows:
-- Industry Rivalry (centre): x=280 y=220 w=240 h=160 blue
-- New Entrants (top): x=280 y=20 w=240 h=120 yellow — arrow pointing DOWN to centre
-- Substitutes (bottom): x=280 y=480 w=240 h=120 red — arrow pointing UP to centre
-- Supplier Power (left): x=20 y=220 w=220 h=160 green — arrow pointing RIGHT to centre
-- Buyer Power (right): x=560 y=220 w=220 h=160 purple — arrow pointing LEFT to centre
-
-**Business Model Canvas** — 9-cell Osterwalder grid using swimlane containers for clean title/content separation.
-
-Use swimlane style (`swimlane;startSize=30;`) for each module so the title bar is visually separated from the content. Place bullet-point content as a **child cell** inside each swimlane (use `parent="<swimlane-id>"`). Child cells use `text;html=1;align=left;verticalAlign=top;fillColor=none;strokeColor=none;` with `spacingLeft=8;spacingTop=4;`.
-
-**Layout (x:20–740, y:30–470, total 720×440):**
-- Key Partners: x=20, y=30, w=130, h=300, fillColor=#f5f5f5
-- Key Activities: x=160, y=30, w=130, h=150, fillColor=#dae8fc
-- Key Resources: x=160, y=190, w=130, h=140, fillColor=#dae8fc
-- Value Proposition: x=300, y=30, w=160, h=300, fillColor=#d5e8d4
-- Customer Relationships: x=470, y=30, w=130, h=150, fillColor=#e1d5e7
-- Channels: x=470, y=190, w=130, h=140, fillColor=#e1d5e7
-- Customer Segments: x=610, y=30, w=130, h=300, fillColor=#fff2cc
-- Cost Structure: x=20, y=340, w=270, h=130, fillColor=#f8cecc
-- Revenue Streams: x=470, y=340, w=270, h=130, fillColor=#d5e8d4
-
-**Critical:** 
-- Value Proposition (x=300–460, y=30–330) and Customer Segments (x=610–740, y=30–330) span two rows.
-- Cost Structure (x=20–290, y=340–470) sits BELOW Key Partners/KR, not overlapping.
-- Revenue Streams (x=470–740, y=340–470) sits BELOW Channels/CS, not overlapping.
-- NO module may exceed its assigned coordinates.
-
-**Example (Key Partners swimlane + content):**
-```
-<mxCell id="2" value="Key Partners" style="swimlane;startSize=30;fontStyle=1;fontSize=12;fillColor=#f5f5f5;strokeColor=#666666;html=1;" vertex="1" parent="1">
-  <mxGeometry x="20" y="30" width="130" height="300" as="geometry"/>
-</mxCell>
-<mxCell id="3" value="• Coffee bean farms&#xa;• Dairy suppliers&#xa;• Food packaging&#xa;• Real estate developers&#xa;• Logistics partners&#xa;• Payment tech partners" style="text;html=1;align=left;verticalAlign=top;whiteSpace=wrap;fillColor=none;strokeColor=none;fontSize=10;spacingLeft=8;spacingTop=4;" vertex="1" parent="2">
-  <mxGeometry x="10" y="40" width="110" height="250" as="geometry"/>
-</mxCell>
-```
-
-**Value Proposition Canvas** — two large panels side by side (820×600):
-- Customer Profile (left, blue): x=20 y=20 w=380 h=560 — contains Jobs (top), Pains (bottom-left), Gains (bottom-right)
-- Value Map (right, green): x=420 y=20 w=380 h=560 — contains Products & Services (bottom), Pain Relievers (top-left), Gain Creators (top-right)
-
-**When the user provides real data** (product names, scores, descriptions), fill in the content cells with that data instead of placeholder text. Use `&#xa;` as line separator for multi-line values."""
-
-
 UNNAMED_COLUMN_RULES = """## Unnamed-column rules
 
 Columns such as col, col_2 and col_3 represent real data with blank source headers.
@@ -792,12 +636,6 @@ _HOOKS_INTENT_RE = re.compile(
 )
 _CHART_INTENT_RE = re.compile(
     r"(chart|plot|visuali[sz]|dashboard|图表|可视化|画图|绘图|看板)",
-    re.IGNORECASE,
-)
-_DIAGRAM_INTENT_RE = re.compile(
-    r"(商业模式画布|价值主张画布|bcg\s*矩阵|bcg\s*matrix|swot|波特五力|porter.*five|"
-    r"四象限|strategic.*canvas|business.*canvas|draw.*io|diagram|"
-    r"画布|框架图|战略图|绘制.*矩阵|绘制.*画布|绘制.*分析)",
     re.IGNORECASE,
 )
 _NON_BUSINESS_KNOWLEDGE_RE = re.compile(
@@ -838,10 +676,6 @@ def message_needs_hooks_rules(message: str) -> bool:
 def message_needs_chart_rules(message: str) -> bool:
     return bool(_CHART_INTENT_RE.search(str(message or "")))
 
-
-def message_needs_diagram_rules(message: str, *, has_canvas_skill: bool = False) -> bool:
-    # Only attach diagram rules when the canvas skill is explicitly activated
-    return has_canvas_skill
 
 def message_needs_knowledge(message: str) -> bool:
     """Conservative privacy gate for knowledge retrieval."""
@@ -886,8 +720,6 @@ def get_system_prompt(
         blocks.append(MULTI_SOURCE_RULES)
     if context.has_unnamed_columns:
         blocks.append(UNNAMED_COLUMN_RULES)
-    if context.needs_diagram:
-        blocks.append(DIAGRAM_RULES)
     if context.skill_catalog:
         blocks.append(SKILL_CATALOG_RULES.format(catalog=context.skill_catalog))
     return "\n\n".join(block.strip() for block in blocks if block and block.strip())

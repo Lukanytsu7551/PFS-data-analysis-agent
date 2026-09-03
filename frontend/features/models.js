@@ -1,19 +1,25 @@
 // Model selector + Settings panel (built-in providers + custom models).
 import { $, state } from "../core/runtime.js";
 import { getUiIsland } from "../core/ui-registry.js";
+import { iconSpan } from "../core/icons.js";
 
 const pfs = () => globalThis.PFS;
 
   const COMMON_ICON = "/static/Images/pfs-mark.svg";
   const BUILTIN_META = {
-    deepseek:   { label: "DeepSeek",         icon: COMMON_ICON },
-    openai:     { label: "OpenAI / ChatGPT", icon: COMMON_ICON },
-    atlascloud: { label: "AtlasCloud",       icon: COMMON_ICON },
-    ollama:     { label: "Ollama (本地)",     icon: COMMON_ICON, local: true },
+    deepseek:       { label: "DeepSeek",            icon: COMMON_ICON },
+    kimi:           { label: "Kimi",                icon: COMMON_ICON },
+    kimi_coding:    { label: "Kimi Coding Plan",    icon: COMMON_ICON },
+    glm:            { label: "GLM",                 icon: COMMON_ICON },
+    glm_coding:     { label: "GLM Coding Plan",     icon: COMMON_ICON },
+    minimax:        { label: "MiniMax",             icon: COMMON_ICON },
+    minimax_coding: { label: "MiniMax Coding Plan", icon: COMMON_ICON },
   };
+  const VISIBLE_BUILTIN_PROVIDERS = new Set(Object.keys(BUILTIN_META));
   const MODEL_PICKER = {
     index: 0,
     models: [],
+    trigger: null,
   };
 
   // 判断 base_url 是否本地地址（与后端 _is_local_base_url 保持一致）
@@ -48,9 +54,13 @@ const pfs = () => globalThis.PFS;
     return parts.join(" · ") || key;
   }
 
+  function _isVisibleProvider(key, cfg) {
+    return !!cfg?.is_custom || VISIBLE_BUILTIN_PROVIDERS.has(key);
+  }
+
   function _availableModels(models = state.modelConfigs || {}) {
     return Object.entries(models)
-      .filter(([, cfg]) => cfg?.has_api_key)
+      .filter(([key, cfg]) => cfg?.has_api_key && _isVisibleProvider(key, cfg))
       .map(([key, cfg]) => ({
         key,
         label: _modelLabel(key, cfg),
@@ -88,7 +98,7 @@ const pfs = () => globalThis.PFS;
     for (const sel of selectors) {
       sel.innerHTML = `<option value="">${t('sidebar.model_placeholder')}</option>`;
       for (const [key, cfg] of Object.entries(models)) {
-        if (!cfg.has_api_key) continue;
+        if (!cfg.has_api_key || !_isVisibleProvider(key, cfg)) continue;
         const opt = document.createElement("option");
         opt.value = key;
         opt.textContent = cfg.is_custom
@@ -166,7 +176,7 @@ const pfs = () => globalThis.PFS;
       button.setAttribute("role", "option");
       button.setAttribute("aria-selected", String(model.key === selected));
       button.innerHTML = `
-        <span class="skill-picker-icon model-picker-icon">AI</span>
+        ${iconSpan("spark", { className: "skill-picker-icon model-picker-icon", size: 17 })}
         <span class="skill-picker-copy">
           <strong>${_esc(model.label)}</strong>
           <small>${_esc(model.description || model.key)}</small>
@@ -184,11 +194,22 @@ const pfs = () => globalThis.PFS;
     const width = Math.min(460, Math.max(320, rect.width + 160));
     const actualWidth = Math.min(width, window.innerWidth - 24);
     picker.style.width = `${actualWidth}px`;
-    picker.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - actualWidth - 12))}px`;
+    const sidebarTrigger = trigger.id === "model-picker-trigger-sidebar";
+    const sidebarRight = document.querySelector("#app-sidebar .sb-main")
+      ?.getBoundingClientRect?.().right || 0;
+    const preferredLeft = sidebarTrigger
+      ? Math.max(rect.right + 10, sidebarRight + 12)
+      : rect.left;
+    picker.style.left = `${Math.max(12, Math.min(preferredLeft, window.innerWidth - actualWidth - 12))}px`;
     const gap = 8;
+    const pickerHeight = Math.min(picker.offsetHeight || picker.scrollHeight || 320, window.innerHeight - 24);
+    if (sidebarTrigger) {
+      picker.style.top = `${Math.max(12, Math.min(rect.top, window.innerHeight - pickerHeight - 12))}px`;
+      picker.style.bottom = "auto";
+      return;
+    }
     const below = rect.bottom + gap;
-    const pickerHeight = Math.min(430, window.innerHeight - 24);
-    if (below + pickerHeight <= window.innerHeight || rect.top < window.innerHeight / 2) {
+    if (below + pickerHeight <= window.innerHeight) {
       picker.style.top = `${below}px`;
       picker.style.bottom = "auto";
     } else {
@@ -200,24 +221,31 @@ const pfs = () => globalThis.PFS;
   async function openModelPicker(trigger) {
     pfs()?.skills?.close?.();
     pfs()?.slash?.closeSlashPopup?.();
+    pfs()?.sidebar?.closeSidebarSurfaces?.({ restoreFocus: false });
     const button = trigger?.closest?.("#model-picker-trigger, #model-picker-trigger-sidebar")
       || $("model-picker-trigger");
+    MODEL_PICKER.trigger = button;
     MODEL_PICKER.index = 0;
     if (!Object.keys(state.modelConfigs || {}).length) await loadModels();
     const search = $("model-picker-search");
     if (search) search.value = "";
     renderModelPicker();
+    const picker = $("model-picker");
+    picker?.classList.add("open");
+    if (picker) picker.style.visibility = "hidden";
     _positionModelPicker(button);
-    $("model-picker")?.classList.add("open");
+    if (picker) picker.style.visibility = "";
     _syncModelLabels($("model-sel")?.value || "");
     search?.focus();
   }
 
   function closeModelPicker() {
     $("model-picker")?.classList.remove("open");
+    $("model-picker")?.removeAttribute("style");
     for (const id of ["model-picker-trigger", "model-picker-trigger-sidebar"]) {
       $(id)?.setAttribute("aria-expanded", "false");
     }
+    MODEL_PICKER.trigger = null;
   }
 
   function selectModel(key) {
@@ -281,7 +309,6 @@ const pfs = () => globalThis.PFS;
   function _setProviderRowState(provider, st, message) {
     const vs = getUiIsland("settings");
     if (!vs || !vs.isAvailable()) {
-      console.warn("[models] vueSettings unavailable, _setProviderRowState skipped");
       return;
     }
     if (st === "testing") {

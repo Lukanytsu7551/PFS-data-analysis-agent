@@ -1,8 +1,10 @@
 import io
+import threading
 import uuid
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -52,6 +54,18 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
             content_type="multipart/form-data",
         )
 
+    def _upload_missing_metric_csv(self):
+        csv = (
+            "month,region,orders\n"
+            "2026-01,华东,12\n"
+            "2026-02,华南,8\n"
+        ).encode("utf-8")
+        return self.client.post(
+            f"/api/session/{self.sid}/upload",
+            data={"file": (io.BytesIO(csv), "missing-sales.csv")},
+            content_type="multipart/form-data",
+        )
+
     def test_upload_list_and_analyze_uploaded_csv(self):
         uploaded = self._upload()
         self.assertEqual(200, uploaded.status_code)
@@ -84,7 +98,71 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         self.assertEqual(["华东", "华南"], [item["dimension"] for item in result["groups"]])
         self.assertEqual(2700, result["groups"][0]["value"])
         self.assertEqual(1, len(result["evidence"]))
+        evidence = result["evidence"][0]
+        self.assertEqual("quarterly_sales.csv", evidence["file_name"])
+        self.assertEqual("", evidence["worksheet"])
+        self.assertEqual(4, evidence["included_rows"])
+        self.assertEqual(result["snapshot"]["content_sha256"], evidence["content_sha256"])
+        self.assertIn("quarterly_sales.csv#sha256=", evidence["locator"])
+        self.assertEqual([evidence["evidence_id"]], result["claims"][0]["evidence_ids"])
+        self.assertEqual([evidence["evidence_id"]], [link["evidence_id"] for link in result["claims"][0]["evidence_links"]])
         self.assertEqual("http-upload-run", result["request"]["run_id"])
+
+    def test_active_uploaded_analysis_can_be_canceled_before_governance_persistence(self):
+        uploaded = self._upload()
+        source_id = uploaded.get_json()["added"][0]["source_id"]
+        run_id = "http-cancel-run"
+        analysis_started = threading.Event()
+        release_analysis = threading.Event()
+        response_holder = {}
+
+        def slow_analysis(*_args, **_kwargs):
+            analysis_started.set()
+            release_analysis.wait(timeout=3)
+            return object()
+
+        def post_analysis():
+            with self.app.test_client() as client:
+                response_holder["response"] = client.post(
+                    f"/api/session/{self.sid}/pfs/analyze",
+                    json={
+                        "source_id": source_id,
+                        "run_id": run_id,
+                        "value_column": "sales_amount",
+                        "date_column": "month",
+                        "dimension": "region",
+                    },
+                )
+
+        with patch("api.pfs.analyze_file", side_effect=slow_analysis), patch(
+            "api.pfs._governance_result"
+        ) as govern:
+            worker = threading.Thread(target=post_analysis, daemon=True)
+            worker.start()
+            try:
+                self.assertTrue(analysis_started.wait(timeout=2))
+                canceled = self.client.post(
+                    f"/api/session/{self.sid}/pfs/runs/{run_id}/cancel"
+                )
+                self.assertEqual(202, canceled.status_code)
+                self.assertEqual("cancel_requested", canceled.get_json()["status"])
+            finally:
+                release_analysis.set()
+                worker.join(timeout=3)
+
+            self.assertFalse(worker.is_alive())
+            govern.assert_not_called()
+
+        response = response_holder["response"]
+        self.assertEqual(409, response.status_code)
+        self.assertEqual("pfs_analysis_canceled", response.get_json()["code"])
+
+    def test_cancel_rejects_run_that_is_not_active_in_session(self):
+        response = self.client.post(
+            f"/api/session/{self.sid}/pfs/runs/not-running/cancel"
+        )
+        self.assertEqual(404, response.status_code)
+        self.assertEqual("pfs_analysis_run_not_active", response.get_json()["code"])
 
     def test_upload_rejects_oversized_file_with_explicit_code(self):
         from api.datasource import MAX_UPLOAD_BYTES
@@ -98,6 +176,59 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         payload = response.get_json()
         self.assertFalse(payload["ok"])
         self.assertEqual("upload_file_too_large", payload["code"])
+
+    def test_invalid_date_source_remains_selectable_and_analysis_explains_repair(self):
+        csv = (
+            "month,region,sales_amount\n"
+            "2026-02-30,华东,1200\n"
+        ).encode("utf-8")
+        uploaded = self.client.post(
+            f"/api/session/{self.sid}/upload",
+            data={"file": (io.BytesIO(csv), "invalid-date.csv")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(200, uploaded.status_code)
+        source_id = uploaded.get_json()["added"][0]["source_id"]
+
+        listed = self.client.get(f"/api/session/{self.sid}/pfs/sources")
+        self.assertEqual(200, listed.status_code)
+        source = listed.get_json()["sources"][0]
+        self.assertEqual(source_id, source["source_id"])
+        self.assertEqual(["month", "region", "sales_amount"], source["columns"])
+        self.assertEqual(1, source["row_count"])
+        self.assertEqual("source_date_invalid", source["validation_error"]["code"])
+
+        analyzed = self.client.post(
+            f"/api/session/{self.sid}/pfs/analyze",
+            json={
+                "source_id": source_id,
+                "run_id": "invalid-date-run",
+                "value_column": "sales_amount",
+                "date_column": "month",
+                "dimension": "region",
+            },
+        )
+        self.assertEqual(400, analyzed.status_code)
+        self.assertEqual("source_date_invalid", analyzed.get_json()["code"])
+
+    def test_question_missing_metric_column_keeps_actionable_error_code(self):
+        uploaded = self._upload_missing_metric_csv()
+        self.assertEqual(200, uploaded.status_code)
+        source_id = uploaded.get_json()["added"][0]["source_id"]
+
+        response = self.client.post(
+            f"/api/session/{self.sid}/pfs/query",
+            json={
+                "source_id": source_id,
+                "run_id": "missing-metric-query",
+                "question": "按地区统计销售额",
+            },
+        )
+        self.assertEqual(400, response.status_code)
+        payload = response.get_json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual("source_columns_missing", payload["code"])
+        self.assertIn("指标字段", payload["error"])
 
     def test_fixture_report_export_returns_server_recomputed_json_and_csv(self):
         json_response = self.client.post(
@@ -241,6 +372,18 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         self.assertIn("4400", body)
         self.assertIn("Claim", body)
 
+        ledger = self.client.get(
+            f"/api/pfs/ledger?task_id={self.sid}:chat-pfs-run"
+        ).get_json()
+        self.assertTrue(ledger["ok"])
+        self.assertEqual(2, len(ledger["claims"]))
+        self.assertEqual(1, len(ledger["evidence"]))
+        self.assertEqual("quarterly_sales.csv", ledger["evidence"][0]["file_name"])
+        self.assertEqual(
+            [ledger["evidence"][0]["evidence_id"]],
+            ledger["claims"][0]["evidence_ids"],
+        )
+
     def test_chat_deterministic_mode_requires_source(self):
         response = self.client.post(
             f"/api/session/{self.sid}/chat",
@@ -313,6 +456,7 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         self.assertTrue(listed_payload["ok"])
         self.assertEqual(1, len(listed_payload["sources"]))
         self.assertEqual("monthly_sales.xlsx", listed_payload["sources"][0]["name"])
+        self.assertEqual("monthly_sales.xlsx", listed_payload["sources"][0]["file_name"])
         self.assertEqual(
             ["Monthly Sales", "Orders"],
             [item["name"] for item in listed_payload["sources"][0]["worksheets"]],
@@ -338,6 +482,35 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         self.assertEqual(["华东", "华南"], [item["dimension"] for item in result["groups"]])
         self.assertEqual("http-xlsx-run", result["request"]["run_id"])
         self.assertEqual(1, len(result["evidence"]))
+        self.assertEqual("Monthly Sales", result["evidence"][0]["worksheet"])
+        self.assertEqual(3, result["evidence"][0]["included_rows"])
+        self.assertEqual("monthly_sales.xlsx", result["evidence"][0]["file_name"])
+        self.assertEqual(result["snapshot"]["content_sha256"], result["evidence"][0]["content_sha256"])
+
+        chat = self.client.post(
+            f"/api/session/{self.sid}/chat",
+            json={
+                "message": "按地区统计 2026年1月到2026年3月的销售额",
+                "pfs_mode": "deterministic",
+                "source_id": source_id,
+                "worksheet": "Monthly Sales",
+                "run_id": "chat-xlsx-run",
+            },
+        )
+        self.assertEqual(200, chat.status_code)
+        self.assertIn("pfs_result", chat.get_data(as_text=True))
+        chat_ledger = self.client.get(
+            f"/api/pfs/ledger?task_id={self.sid}:chat-xlsx-run"
+        ).get_json()
+        self.assertTrue(chat_ledger["ok"])
+        self.assertEqual(2, len(chat_ledger["claims"]))
+        self.assertEqual(1, len(chat_ledger["evidence"]))
+        self.assertEqual("monthly_sales.xlsx", chat_ledger["evidence"][0]["file_name"])
+        self.assertEqual("Monthly Sales", chat_ledger["evidence"][0]["worksheet"])
+        self.assertEqual(
+            [chat_ledger["evidence"][0]["evidence_id"]],
+            chat_ledger["claims"][0]["evidence_ids"],
+        )
 
         exported = self.client.post(
             f"/api/session/{self.sid}/pfs/export",

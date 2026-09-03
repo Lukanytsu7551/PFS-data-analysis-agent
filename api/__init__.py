@@ -1,7 +1,7 @@
 """Flask application factory."""
 import logging
 import os
-from infrastructure.compat import env
+from infrastructure.compat import env, optional_feature_enabled
 from urllib.parse import urlsplit
 
 from flask import Flask, abort, jsonify, render_template, request
@@ -25,9 +25,6 @@ def _start_background_services() -> None:
         return
     if not resource_path("MCP").is_dir():
         log.info("[startup] bundled MCP resources are not installed; continuing without them")
-    # Diagram support is in-process: the Agent diagram tools persist draw.io
-    # XML through the business-canvas store and the browser loads the bundled
-    # editor from /static/drawio/. There is no separate flowchart MCP daemon.
 
 
 def _run_startup_hooks() -> None:
@@ -84,13 +81,13 @@ def create_app() -> Flask:
     from .hooks           import bp as hooks_bp
     from .lifecycle       import bp as lifecycle_bp
     from .teams           import bp as teams_bp
-    from .business_canvas import bp as business_canvas_bp
     from .workflows       import bp as workflows_bp
     from .workflow_runs   import bp as workflow_runs_bp
     from .auth             import bp as auth_bp
     from .gpu              import bp as gpu_bp
     from .feishu_bot       import bp as feishu_bot_bp
     from .pfs              import bp as pfs_bp
+    from .audit            import bp as audit_bp
 
     app.register_blueprint(models_bp)
     app.register_blueprint(datasource_bp)
@@ -111,21 +108,23 @@ def create_app() -> Flask:
     app.register_blueprint(hooks_bp)
     app.register_blueprint(lifecycle_bp)
     app.register_blueprint(teams_bp)
-    app.register_blueprint(business_canvas_bp)
     app.register_blueprint(workflows_bp)
     app.register_blueprint(workflow_runs_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(gpu_bp)
     app.register_blueprint(feishu_bot_bp)
     app.register_blueprint(pfs_bp)
-    try:
-        from infrastructure.feishu_long_connection import start_long_connection
+    app.register_blueprint(audit_bp)
+    if optional_feature_enabled("FEISHU_BOT"):
+        try:
+            from infrastructure.feishu_long_connection import start_long_connection
 
-        start_long_connection(app)
-    except Exception as exc:
-        # The app remains usable when the optional Feishu SDK is unavailable.
-        log.warning("[startup] Feishu long connection skipped: %s", type(exc).__name__)
-    _run_startup_hooks()
+            start_long_connection(app)
+        except Exception as exc:
+            # The app remains usable when the optional Feishu SDK is unavailable.
+            log.warning("[startup] Feishu long connection skipped: %s", type(exc).__name__)
+    if optional_feature_enabled("HOOKS"):
+        _run_startup_hooks()
 
     @app.before_request
     def reject_cross_origin_writes():
@@ -214,7 +213,6 @@ def create_app() -> Flask:
     def add_security_headers(response):
         """Apply a restrictive browser baseline while allowing generated charts."""
         is_chart = request.path.startswith("/api/chart/")
-        is_drawio = request.path.startswith("/static/drawio/")
         if is_chart:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'none'; "
@@ -227,26 +225,6 @@ def create_app() -> Flask:
                 "form-action 'none'; "
                 "frame-ancestors 'self'"
             )
-        elif is_drawio:
-            # Self-hosted draw.io editor must be frameable by the chat page
-            # (same origin) and needs worker/wasm for deflate + inline styles.
-            response.headers["Content-Security-Policy"] = (
-                "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; "
-                "worker-src 'self' blob:; "
-                "style-src 'self' 'unsafe-inline'; "
-                "img-src 'self' data: blob: https:; "
-                "font-src 'self' data:; "
-                "connect-src 'self'; "
-                "frame-src 'self'; "
-                "object-src 'none'; "
-                "base-uri 'self'; "
-                "form-action 'self'; "
-                "frame-ancestors 'self'"
-            )
-            response.headers["Cache-Control"] = "no-store, must-revalidate"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Expires"] = "0"
         elif request.path == "/login":
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "

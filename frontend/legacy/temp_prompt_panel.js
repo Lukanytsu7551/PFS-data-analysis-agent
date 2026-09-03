@@ -9,6 +9,8 @@
  * API routes:  /api/session/<sid>/temp-prompt*      (api/knowledge.py)
  */
 
+import { iconSpan } from "../core/icons.js";
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
 const _tp = {
@@ -64,13 +66,13 @@ function tpRenderStatus() {
   if (statusEl) {
     if (_tp.enabled && hasText) {
       statusEl.innerHTML =
-        '<span class="tp-dot tp-dot-on"></span>已启用 · 本次会话每轮对话都会带上此临时指令';
+        `${iconSpan("checkCircle", { className: "tp-status-icon tp-status-on", size: 16 })}<span>已启用 · 本次会话每轮对话都会带上此临时指令</span>`;
     } else if (hasText) {
       statusEl.innerHTML =
-        '<span class="tp-dot tp-dot-off"></span>已保存但未启用 · 点击「启用」生效';
+        `${iconSpan("circle", { className: "tp-status-icon tp-status-off", size: 16 })}<span>已保存但未启用 · 点击「启用」生效</span>`;
     } else {
       statusEl.innerHTML =
-        '<span class="tp-dot tp-dot-off"></span>未设置 · 输入指令并保存后可启用';
+        `${iconSpan("circle", { className: "tp-status-icon tp-status-off", size: 16 })}<span>未设置 · 输入指令并保存后可启用</span>`;
     }
   }
   if (toggleBtn) {

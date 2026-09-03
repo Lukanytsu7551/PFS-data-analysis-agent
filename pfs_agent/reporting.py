@@ -149,8 +149,14 @@ class EvidenceRecord:
     locator: str
     excerpt: str
     content_sha256: str
+    file_name: str = ""
+    worksheet: str = ""
+    included_rows: int = 0
+    date_from: str = ""
+    date_to: str = ""
+    columns: tuple[str, ...] = ()
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "evidence_id": self.evidence_id,
             "source_id": self.source_id,
@@ -158,6 +164,12 @@ class EvidenceRecord:
             "locator": self.locator,
             "excerpt": self.excerpt,
             "content_sha256": self.content_sha256,
+            "file_name": self.file_name,
+            "worksheet": self.worksheet,
+            "included_rows": self.included_rows,
+            "date_from": self.date_from,
+            "date_to": self.date_to,
+            "columns": list(self.columns),
         }
 
 
@@ -200,6 +212,7 @@ def load_csv_snapshot(
     *,
     source_id: str,
     date_column: str,
+    file_name: str = "",
 ) -> DataSnapshot:
     """Read a bounded UTF-8 CSV and record its stable content identity."""
     csv_path = Path(path).resolve()
@@ -243,7 +256,7 @@ def load_csv_snapshot(
         )
     return DataSnapshot(
         source_id=source_id.strip() or csv_path.stem,
-        file_name=csv_path.name,
+        file_name=str(file_name or csv_path.name).strip(),
         content_sha256=digest,
         row_count=len(rows),
         columns=columns,
@@ -288,6 +301,7 @@ def load_xlsx_snapshot(
     source_id: str,
     date_column: str,
     worksheet: str = "",
+    file_name: str = "",
 ) -> DataSnapshot:
     """Read one explicit worksheet and preserve it in the snapshot contract."""
     xlsx_path = Path(path).resolve()
@@ -370,7 +384,7 @@ def load_xlsx_snapshot(
         )
     return DataSnapshot(
         source_id=source_id.strip() or xlsx_path.stem,
-        file_name=xlsx_path.name,
+        file_name=str(file_name or xlsx_path.name).strip(),
         content_sha256=digest,
         row_count=len(rows),
         columns=columns,
@@ -384,14 +398,18 @@ def load_xlsx_snapshot(
 
 
 def load_tabular_snapshot(
-    path: str | Path, *, source_id: str, date_column: str, worksheet: str = ""
+    path: str | Path, *, source_id: str, date_column: str, worksheet: str = "",
+    file_name: str = "",
 ) -> DataSnapshot:
     suffix = Path(path).suffix.lower()
     if suffix == ".csv":
-        return load_csv_snapshot(path, source_id=source_id, date_column=date_column)
+        return load_csv_snapshot(
+            path, source_id=source_id, date_column=date_column, file_name=file_name
+        )
     if suffix == ".xlsx":
         return load_xlsx_snapshot(
-            path, source_id=source_id, date_column=date_column, worksheet=worksheet
+            path, source_id=source_id, date_column=date_column, worksheet=worksheet,
+            file_name=file_name,
         )
     raise ReportingContractError("PFS deterministic analysis accepts CSV or XLSX files only")
 
@@ -412,6 +430,7 @@ def analyze_csv(
     metric: MetricContract,
     request: AnalysisRequest,
     source_id: str = "fixture",
+    file_name: str = "",
 ) -> AnalysisResult:
     """Run the first deterministic PFS report analysis: grouped SUM."""
     if request.metric_id != metric.metric_id:
@@ -422,6 +441,7 @@ def analyze_csv(
         path,
         source_id=source_id,
         date_column=metric.date_column,
+        file_name=file_name,
     )
     return _analyze_snapshot(snapshot, metric=metric, request=request)
 
@@ -433,10 +453,12 @@ def analyze_file(
     request: AnalysisRequest,
     source_id: str = "fixture",
     worksheet: str = "",
+    file_name: str = "",
 ) -> AnalysisResult:
     """Analyze a supported CSV or XLSX source with one shared contract."""
     snapshot = load_tabular_snapshot(
-        path, source_id=source_id, date_column=metric.date_column, worksheet=worksheet
+        path, source_id=source_id, date_column=metric.date_column, worksheet=worksheet,
+        file_name=file_name,
     )
     return _analyze_snapshot(snapshot, metric=metric, request=request)
 
@@ -515,6 +537,12 @@ def _analyze_snapshot(
         locator=f"{snapshot.file_name}#sha256={snapshot.content_sha256}",
         excerpt=evidence_text,
         content_sha256=snapshot.content_sha256,
+        file_name=snapshot.file_name,
+        worksheet=snapshot.worksheet,
+        included_rows=included_rows,
+        date_from=request.date_from or snapshot.min_date,
+        date_to=request.date_to or snapshot.max_date,
+        columns=snapshot.columns,
     )
     top_group = groups[0] if groups else None
     claims = [

@@ -14,9 +14,13 @@
 
 <!-- ── Top Nav ── -->
 <nav class="db-nav">
-  <button class="btn-back-nav" id="btn-back" title="">←</button>
+  <button class="btn-back-nav" id="btn-back" title="" aria-label="返回">
+    <svg class="db-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg>
+  </button>
   <div class="nav-brand">
-    <span class="nav-brand-icon">📊</span>
+    <span class="nav-brand-icon" aria-hidden="true">
+      <svg class="db-icon" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"></path><path d="m7 15 3-4 3 2 5-7"></path></svg>
+    </span>
     <span id="nav-brand-label"></span>
   </div>
   <div class="nav-title" id="db-name">Dashboard</div>
@@ -31,7 +35,8 @@
         <option value="600" id="opt-10m"></option>
       </select>
       <button class="btn-nav attached-r" id="btn-refresh">
-        <span id="refresh-icon">↻</span> <span id="btn-refresh-label"></span>
+        <span id="refresh-icon" aria-hidden="true"><svg class="db-icon" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0 1 4"></path><path d="M20 4v7h-7"></path></svg></span>
+        <span id="btn-refresh-label"></span>
       </button>
     </div>
     <span class="db-refresh-countdown" id="refresh-countdown" style="display:none;"></span>
@@ -59,7 +64,7 @@
 
   <!-- Empty state -->
   <div class="db-empty" id="empty-state" style="display:none;">
-    <div class="db-empty-icon">📊</div>
+    <div class="db-empty-icon" aria-hidden="true"><svg class="db-icon" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"></path><path d="m7 15 3-4 3 2 5-7"></path></svg></div>
     <div class="db-empty-title" id="empty-title"></div>
     <div class="db-empty-desc" id="empty-desc"></div>
   </div>

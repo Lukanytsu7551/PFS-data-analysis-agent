@@ -1,4 +1,5 @@
 import { uiRegistry } from "../../core/ui-registry.js";
+import { iconVNode } from "../../core/icons.js";
 
 // Global toast, loading and confirmation surface.
 export function mountGlobalUi() {
@@ -109,14 +110,14 @@ export function mountGlobalUi() {
     const classes = ["global-toast"];
     if (item.type) classes.push(item.type);
     return h("div", { key: item.id, class: classes.join(" ") }, [
-      h("div", { class: "global-toast-icon", "aria-hidden": "true" }, item.type === "err" ? "!" : "✓"),
+      h("div", { class: "global-toast-icon", "aria-hidden": "true" }, [iconVNode(h, item.type === "err" ? "circleHelp" : "check", { size: 16 })]),
       h("div", { class: "global-toast-text" }, item.message),
       h("button", {
         class: "global-toast-close",
         type: "button",
         title: "Close",
         onClick: () => removeToast(item.id),
-      }, "×"),
+      }, [iconVNode(h, "close", { size: 15 })]),
     ]);
   }
 

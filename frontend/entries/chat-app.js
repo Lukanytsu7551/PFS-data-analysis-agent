@@ -15,6 +15,7 @@ if (globalThis.__pfsAppLoaded) {
 globalThis.__pfsAppLoaded = true;
 
 import "../core/product-identity.js";
+import { hydrateIcons } from "../core/icons.js";
 import "../legacy/i18n.js";
 import "../legacy/state.js";
 import "./legacy-core.js";
@@ -36,3 +37,7 @@ import "../legacy/checkpoints.js";
 import "./legacy-panels.js";
 import "../legacy/temp_prompt_panel.js";
 import "../legacy/app.js";
+
+// Static template slots use the same registry as lazy Vue islands and legacy
+// renderers. Hydrate once after the deferred module graph has been evaluated.
+hydrateIcons(document);

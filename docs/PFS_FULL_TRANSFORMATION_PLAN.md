@@ -4,6 +4,7 @@
 > 目标：保留并重新验证 Data-Analysis-Agent 的全部功能，同时完成 PFS 的独立产品身份、用户界面、内部标识、文档、安装和发布体系。  
 > 当前基线：CSV/XLSX + PFS 口径 + Claim/Evidence + JSON/CSV + Excel/Word/PPT/Dashboard 桌面即时交付、会话 Artifact/Lineage、DeepSeek 单任务和 Docker 单容器已有分层本地证据；完整兼容复验、动态 Evidence/HITL、跨进程恢复、安装包、部署和线上验收仍未完成。不要用百分比替代功能矩阵状态。
 > 范围更新：当前产品只要求桌面端工作台。手机端适配、移动端完整分析流程和移动端下载不再纳入完成标准；已有 390×844 验收记录作为历史证据保留。
+> 2026-09-02 范围更新：商业画布和 Google Sheets 已决定退役并从代码、依赖和验收矩阵删除；Teams、Hooks、GPU/远程、飞书机器人和云端登录保留但暂不启用。
 
 ## 1. 完成目标如何判定
 
@@ -33,7 +34,7 @@
 
 - 原项目所有 API、工具、数据源、分析方法、图表、导出和扩展能力尚未形成逐项验收台账。
 - 真实模型驱动的多轮、复杂数据和长任务分析尚未验收。
-- 复杂 Excel、生产 SQL、Google Sheets、外部 HTTP、飞书等真实数据连接尚未逐项验收。
+- 复杂 Excel、生产 SQL、外部 HTTP、飞书等真实数据连接尚未逐项验收。
 - 14 类分析和 41 个图表目前主要是固定夹具结果证据；Office 输出尚未完成复杂内容、原生应用视觉和跨平台核验。
 - 多轮 SSE、流中断、跨进程工作流恢复、完整审批、团队、Hooks、Memory、Knowledge、MCP 等尚未完成生产级验证。
 - 真实工作台与静态 `index.html` 仍是两套表面；还没有收敛成一个产品入口。
@@ -96,7 +97,7 @@
 
 1. 确认最终源码根目录，参考快照只用于比对，不进入 PFS 运行和发布包。
 2. 固化授权记录，分别说明原作者授权、第三方许可证和 PFS 新增代码归属。
-3. 建立第三方资源清单：依赖、字体、图标、图表库、draw.io、模型接口和内置 MCP。
+3. 建立第三方资源清单：依赖、字体、图标、图表库、模型接口和内置 MCP。
 4. 建立发布排除规则：密钥、`.env`、SQLite/WAL/SHM、上传文件、日志、缓存、`.venv`、`node_modules`、构建临时目录、参考快照。
 5. 补密钥扫描、发布包审计和依赖许可证检查。
 6. 在用户确认准确纳入范围后，再初始化本地 Git、建立首个提交并连接已创建的私有仓库。
@@ -197,7 +198,7 @@
 
 - CSV、Excel、多表、DuckDB/本地分析库；
 - MySQL/PostgreSQL 等 SQL 数据库；
-- Google Sheets、HTTP API、飞书多维表格；
+- HTTP API、飞书多维表格；
 - 多来源合并、数据仓库配置保存/加载；
 - 数据预览、字段详情、启用/停用、删除和分析表范围。
 
@@ -307,7 +308,7 @@
 
 ## 11. 推荐执行顺序与里程碑
 
-现役顺序以 [`docs/HANDOFF.md`](HANDOFF.md) 第 5 节为准：当前提交与私有仓库 push 已完成；下一步依次完成桌面错误态、Artifact 跨进程关联、动态 Evidence/HITL、原能力兼容复验、长任务/工作流恢复、Office/安装包和部署/live 验收。
+现役顺序以 [`docs/HANDOFF.md`](HANDOFF.md) 第 5 节为准：既有基线已提交并推送，但当前本地切片仍未 commit/push。桌面错误态、已知本地工作区 Artifact 重开关联、动态 Evidence/Claim、统一审计 Escape 和 Agent/Workflow Artifact 成本已完成本地收口；下一步依次完成语义核验与完整审批、原能力兼容复验、长任务/分布式工作流恢复、Office/安装包和部署/live 验收。
 
 不再用主观百分比表达改造完成度；真正状态来自功能兼容矩阵的逐项证据。
 
@@ -332,7 +333,7 @@
 
 - 应用入口：`api/__init__.py:create_app()` 注册各 API 模块。
 - 对话主链：`POST /api/session/<sid>/chat`，停止入口为 `POST /api/session/<sid>/stop`。
-- 数据接入：上传、数据库、Google Sheets、HTTP API、来源列表和数据预览位于 `api/datasource.py`。
+- 数据接入：上传、数据库、HTTP API、来源列表和数据预览位于 `api/datasource.py`。
 - PFS 第一段：`/api/pfs/capabilities`、`/api/pfs/fixture`、会话报表分析和 Ledger 接口位于 `api/pfs.py`。
 - 工具契约：`get_schema`、`query_data`、`run_analysis`、`select_chart`、`generate_chart`、`profile_data`、清洗和导出等位于 `agent/tools/schemas.py`。
 - 分析注册：14 类分析由 `Function/Analyze/registry.py` 提供。

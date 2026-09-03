@@ -2,6 +2,7 @@
 import { state as appState, state } from "../core/runtime.js";
 import { uiRegistry } from "../core/ui-registry.js";
 import { chatStream } from "../features/chat-stream.js";
+import { iconVNode } from "../core/icons.js";
 
 const pfs = () => globalThis.PFS;
 
@@ -57,10 +58,13 @@ const pfs = () => globalThis.PFS;
   ];
   const BUILTIN_HOOK_IDS = new Set(BUILTIN_HOOK_TEMPLATES.flatMap(template => template.hooks.map(hook => hook.id)));
   const BUILTIN_META = {
-    deepseek:   { label: "DeepSeek",         icon: "/static/Images/pfs-mark.svg" },
-    openai:     { label: "OpenAI / ChatGPT", icon: "/static/Images/pfs-mark.svg" },
-    atlascloud: { label: "AtlasCloud",       icon: "/static/Images/pfs-mark.svg" },
-    ollama:     { label: "Ollama (本地)",     icon: "/static/Images/pfs-mark.svg", local: true },
+    deepseek:       { label: "DeepSeek",            icon: "/static/Images/pfs-mark.svg" },
+    kimi:           { label: "Kimi",                icon: "/static/Images/pfs-mark.svg" },
+    kimi_coding:    { label: "Kimi Coding Plan",    icon: "/static/Images/pfs-mark.svg" },
+    glm:            { label: "GLM",                 icon: "/static/Images/pfs-mark.svg" },
+    glm_coding:     { label: "GLM Coding Plan",     icon: "/static/Images/pfs-mark.svg" },
+    minimax:        { label: "MiniMax",             icon: "/static/Images/pfs-mark.svg" },
+    minimax_coding: { label: "MiniMax Coding Plan", icon: "/static/Images/pfs-mark.svg" },
   };
   const LIFECYCLE_AUDIT_LABELS = {
     session_registered: "会话登记",
@@ -1278,7 +1282,7 @@ const pfs = () => globalThis.PFS;
   function renderLlm() {
     /* Full interactive LLM config: built-in providers (expand/collapse, API key,
        save/test/clear) + custom model list + add-custom form.
-       Mirrors the quick-settings modal (⚙ LLM模型) but rendered inside the
+       Mirrors the quick-settings modal (LLM模型) but rendered inside the
        app-settings panel, reusing the same /api/models endpoints. */
 
     /* ── trigger data load (once, with guard) ── */
@@ -1296,7 +1300,9 @@ const pfs = () => globalThis.PFS;
     const configs = state.modelConfigs || {};
     const llmDefaults = uiState.modelDefaults || {};  // loaded by loadLlmData()
 
-    const BUILTIN_ORDER = ["deepseek", "openai", "atlascloud", "ollama"];
+    const BUILTIN_ORDER = [
+      "deepseek", "kimi", "kimi_coding", "glm", "glm_coding", "minimax", "minimax_coding",
+    ];
 
     /* ── LLM tab reactive state ────────────────────── */
     if (!uiState._llmProviders) {
@@ -1344,9 +1350,9 @@ const pfs = () => globalThis.PFS;
     /* ── render the panel ── */
     return Vue.h("section", { class: "app-settings-panel llm-settings-panel" }, [
       _renderPanelHead("LLM模型", "管理聊天、分析、团队协作使用的 LLM 后端。", [
-        Vue.h("button", { class: "btn-sm btn-sm-ghost", type: "button", onClick: function () { loadLlmData().then(draw); } }, "刷新"),
+        Vue.h("button", { class: "btn-sm btn-sm-ghost", type: "button", onClick: function () { loadLlmData().then(draw); } }, [iconVNode(Vue.h, "refresh", { size: 14 }), Vue.h("span", null, "刷新")]),
         Vue.h("button", { class: "btn-sm btn-sm-primary", type: "button", onClick: function () { _llmToggleForm(); draw(); } },
-          uiState._llmFormOpen ? "收起添加表单" : "＋ 添加自定义模型"),
+          [iconVNode(Vue.h, uiState._llmFormOpen ? "chevronUp" : "plus", { size: 14 }), Vue.h("span", null, uiState._llmFormOpen ? "收起添加表单" : "添加自定义模型")]),
       ]),
 
       /* ── global status banner ── */
@@ -1502,7 +1508,7 @@ const pfs = () => globalThis.PFS;
       Vue.h("span", { class: "provider-status " + (p.hasKey ? "set" : "unset") },
         p.hasKey ? "已配置" : "未配置"),
       Vue.h("span", { class: "provider-toggle " + (isExpanded ? "open" : "") },
-        isExpanded ? "▾" : "▸"),
+        iconVNode(Vue.h, isExpanded ? "chevronDown" : "chevronRight", { size: 14 })),
     ]);
 
     if (!isExpanded) {
@@ -3155,7 +3161,7 @@ const pfs = () => globalThis.PFS;
       // GPU 算力（G1）
       gpuStatus: null,
       gpuOllama: null,
-      gpuEnabled: true,
+      gpuEnabled: false,
       gpuLoading: false,
       gpuRefreshing: false,
       gpuBusy: false,

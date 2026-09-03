@@ -401,10 +401,7 @@
   color: var(--color-success, #16a34a);
   font-weight: 600;
 }
-.sb-btn.tp-entry-active::after {
-  content: "●"; margin-left: 6px; font-size: 9px;
-  color: var(--color-success, #16a34a);
-}
+.sb-btn.tp-entry-active::after { content: none; }
 
 /* ── Knowledge panel category filter overrides ───────────────────── */
 #sb-panel-knowledge .kb-tabs-shell {

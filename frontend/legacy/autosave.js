@@ -1,12 +1,13 @@
 // Compatibility auto-save: silently saves conversation after each AI reply.
 // - Debounced 3s after stream ends
 // - One file per session (overwrite), never clutters the manual save list
-// - Shows "💾 自动保存 HH:MM" in the sidebar status
+// - Shows the registered save icon plus the latest autosave time in the sidebar
 // - On page load: if session alive → re-render history; if session dead → offer restore banner
 import { appendMsg, updateTokenBar } from "./msg.js";
 import { renderMd } from "./markdown.js";
 import { loadSavedSession } from "./sessions.js";
 import { $, hideWelcome } from "../core/dom.js";
+import { iconSpan } from "../core/icons.js";
 
   const pfs = globalThis.PFS;
   const state = pfs.state;
@@ -150,7 +151,7 @@ import { $, hideWelcome } from "../core/dom.js";
     banner.id = "autosave-restore-banner";
     banner.className = "autosave-banner";
     banner.innerHTML = `
-      <span class="autosave-banner-icon">💾</span>
+      ${iconSpan("save", { className: "autosave-banner-icon", size: 16 })}
       <span class="autosave-banner-text">
         发现上次未恢复的自动保存（${time}，共 ${meta.msg_count} 条消息）
       </span>

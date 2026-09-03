@@ -299,8 +299,8 @@ def _jieba_tokenize(text: str) -> str:
     """Jieba-segment text into space-separated tokens for FTS5 matching.
 
     FTS5 treats whitespace as token boundary. Without jieba, Chinese text is
-    stored as one giant token and MATCH queries fail. With jieba, '商业画布分析'
-    becomes '商业 画布 分析', each searchable independently.
+    stored as one giant token and MATCH queries fail. With jieba, '经营数据分析'
+    becomes '经营 数据 分析', each searchable independently.
     """
     words = jieba.cut_for_search(text or "")
     return " ".join(w.strip() for w in words if w.strip())

@@ -68,11 +68,18 @@ if (globalThis.__pfsAppDelegationRegistered) {
       onSendOrStop: () => pfs().chatStream.onSendOrStop(),
       clearCmd: () => pfs().slash.clearCmd(),
       clearSkill: () => pfs().skills.clearSkill(),
-      openSkillPicker: () => sidebar.openPanel("skills"),
+      openSkillPicker: (el) => {
+        sidebar.rememberSurfaceTrigger("skills", el);
+        pfs().skills.open();
+      },
       closeSkillPicker: () => sidebar.closePanel("skills"),
       closeSkillModal: () => pfs().skills?.closeSkillModal?.(),
       openModelPicker: (el) => pfs().models.openModelPicker(el),
       closeModelPicker: () => pfs().models.closeModelPicker(),
+      openModelSettings: () => {
+        pfs().models.closeModelPicker();
+        return globalThis.openOverlay("ov-settings");
+      },
       fillHint: (el) => pfs().slash.fillHint(el),
       toggleComposerExpanded: () => {
         const shell = document.querySelector(".composer-shell");
@@ -82,6 +89,7 @@ if (globalThis.__pfsAppDelegationRegistered) {
         shell.classList.toggle("expanded", expanded);
         button.setAttribute("aria-expanded", String(expanded));
         button.title = t(expanded ? "composer.collapse" : "composer.expand");
+        button.setAttribute("aria-label", button.title);
         if (expanded) input.style.height = "220px";
         else pfs().slash.autoResize(input);
         input.focus();
@@ -91,7 +99,8 @@ if (globalThis.__pfsAppDelegationRegistered) {
       togglePfsChatMode: () => pfs().pfsReport?.toggleDeterministicMode?.(),
 
       // Independent side panels (skills / knowledge / mcp) — island loading via openSidePanel
-      openPanel: (_el, name) => {
+      openPanel: (el, name) => {
+        sidebar.rememberSurfaceTrigger(name, el);
         if (name === "skills") {
           pfs().skills.open();
         } else {
@@ -123,18 +132,22 @@ if (globalThis.__pfsAppDelegationRegistered) {
       openPfsReport: () => pfs().pfsReport?.open(),
       refreshPfsReport: () => pfs().pfsReport?.load(),
       analyzePfsQuestion: () => pfs().pfsReport?.loadFromQuestion(),
+      cancelPfsReport: () => pfs().pfsReport?.cancelCurrentRun(),
       exportPfsReport: (_el, format) => pfs().pfsReport?.exportReport(format),
       openJobHistory: () => jobHistory.open(),
-      openBusinessCanvas: () => pfs().businessCanvas.open(),
       toggleFocusMode: () => sidebar.toggleFocusMode(),
+      toggleSidebarRail: () => sidebar.toggleSidebarRail(),
       openSaveDialog: () => sessions.openSaveDialog(),
       loadSavedList: () => sessions.loadSavedList(),
       setSidebarNav: (_el, nav) => sidebar.setSidebarNav(nav || "agent"),
-      openSidebarDrawer: (_el, tab) => sidebar.openSidebarDrawer(tab || "sessions"),
+      openSidebarDrawer: (el, tab) => sidebar.openSidebarDrawer(tab || "sessions", el),
       closeSidebarDrawer: () => sidebar.closeSidebarDrawer(),
       closeSidebarSurfaces: () => sidebar.closeSidebarSurfaces(),
       setDrawerTab: (_el, tab) => sidebar.setDrawerTab(tab || "sessions"),
-      openMcpSettings: () => pfs().mcp.openMcpSettings(),
+      openMcpSettings: (el) => {
+        sidebar.rememberSurfaceTrigger("mcp", el);
+        pfs().mcp.openMcpSettings();
+      },
       loadMcpServers: () => pfs().mcp.loadMcpServers(),
       toggleLang: () => pfs().i18n.setLang(pfs().i18n.getLang() === "zh" ? "en" : "zh"),
       toggleTheme: () => pfs().theme.toggleTheme(),
@@ -144,7 +157,6 @@ if (globalThis.__pfsAppDelegationRegistered) {
       uploadXl: () => datasource.uploadXl(),
       loadSample: () => datasource.loadSample(),
       connectDB: () => datasource.connectDB(),
-      connectGSheets: () => datasource.connectGSheets(),
       connectAPI: () => datasource.connectAPI(),
       cloudLogout: () => {
         fetch("/api/auth/logout", { method: "POST" }).finally(() => {
@@ -264,11 +276,12 @@ if (globalThis.__pfsAppDelegationRegistered) {
       // Sidebar — datasource row click. Behaviour depends on connection state:
       //   connected    → open data preview modal
       //   disconnected → open the "Add data source" dropdown
-      openDataSource: () => sidebar.openDataSource(),
+      openDataSource: (el) => sidebar.openDataSource(el),
     };
 
     sidebar.initAddSourceDropdown();
     sidebar.initPanelKeyClose();
+    sidebar.initSidebarRail();
 
     // Click delegation
     document.addEventListener("click", (e) => {
@@ -281,7 +294,18 @@ if (globalThis.__pfsAppDelegationRegistered) {
         console.warn("[PFS] unknown action:", name);
         return;
       }
-      fn(el, ...args, e);
+      try {
+        const result = fn(el, ...args, e);
+        if (result && typeof result.then === "function") {
+          result.catch((error) => {
+            console.error(`[PFS] action ${name} failed:`, error);
+            pfs().overlay?.toast?.("该功能暂时无法打开，请重试", "err");
+          });
+        }
+      } catch (error) {
+        console.error(`[PFS] action ${name} failed:`, error);
+        pfs().overlay?.toast?.("该功能暂时无法打开，请重试", "err");
+      }
     });
 
     // Direct fallback for "添加自定义模型" toggle — some users report event delegation not firing
@@ -525,7 +549,19 @@ if (globalThis.__pfsAppDelegationRegistered) {
         pfs().models.refreshModelPickerLabels?.();
       }
       const sendBtn = $("send-btn");
-      if (sendBtn && !sendBtn.classList.contains("stopping")) sendBtn.title = t("send.title");
+      if (sendBtn && !sendBtn.classList.contains("stopping")) {
+        sendBtn.title = t("send.title");
+        sendBtn.setAttribute("aria-label", sendBtn.title);
+      }
+      const expandButton = $("composer-expand-btn");
+      if (expandButton) {
+        expandButton.title = t(
+          expandButton.getAttribute("aria-expanded") === "true"
+            ? "composer.collapse"
+            : "composer.expand",
+        );
+        expandButton.setAttribute("aria-label", expandButton.title);
+      }
       if (pfs().chatStream?.syncComposerPlaceholder) {
         pfs().chatStream.syncComposerPlaceholder();
       } else {
@@ -585,7 +621,6 @@ if (globalThis.__pfsAppDelegationRegistered) {
       await Promise.all([pfs().slash.loadCommands(), pfs().skills.loadSkills()]);
       await jobHistory.init(state.SID);
       await pfs().models.loadModels();
-      await pfs().models.loadBuiltinProviders();
       await sessions.loadSavedList();
       await datasource.loadWarehouseList();
       await datasource.loadDatasourceConfigs();

@@ -10,6 +10,7 @@ const state = {
   question: "",
   deliveryFormat: "",
   deliveryArtifacts: [],
+  currentRun: null,
 };
 
 function translate(key, fallback, vars) {
@@ -65,6 +66,101 @@ function renderLoading() {
   );
 }
 
+function renderCanceled() {
+  const content = document.getElementById("pfs-report-content");
+  if (!content) return;
+  content.replaceChildren(
+    makeElement(
+      "div",
+      "pfs-report-canceled",
+      translate("pfs_report.canceled_message", "分析已取消，未生成结论或证据记录。"),
+    ),
+  );
+}
+
+function setCancelAvailability(available) {
+  const button = document.getElementById("pfs-report-cancel");
+  if (!button) return;
+  button.hidden = !available;
+  button.classList.toggle("hidden", !available);
+  button.disabled = !available || Boolean(state.currentRun?.cancelRequested);
+  button.setAttribute("aria-disabled", String(button.disabled));
+  button.setAttribute("aria-busy", state.currentRun?.cancelRequested ? "true" : "false");
+}
+
+function createRun(prefix, sid = "", serverCancelable = false) {
+  const suffix =
+    globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const run = {
+    runId: `${prefix}-${suffix}`.slice(0, 120),
+    sid,
+    serverCancelable,
+    cancelRequested: false,
+    controller: new AbortController(),
+  };
+  state.currentRun = run;
+  setCancelAvailability(true);
+  return run;
+}
+
+function finishRun(run) {
+  if (state.currentRun !== run) return;
+  state.currentRun = null;
+  setCancelAvailability(false);
+}
+
+function wasCanceled(error, run) {
+  return (
+    run?.cancelRequested ||
+    error?.name === "AbortError" ||
+    error?.code === "pfs_analysis_canceled"
+  );
+}
+
+function waitMilliseconds(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function requestServerCancel(run) {
+  const retryDelays = [0, 50, 100, 200, 400, 800];
+  for (const delay of retryDelays) {
+    if (delay) await waitMilliseconds(delay);
+    if (state.currentRun !== run || !run.cancelRequested) return false;
+    try {
+      const response = await fetch(
+        `/api/session/${encodeURIComponent(run.sid)}/pfs/runs/${encodeURIComponent(run.runId)}/cancel`,
+        { method: "POST", keepalive: true },
+      );
+      if (response.ok) return true;
+      if (response.status !== 404) return false;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+async function cancelCurrentRun() {
+  const run = state.currentRun;
+  if (!run || run.cancelRequested) return;
+  run.cancelRequested = true;
+  setCancelAvailability(true);
+  if (run.serverCancelable && run.sid) {
+    const accepted = await requestServerCancel(run);
+    if (!accepted) {
+      run.cancelRequested = false;
+      setCancelAvailability(state.currentRun === run);
+      return;
+    }
+  }
+  run.controller.abort();
+  state.result = null;
+  setExportAvailability(false);
+  setDeliveryAvailability(false);
+  renderCanceled();
+  setStatus("canceled");
+}
+
 function renderIdle() {
   const content = document.getElementById("pfs-report-content");
   const source = document.getElementById("pfs-report-source");
@@ -96,11 +192,12 @@ function errorGuidance(code, message) {
     source_columns_missing: translate("pfs_report.error_columns_missing", "请确认指标列、日期列和分组列都存在于数据源中。"),
     source_date_invalid: translate("pfs_report.error_date_invalid", "请将日期列统一为 YYYY-MM 或 YYYY-MM-DD，并修正无效日期。"),
     date_filter_invalid: translate("pfs_report.error_date_filter_invalid", "请检查起止日期格式，并确保开始日期不晚于结束日期。"),
+    date_range_invalid: translate("pfs_report.error_date_filter_invalid", "请检查起止日期格式，并确保开始日期不晚于结束日期。"),
     metric_value_not_numeric: translate("pfs_report.error_not_numeric", "请清理指标列中的文本或改选数值列。"),
     delivery_table_missing: translate("pfs_report.error_delivery_table", "当前数据源没有可交付的表，请重新选择有效工作表。"),
     upload_file_too_large: translate("pfs_report.error_file_too_large", "请压缩文件或拆分后再上传，单文件上限为 100 MB。"),
     model_not_configured: translate("pfs_report.error_model_not_configured", "请先在模型设置中配置 DeepSeek 或其他可用模型，再运行 Agent。"),
-    delivery_generation_failed: translate("pfs_report.error_delivery_generation", "交付物生成失败，请检查输出目录权限后重试。"),
+    delivery_generation_failed: translate("pfs_report.error_delivery_generation", "请检查输出目录权限后重试。"),
     delivery_table_ambiguous: translate("pfs_report.error_delivery_ambiguous", "请先明确选择一个工作表，再生成交付物。"),
   };
   return guidance[code] ? `${message} ${guidance[code]}` : message;
@@ -256,6 +353,7 @@ function toggleDeterministicMode() {
     button.title = appState.pfsDeterministicMode
       ? translate("pfs_report.chat_mode_on", "聊天将按报表口径分析")
       : translate("pfs_report.chat_mode_off", "关闭报表口径分析");
+    button.setAttribute("aria-label", button.title);
   }
   return appState.pfsDeterministicMode;
 }
@@ -314,6 +412,8 @@ function updateWorksheetControl() {
   for (const sheet of worksheets) {
     const label = sheet.error
       ? `${sheet.name} · ${translate("pfs_report.worksheet_unavailable", "不可分析")}`
+      : sheet.validation_error
+        ? `${sheet.name} · ${translate("pfs_report.needs_repair", "需修复")}`
       : `${sheet.name} · ${formatNumber(sheet.row_count)} ${translate("pfs_report.rows", "行")}`;
     const option = makeElement("option", "", label);
     option.value = sheet.name;
@@ -335,10 +435,13 @@ function renderSourceOptions() {
   select.append(makeElement("option", "", "PFS 固定示例销售报表"));
   select.options[0].value = "fixture";
   for (const source of state.sources) {
+    const repairLabel = source.validation_error
+      ? ` · ${translate("pfs_report.needs_repair", "需修复")}`
+      : "";
     const option = makeElement(
       "option",
       "",
-      `${source.name || source.file_name} · ${formatNumber(source.row_count)} rows`,
+      `${source.name || source.file_name} · ${formatNumber(source.row_count)} rows${repairLabel}`,
     );
     option.value = `csv:${source.source_id}`;
     select.append(option);
@@ -576,7 +679,15 @@ function renderEvidence(result) {
     if (evidence.source_url || evidence.title || evidence.publisher || evidence.captured_at)
       card.append(makeElement("small", "pfs-report-evidence-details",
         [evidence.title, evidence.publisher, evidence.published_at ? "发布 " + evidence.published_at : "",
-          evidence.captured_at ? "抓取 " + evidence.captured_at : "", evidence.source_url].filter(Boolean).join(" · ")));
+          evidence.captured_at ? "抓取 " + evidence.captured_at : "", evidence.file_name ? "文件 " + evidence.file_name : "",
+          evidence.worksheet ? "工作表 " + evidence.worksheet : "",
+          evidence.included_rows != null ? "纳入 " + evidence.included_rows + " 行" : "",
+          evidence.source_url].filter(Boolean).join(" · ")));
+    if (evidence.content_sha256 || evidence.locator || evidence.columns?.length)
+      card.append(makeElement("small", "pfs-report-evidence-details",
+        [evidence.content_sha256 ? "SHA-256 " + evidence.content_sha256 : "",
+          evidence.locator ? "定位 " + evidence.locator : "",
+          evidence.columns?.length ? "字段 " + evidence.columns.join(", ") : ""].filter(Boolean).join(" · ")));
     card.append(makeElement("p", "pfs-report-evidence-excerpt", evidence.excerpt || ""));
     list.append(card);
   }
@@ -690,6 +801,7 @@ function renderResult(result) {
 
 async function load() {
   if (state.loading) return;
+  let run = null;
   state.loading = true;
   state.question = "";
   setExportAvailability(false);
@@ -703,16 +815,23 @@ async function load() {
     const sourceValue = controls().source?.value || "fixture";
     let response;
     if (sourceValue === "fixture") {
-      response = await fetch(REPORT_ENDPOINT, { cache: "no-store" });
+      run = createRun("pfs-fixture");
+      response = await fetch(REPORT_ENDPOINT, {
+        cache: "no-store",
+        signal: run.controller.signal,
+      });
     } else {
       const sid = globalThis.PFS?.state?.SID;
       const source = selectedSource();
       if (!sid || !source) throw new Error("未找到可分析的上传数据源");
+      run = createRun("pfs-report", sid, true);
       response = await fetch(`/api/session/${encodeURIComponent(sid)}/pfs/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: run.controller.signal,
         body: JSON.stringify({
           source_id: source.source_id,
+          run_id: run.runId,
           worksheet: selectedWorksheet(),
           value_column: controls().value?.value,
           date_column: controls().date?.value,
@@ -735,15 +854,22 @@ async function load() {
   } catch (error) {
     state.result = null;
     setExportAvailability(false);
-    renderError(String(error?.message || error), error?.code);
-    setStatus("error");
+    if (wasCanceled(error, run)) {
+      renderCanceled();
+      setStatus("canceled");
+    } else {
+      renderError(String(error?.message || error), error?.code);
+      setStatus("error");
+    }
   } finally {
     state.loading = false;
+    finishRun(run);
   }
 }
 
 async function loadFromQuestion() {
   if (state.loading) return;
+  let run = null;
   const source = selectedSource();
   const input = document.getElementById("pfs-report-question-input");
   const question = input?.value?.trim();
@@ -771,14 +897,16 @@ async function loadFromQuestion() {
   renderLoading();
   setInterpretation("");
   try {
+    run = createRun("pfs-question", sid, true);
     const response = await fetch(`/api/session/${encodeURIComponent(sid)}/pfs/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: run.controller.signal,
       body: JSON.stringify({
         source_id: source.source_id,
         worksheet: selectedWorksheet(),
         question,
-        run_id: "pfs-question-run",
+        run_id: run.runId,
       }),
     });
     const payload = await response.json();
@@ -797,11 +925,17 @@ async function loadFromQuestion() {
   } catch (error) {
     state.result = null;
     setExportAvailability(false);
-    renderError(String(error?.message || error), error?.code);
-    setStatus("error");
+    if (wasCanceled(error, run)) {
+      renderCanceled();
+      setStatus("canceled");
+    } else {
+      renderError(String(error?.message || error), error?.code);
+      setStatus("error");
+    }
   } finally {
     state.loading = false;
     setQuestionLoading(false);
+    finishRun(run);
   }
 }
 
@@ -952,6 +1086,7 @@ function init() {
   pfs.pfsReport = {
     load,
     loadFromQuestion,
+    cancelCurrentRun,
     exportReport,
     generateDelivery,
     open,
@@ -992,6 +1127,7 @@ function init() {
   });
   setExportAvailability(false);
   setDeliveryAvailability(false);
+  setCancelAvailability(false);
   renderSourceOptions();
 }
 

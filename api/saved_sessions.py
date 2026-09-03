@@ -1,7 +1,6 @@
 """Blueprint: save / load / delete persistent sessions."""
 import json
 import logging
-import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -13,6 +12,7 @@ from data.connector import ExcelDataSource, CSVDataSource
 from agent.reasoning import split_reasoning_tags
 from infrastructure.artifact_lifecycle import register_session_file, soft_delete_session_group
 from infrastructure.paths import data_path
+from infrastructure.compat import cloud_login_enabled
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _is_cloud() -> bool:
-    return bool(os.environ.get("RAILWAY_PROJECT_ID")) or os.environ.get("VERCEL") == "1"
+    return cloud_login_enabled()
 
 
 def _scoped_save_dir() -> Path:

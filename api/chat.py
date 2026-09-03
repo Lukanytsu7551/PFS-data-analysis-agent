@@ -25,9 +25,14 @@ from agent.prompts import get_system_prompt
 from agent.reasoning import split_reasoning_tags
 from agent.retry import call_with_retry as _call_with_retry
 from agent.skills import SkillLoader
-from infrastructure.artifact_lifecycle import register_artifact
+from infrastructure.artifact_lifecycle import register_artifact, update_artifact_run_usage
 from config.product_identity import PRODUCT_SHORT_NAME
-from infrastructure.compat import request_user_id, workspace_hidden_dir
+from infrastructure.compat import (
+    cloud_login_enabled,
+    optional_feature_enabled,
+    request_user_id,
+    workspace_hidden_dir,
+)
 from agent.pricing import validate_cost_limit
 
 
@@ -43,17 +48,35 @@ def _pfs_deterministic_chat_response(sid: str, message: str, payload: dict, sess
     if not source_id:
         return jsonify({"error": "确定性报表分析需要 source_id", "code": "pfs_source_required"}), 400
     try:
-        from api.pfs import _session_tabular_source
+        from api.pfs import _session_tabular_source, _worksheet_from_payload
         from pfs_agent.query import parse_report_question
         from pfs_agent.reporting import analyze_file, load_tabular_snapshot
 
         path, _source = _session_tabular_source(sid, source_id)
-        snapshot = load_tabular_snapshot(path, source_id=source_id, date_column="month")
+        display_file_name = str(getattr(_source, "name", "") or path.name)
+        worksheet = _worksheet_from_payload(payload)
+        snapshot = load_tabular_snapshot(
+            path, source_id=source_id, date_column="month", worksheet=worksheet,
+        )
         parsed = parse_report_question(
             message, snapshot.columns,
             run_id=str(payload.get("run_id") or "pfs-chat-" + uuid.uuid4().hex[:16])[:120],
         )
-        result = analyze_file(path, metric=parsed.metric, request=parsed.request, source_id=source_id)
+        result = analyze_file(
+            path,
+            metric=parsed.metric,
+            request=parsed.request,
+            source_id=source_id,
+            worksheet=worksheet,
+            file_name=display_file_name,
+        )
+        # Keep the chat bridge on the same governance path as the direct PFS
+        # endpoints.  The SSE payload must point to the records that were
+        # actually persisted, otherwise the UI would show orphan Claims and
+        # Evidence that cannot be recovered from the Ledger later.
+        from api.pfs import _governance_result
+
+        governed_result = _governance_result(result, sid)
     except (TypeError, ValueError, OSError) as exc:
         return jsonify({"ok": False, "error": str(exc), "code": "pfs_query_failed"}), 400
 
@@ -61,7 +84,7 @@ def _pfs_deterministic_chat_response(sid: str, message: str, payload: dict, sess
         from agent.events import serialize_event
         return "data: " + json.dumps(serialize_event(obj), ensure_ascii=False) + "\n\n"
 
-    result_dict = result.to_dict()
+    result_dict = governed_result
     total = result_dict.get("total", 0)
     groups = result_dict.get("groups", [])
     lines = ["已按确定性口径完成报表分析：" + parsed.interpretation, "合计：" + str(total)]
@@ -605,22 +628,23 @@ def _build_agent(
 @bp.post("/api/session/new")
 def new_session():
     owner_user_id = ""
-    if bool(os.environ.get("RAILWAY_PROJECT_ID")) or os.environ.get("VERCEL") == "1":
+    if cloud_login_enabled():
         from .auth import current_user
         auth_user = current_user()
         if auth_user:
             owner_user_id = auth_user["id"]
     sess = session_manager.create(owner_user_id=owner_user_id)
-    try:
-        from agent.hooks.models import HookContext
-        from data.hooks_store import load_engine
+    if optional_feature_enabled("HOOKS"):
+        try:
+            from agent.hooks.models import HookContext
+            from data.hooks_store import load_engine
 
-        load_engine().run_hooks(
-            "session_start",
-            HookContext(event_name="session_start", session_id=sess.session_id),
-        )
-    except Exception as exc:
-        log.debug("[hooks] session_start skipped sid=%s error=%s", sess.session_id, exc)
+            load_engine().run_hooks(
+                "session_start",
+                HookContext(event_name="session_start", session_id=sess.session_id),
+            )
+        except Exception as exc:
+            log.debug("[hooks] session_start skipped sid=%s error=%s", sess.session_id, exc)
     # Governance: trigger the 24h consolidation check on every new session.
     # workspace_id is not yet known here, so only user-level records are in
     # scope; workspace-level consolidation continues to fire at turn-end.
@@ -760,16 +784,17 @@ def stop_session(sid: str):
     sess = session_manager.get(sid)
     if sess:
         sess.cancel_requested = True
-        try:
-            from agent.hooks.models import HookContext
-            from data.hooks_store import load_engine
+        if optional_feature_enabled("HOOKS"):
+            try:
+                from agent.hooks.models import HookContext
+                from data.hooks_store import load_engine
 
-            load_engine().run_hooks(
-                "stop",
-                HookContext(event_name="stop", session_id=sid, message="stop requested"),
-            )
-        except Exception as exc:
-            log.debug("[hooks] stop skipped sid=%s error=%s", sid, exc)
+                load_engine().run_hooks(
+                    "stop",
+                    HookContext(event_name="stop", session_id=sid, message="stop requested"),
+                )
+            except Exception as exc:
+                log.debug("[hooks] stop skipped sid=%s error=%s", sid, exc)
         log.info("[session] stop requested  sid=%s", sid)
     return jsonify({"ok": True})
 
@@ -856,7 +881,7 @@ def chat_stream(sid: str):
     is_internal_feishu = bool(getattr(g, "feishu_inbound", False))
     user_id = request_user_id(request.headers, d, default="local-default")
     # Cloud mode: use authenticated user and enforce token quota
-    if bool(os.environ.get("RAILWAY_PROJECT_ID")) or os.environ.get("VERCEL") == "1":
+    if cloud_login_enabled():
         from .auth import current_user
         from data.auth_store import check_quota
         auth_user = current_user()
@@ -984,31 +1009,32 @@ def chat_stream(sid: str):
                     sess.total_cached_input_tokens - _command_usage_before[2],
                 ),
             )
-        try:
-            from agent.hooks.models import HookContext
-            from data.hooks_store import load_engine
+        hook_engine = None
+        hook_context = None
+        if optional_feature_enabled("HOOKS"):
+            try:
+                from agent.hooks.models import HookContext
+                from data.hooks_store import load_engine
 
-            hook_engine = load_engine()
-            hook_context = HookContext(
-                event_name="turn_start",
-                session_id=sid,
-                turn_id=conversation_job_id,
-                workspace_id=fixed_workspace_id,
-                workspace_name=(
-                    fixed_workspace_runtime.to_dict().get("name", "")
-                    if fixed_workspace_runtime is not None else ""
-                ),
-                workspace_path=(
-                    fixed_workspace_runtime.to_dict().get("path", "")
-                    if fixed_workspace_runtime is not None else ""
-                ),
-                message=message,
-                model_provider=sess.model_provider or config_manager.get_default_provider() or "",
-            )
-        except Exception as exc:
-            log.warning("[hooks] disabled for turn sid=%s error=%s", sid, exc)
-            hook_engine = None
-            hook_context = None
+                hook_engine = load_engine()
+                hook_context = HookContext(
+                    event_name="turn_start",
+                    session_id=sid,
+                    turn_id=conversation_job_id,
+                    workspace_id=fixed_workspace_id,
+                    workspace_name=(
+                        fixed_workspace_runtime.to_dict().get("name", "")
+                        if fixed_workspace_runtime is not None else ""
+                    ),
+                    workspace_path=(
+                        fixed_workspace_runtime.to_dict().get("path", "")
+                        if fixed_workspace_runtime is not None else ""
+                    ),
+                    message=message,
+                    model_provider=sess.model_provider or config_manager.get_default_provider() or "",
+                )
+            except Exception as exc:
+                log.warning("[hooks] disabled for turn sid=%s error=%s", sid, exc)
 
         try:
             agent = _build_agent(
@@ -1037,6 +1063,54 @@ def chat_stream(sid: str):
         pending_steps: dict[str, list[dict]] = {}
         artifact_signatures: set[str] = set()
         stream_error = ""
+        run_usage = {
+            "model_calls": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "priced_cost_usd": 0.0,
+            "price_unknown": False,
+            "providers": set(),
+            "models": set(),
+        }
+
+        def _artifact_run_cost(status: str = "running") -> dict:
+            calls = int(run_usage["model_calls"] or 0)
+            price_unknown = bool(run_usage["price_unknown"])
+            if calls == 0:
+                source = "provider_usage_unavailable"
+                amount = None
+                estimated = None
+            elif price_unknown:
+                source = "provider_usage_price_unknown"
+                amount = None
+                estimated = None
+            else:
+                source = "provider_usage_configured_pricing"
+                amount = round(float(run_usage["priced_cost_usd"] or 0.0), 8)
+                estimated = True
+            return {
+                "amount": amount,
+                "currency": "USD",
+                "estimated": estimated,
+                "source": source,
+                "model_calls": calls,
+                "input_tokens": int(run_usage["input_tokens"] or 0),
+                "output_tokens": int(run_usage["output_tokens"] or 0),
+                "cached_input_tokens": int(run_usage["cached_input_tokens"] or 0),
+                "providers": sorted(run_usage["providers"]),
+                "models": sorted(run_usage["models"]),
+                "status": status,
+                # This amount is derived from provider usage and configured
+                # rates. It is never presented as a reconciled provider bill.
+                "billing_verified": False,
+            }
+
+        agent._artifact_metadata = {
+            **dict(getattr(agent, "_artifact_metadata", None) or {}),
+            "run_id": conversation_job_id,
+            "cost": _artifact_run_cost(),
+        }
 
         def _append_parent_artifact(artifact: dict) -> None:
             if not isinstance(artifact, dict) or not artifact:
@@ -1190,6 +1264,7 @@ def chat_stream(sid: str):
         try:
             for event in agent.run(
                 message, list(sess.history), activation=activation,
+                run_id=conversation_job_id,
                 active_skill=active_skill, active_command=active_command,
                 last_reasoning=getattr(sess, "last_reasoning", ""),
                 last_prompt_tokens=getattr(sess, "last_prompt_tokens", 0),
@@ -1244,6 +1319,18 @@ def chat_stream(sid: str):
                     _append_parent_artifact(event["artifact"])
                 elif etype == "skill_activated":
                     sess.auto_loaded_skill = event.get("name", "")
+                elif etype == "retry":
+                    runner.append_tracked_event(conversation_job_id, {
+                        "type": "model_retry",
+                        "job_id": conversation_job_id,
+                        "provider": str(event.get("provider") or "")[:120],
+                        "model": str(event.get("model") or "")[:160],
+                        "attempt": max(1, int(event.get("attempt") or 1)),
+                        "max_retries": max(1, int(event.get("max_retries") or 1)),
+                        "wait_seconds": max(0.0, float(event.get("wait_seconds") or 0)),
+                        "reason": str(event.get("reason") or "transport_error")[:80],
+                        "error_type": str(event.get("error_type") or "")[:120],
+                    })
                 elif etype == "error":
                     stream_error = str(event.get("message") or "Conversation failed")
                 elif etype == "ask_user" and is_internal_feishu:
@@ -1283,7 +1370,12 @@ def chat_stream(sid: str):
                     chart_store[cid] = event["html"]
                     register_artifact(
                         chart_store.path_for(cid),
-                        artifact_type="chart", session_id=sid, artifact_id=f"chart:{cid}",
+                        artifact_type="chart", session_id=sid,
+                        workspace_id=fixed_workspace_id, artifact_id=f"chart:{cid}",
+                        metadata={
+                            "run_id": conversation_job_id,
+                            "cost": _artifact_run_cost(),
+                        },
                     )
                     if not hasattr(sess, "chart_ids"):
                         sess.chart_ids = []
@@ -1312,6 +1404,25 @@ def chat_stream(sid: str):
                 elif etype == "ppt_scheme":
                     sess.ppt_color_scheme = event.get("scheme", "mckinsey")
                 elif etype == "usage":
+                    run_usage["model_calls"] += max(1, int(event.get("model_calls") or 1))
+                    run_usage["input_tokens"] += max(0, int(event.get("prompt_tokens") or 0))
+                    run_usage["output_tokens"] += max(0, int(event.get("completion_tokens") or 0))
+                    run_usage["cached_input_tokens"] += max(0, int(event.get("cached_input_tokens") or 0))
+                    provider_name = str(event.get("provider") or getattr(agent, "_provider", "") or "").strip()
+                    model_name = str(event.get("model") or getattr(agent, "model", "") or "").strip()
+                    if provider_name:
+                        run_usage["providers"].add(provider_name)
+                    if model_name:
+                        run_usage["models"].add(model_name)
+                    if event.get("cost_usd") is None:
+                        run_usage["price_unknown"] = True
+                    else:
+                        run_usage["priced_cost_usd"] += max(0.0, float(event["cost_usd"]))
+                    agent._artifact_metadata["cost"] = _artifact_run_cost()
+                    update_artifact_run_usage(
+                        session_id=sid, run_id=conversation_job_id,
+                        cost=agent._artifact_metadata["cost"],
+                    )
                     sess.record_usage(
                         event.get("prompt_tokens", 0),
                         event.get("completion_tokens", 0),
@@ -1321,7 +1432,7 @@ def chat_stream(sid: str):
                         cost_usd=event.get("cost_usd"),
                     )
                     # Cloud mode: record per-user daily token usage
-                    if bool(os.environ.get("RAILWAY_PROJECT_ID")) or os.environ.get("VERCEL") == "1":
+                    if cloud_login_enabled():
                         from data.auth_store import add_usage
                         _total = (event.get("prompt_tokens", 0) or 0) + (event.get("completion_tokens", 0) or 0)
                         if _total > 0:
@@ -1502,6 +1613,11 @@ def chat_stream(sid: str):
             source_snapshot.release()
             current = runner.get_status(conversation_job_id) or {}
             status = str(current.get("status") or "")
+            final_cost = _artifact_run_cost(status or "interrupted")
+            agent._artifact_metadata["cost"] = final_cost
+            update_artifact_run_usage(
+                session_id=sid, run_id=conversation_job_id, cost=final_cost,
+            )
             _record_prompt_command_metric(
                 "success" if status == "succeeded" else "error",
                 "" if status == "succeeded" else (status or "stream_incomplete"),

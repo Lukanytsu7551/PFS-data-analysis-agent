@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import secrets
 
 from flask import Blueprint, request, jsonify, session, render_template
@@ -21,7 +20,7 @@ from data.auth_store import (
     generate_code, store_email_code, can_resend, consume_email_code,
 )
 from data.email_sender import send_code as _send_email_code, is_configured as _smtp_configured
-from infrastructure.compat import env
+from infrastructure.compat import cloud_login_enabled, env
 
 log = logging.getLogger(__name__)
 
@@ -72,7 +71,7 @@ SECRET_KEY = get_or_create_secret_key()
 
 
 def is_cloud_managed() -> bool:
-    return bool(os.environ.get("RAILWAY_PROJECT_ID")) or os.environ.get("VERCEL") == "1"
+    return cloud_login_enabled()
 
 
 def current_user() -> dict | None:

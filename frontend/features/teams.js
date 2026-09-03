@@ -2,6 +2,7 @@
 import { state } from "../core/runtime.js";
 import { renderMd } from "../legacy/markdown.js";
 import { open as openJobHistory } from "../legacy/job_history.js";
+import { iconVNode } from "../core/icons.js";
 
 const pfs = () => globalThis.PFS;
 
@@ -1501,7 +1502,7 @@ const pfs = () => globalThis.PFS;
               closePanelState();
               pfs().overlay.closeOverlay("ov-teams");
             },
-          }, "×"),
+          }, iconVNode(h, "close", { size: 16 })),
         ]),
       ]);
     }
@@ -1555,7 +1556,7 @@ const pfs = () => globalThis.PFS;
           class: event.status === "error" ? "team-tool-item error" : "team-tool-item",
         }, [
           h("div", { class: "team-tool-head" }, [
-            h("span", null, event.status === "error" ? "✕" : "✓"),
+            h("span", { "aria-hidden": "true" }, [iconVNode(h, event.status === "error" ? "close" : "check", { size: 14 })]),
             h("strong", null, event.tool || "tool"),
             event.elapsed_seconds != null ? h("small", null, `${event.elapsed_seconds}s`) : null,
           ]),

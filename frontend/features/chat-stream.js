@@ -26,6 +26,7 @@ import {
   switchSession as switchJobHistorySession,
 } from "../legacy/job_history.js";
 import { openSchemaView } from "../legacy/preview.js";
+import { iconSpan, svgMarkup } from "../core/icons.js";
 
 const pfs = () => globalThis.PFS;
 import { loadSavedList } from "../legacy/sessions.js";
@@ -84,12 +85,12 @@ import { loadSavedList } from "../legacy/sessions.js";
   }
 
   function _setSendBtnStopping(stopping) {
-    // The button now contains an SVG arrow; the .stopping class swaps it for a
-    // stop-square rendered via ::before (CSS only). No textContent mutation —
-    // that would wipe out the SVG.
+    // Keep both inline SVG states in the button; CSS only changes visibility.
+    // Never mutate textContent here because that would wipe out the SVGs.
     const btn = $("send-btn");
     btn.classList.toggle("stopping", stopping);
     btn.title    = stopping ? (t('send.stop') || "停止 (Stop)") : t('send.title');
+    btn.setAttribute("aria-label", btn.title);
     btn.disabled = false;
   }
 
@@ -97,7 +98,9 @@ import { loadSavedList } from "../legacy/sessions.js";
     const hasDraft = _hasComposerDraft();
     _setSendBtnStopping(state.isStreaming && !hasDraft);
     if (state.isStreaming && hasDraft) {
-      $("send-btn").title = t("send.queue") || "加入等待队列";
+      const button = $("send-btn");
+      button.title = t("send.queue") || "加入等待队列";
+      button.setAttribute("aria-label", button.title);
     }
   }
 
@@ -492,7 +495,7 @@ import { loadSavedList } from "../legacy/sessions.js";
     if (parts[0] === "info" && parts[1]) {
       const skill = pfs().skills.SKILLS.find(item => item.name === parts[1]);
       _localReply(skill
-        ? `### ${skill.icon || "🧩"} ${skill.name}\n\n${skill.description}\n\n来源：${pfs().skills.sourceLabel(skill.source)}`
+        ? `### ${skill.name}\n\n${skill.description}\n\n来源：${pfs().skills.sourceLabel(skill.source)}`
         : `未找到 Skill：${parts[1]}`);
     } else if (parts[0] === "reload") {
       _localReply(`Skill 已刷新，共 ${pfs().skills.SKILLS.length} 个。`);
@@ -512,7 +515,7 @@ import { loadSavedList } from "../legacy/sessions.js";
     button.classList.toggle("is-connected", connected);
     button.setAttribute("aria-hidden", String(!connected));
     if (connected) {
-      button.textContent = `🤖 ${chatName || "飞书机器人"}`;
+      button.innerHTML = `${iconSpan("cpu", { className: "pfs-icon-box", size: 15 })}<span>${esc(chatName || "飞书机器人")}</span>`;
       button.title = `当前对话已连接飞书机器人：${chatName || chatId}。点击可切换或断开。`;
       button.setAttribute("aria-label", button.title);
     } else {
@@ -588,7 +591,7 @@ import { loadSavedList } from "../legacy/sessions.js";
 
   async function _handleRobotCommand() {
     if (!state.SID) return;
-    const target = appendMsg("assistant", "### 🤖 连接飞书机器人\n\n正在读取机器人可加入的群…");
+    const target = appendMsg("assistant", "### 连接飞书机器人\n\n正在读取机器人可加入的群…");
     const targetId = target?.dataset?.vueMsgId || target;
     let chats = [];
     try {
@@ -597,16 +600,16 @@ import { loadSavedList } from "../legacy/sessions.js";
       if (!response.ok || !data.ok) throw new Error(data.error || "读取群列表失败");
       chats = Array.isArray(data.chats) ? data.chats : [];
     } catch (error) {
-      _setLocalReply(targetId, `### 🤖 飞书机器人\n\n${error.message || "读取群列表失败"}`);
+      _setLocalReply(targetId, `### 飞书机器人\n\n${error.message || "读取群列表失败"}`);
       return;
     }
     if (!chats.length) {
-      _setLocalReply(targetId, "### 🤖 飞书机器人\n\n未找到机器人所在的群。请确认机器人已加入目标群，并在应用设置中检查群组读取权限。");
+      _setLocalReply(targetId, "### 飞书机器人\n\n未找到机器人所在的群。请确认机器人已加入目标群，并在应用设置中检查群组读取权限。");
       return;
     }
     const options = chats.map(chat => chat.name || "未命名群");
     if (state.feishuConversation?.connected) options.push("断开当前机器人");
-    _setLocalReply(targetId, "### 🤖 连接飞书机器人\n\n选择一个群后，当前 Web 对话的用户消息与 AI 回答都会同步到该群。机器人群内消息将在完成事件回调配置后接入同一会话。");
+    _setLocalReply(targetId, "### 连接飞书机器人\n\n选择一个群后，当前 Web 对话的用户消息与 AI 回答都会同步到该群。机器人群内消息将在完成事件回调配置后接入同一会话。");
     const picker = getUiIsland("chat");
     const onSubmit = async (name) => {
       if (name === "断开当前机器人") {
@@ -862,7 +865,7 @@ import { loadSavedList } from "../legacy/sessions.js";
       : null;
     const userOptions = {};
     if (skillMeta) {
-      userOptions.skill = { name: skillMeta.name, icon: skillMeta.icon || "🧩" };
+      userOptions.skill = { name: skillMeta.name };
     }
     const payload = { message: text, teams_enabled: !!state.teamsEnabled, auto_match_skill: state.autoMatchSkill !== false, memory_enabled: state.memoryEnabled !== false };
     if (state.pfsDeterministicMode) {
@@ -972,7 +975,7 @@ import { loadSavedList } from "../legacy/sessions.js";
         if (failure.code === "quota_exceeded") {
           const sysErr = document.createElement("div");
           sysErr.className = "msg msg-sys";
-          sysErr.innerHTML = '<span style="color:#f59e0b">⚠️ ' + (failure.error || "今日免费额度已用尽") + "</span>";
+          sysErr.innerHTML = iconSpan("circleHelp", { className: "stream-warning-icon pfs-icon", size: 16 }) + '<span>' + (failure.error || "今日免费额度已用尽") + "</span>";
           if (stepsEl) stepsEl.appendChild(sysErr);
           else if (bubbleEl) bubbleEl.appendChild(sysErr);
           return;
@@ -1066,7 +1069,7 @@ import { loadSavedList } from "../legacy/sessions.js";
     } else {
       s.classList.add("done");
       const spinEl = s.querySelector(".spin");
-      if (spinEl) { spinEl.classList.remove("spin"); spinEl.textContent = "✓"; }
+      if (spinEl) { spinEl.classList.remove("spin"); spinEl.innerHTML = iconSpan("check", { className: "pfs-icon", size: 16 }); }
     }
   }
   function _tickFinishedSteps(stepsEl) {
@@ -1169,7 +1172,7 @@ import { loadSavedList } from "../legacy/sessions.js";
     if (!isCompaction) s.open = false;
     const shortText = esc(String(ev.display || ev.detail || "").replace(/\s+/g, " ").trim());
     const fullText  = esc(ev.detail || ev.display || "");
-    const icon      = isCompaction ? `<span class="compaction-spin">⟳</span>` : `<span class="spin">⟳</span>`;
+    const icon      = isCompaction ? `<span class="compaction-spin">${iconSpan("refresh", { className: "pfs-icon", size: 16 })}</span>` : `<span class="spin">${iconSpan("refresh", { className: "pfs-icon", size: 16 })}</span>`;
     s.innerHTML = isCompaction
       ? `${icon}<span class="tool-step-text">${fullText}</span>`
       : `<summary class="tool-step-head">${icon}<span class="tool-step-text">${shortText}</span></summary><div class="tool-step-detail">${fullText}</div>`;
@@ -1408,7 +1411,8 @@ import { loadSavedList } from "../legacy/sessions.js";
     const expandBtn = document.createElement("button");
     expandBtn.className = "chart-expand-btn";
     expandBtn.title = "在新标签页打开";
-    expandBtn.textContent = "⛶";
+    expandBtn.setAttribute("aria-label", "在新标签页打开");
+    expandBtn.innerHTML = svgMarkup("external", { className: "pfs-icon", size: 15 });
     expandBtn.addEventListener("click", () => window.open(`/api/chart/${chartId}`, "_blank"));
     const iframe = document.createElement("iframe");
     iframe.setAttribute("sandbox", "allow-scripts allow-same-origin");
@@ -1467,7 +1471,7 @@ import { loadSavedList } from "../legacy/sessions.js";
     block.className = "reasoning-block";
     const toggle = document.createElement("div");
     toggle.className = "reasoning-toggle";
-    toggle.innerHTML = `<span class="reasoning-arrow">▶</span> ${t('reasoning_toggle')}`;
+    toggle.innerHTML = `${svgMarkup("chevronRight", { className: "reasoning-arrow", size: 12 })}<span>${t('reasoning_toggle')}</span>`;
     const body = document.createElement("div");
     body.className = "reasoning-body";
     body.textContent = content || "";
@@ -1618,7 +1622,7 @@ import { loadSavedList } from "../legacy/sessions.js";
       copyBtn.addEventListener("click", async () => {
         try {
           await navigator.clipboard.writeText(bar._currentText || "");
-          copyBtn.textContent = t('msg.copied') || "已复制 ✓";
+          copyBtn.textContent = t('msg.copied') || "已复制";
           copyBtn.classList.add("copied");
           setTimeout(() => {
             copyBtn.textContent = t('msg.copy') || "复制";
@@ -1690,7 +1694,7 @@ import { loadSavedList } from "../legacy/sessions.js";
     if (ctx.typing.parentNode) ctx.typing.remove();
     const span = document.createElement("span");
     span.className = "stream-error";
-    span.textContent = `⚠ ${displayMessage}`;
+    span.textContent = displayMessage;
     ctx.bubbleEl.appendChild(span);
   }
 
@@ -1722,19 +1726,19 @@ import { loadSavedList } from "../legacy/sessions.js";
   function _outlineMeta(ev) {
     let icon, confirmCmd, reviseCmd, confirmPayload, headerTitle;
     if (ev.type === "ppt_outline") {
-      icon = "🎯"; confirmCmd = "ppt_confirm"; reviseCmd = "ppt_revise";
+      icon = "presentation"; confirmCmd = "ppt_confirm"; reviseCmd = "ppt_revise";
       headerTitle = esc(ev.title || "PPT 大纲");
       confirmPayload = { ppt_title: ev.title, ppt_slides: ev.slides };
     } else if (ev.type === "excel_outline") {
-      icon = "📥"; confirmCmd = "excel_confirm"; reviseCmd = "excel_revise";
+      icon = "upload"; confirmCmd = "excel_confirm"; reviseCmd = "excel_revise";
       headerTitle = esc(ev.filename || "Excel 导出");
       confirmPayload = { excel_tables: ev.tables, excel_filename: ev.filename };
     } else if (ev.type === "dashboard_outline") {
-      icon = "📊"; confirmCmd = "dashboard_confirm"; reviseCmd = "dashboard_revise";
+      icon = "chart"; confirmCmd = "dashboard_confirm"; reviseCmd = "dashboard_revise";
       headerTitle = esc(ev.name || "数据看板");
       confirmPayload = { dashboard_name: ev.name, dashboard_widgets: ev.widgets };
     } else { // report_outline
-      icon = "📄"; confirmCmd = "report_confirm"; reviseCmd = "report_revise";
+      icon = "file"; confirmCmd = "report_confirm"; reviseCmd = "report_revise";
       headerTitle = esc(ev.title || "分析报告");
       confirmPayload = { report_title: ev.title, report_sections: ev.sections };
     }
@@ -1785,7 +1789,7 @@ import { loadSavedList } from "../legacy/sessions.js";
     card.className = "ppt-outline-card";
     card.innerHTML = `
       <div class="ppt-outline-header">
-        <span class="ppt-outline-icon">${icon}</span>
+        <span class="ppt-outline-icon">${iconSpan(icon, { className: "pfs-icon", size: 18 })}</span>
         <span>${headerTitle}</span>
       </div>
       <div class="ppt-outline-content">${renderMd(ev.markdown || "")}</div>
@@ -1794,9 +1798,9 @@ import { loadSavedList } from "../legacy/sessions.js";
         <textarea class="ppt-outline-edit" rows="3" placeholder="例如：把第3张换成双栏文字，增加一张市场份额环形图…"></textarea>
       </div>
       <div class="ppt-outline-btns">
-        <button class="ppt-btn ppt-btn-confirm">✅ 确认生成</button>
-        <button class="ppt-btn ppt-btn-revise">✏️ 修改大纲</button>
-        <button class="ppt-btn ppt-btn-cancel">✕ 取消</button>
+        <button class="ppt-btn ppt-btn-confirm">${iconSpan("check", { className: "pfs-icon", size: 14 })}<span>确认生成</span></button>
+        <button class="ppt-btn ppt-btn-revise">${iconSpan("edit", { className: "pfs-icon", size: 14 })}<span>修改大纲</span></button>
+        <button class="ppt-btn ppt-btn-cancel">${iconSpan("close", { className: "pfs-icon", size: 14 })}<span>取消</span></button>
       </div>`;
     ctx.bubbleEl.appendChild(card);
     scrollBottom();
@@ -2029,7 +2033,7 @@ import { loadSavedList } from "../legacy/sessions.js";
       const desc = skills.length === 1
         ? esc(skills[0].description || "")
         : `${skills.length} 个候选`;
-      s.innerHTML = `<span class="skill-icon">🧩</span><span class="tool-step-text">匹配 Skill: ${esc(names)}</span><span class="skill-step-desc">${desc}</span>`;
+      s.innerHTML = `${iconSpan("spark", { className: "skill-icon", size: 16 })}<span class="tool-step-text">匹配 Skill: ${esc(names)}</span><span class="skill-step-desc">${desc}</span>`;
       ctx.stepsEl.appendChild(s);
       _scheduleTailActivity(ctx);
       scrollBottom();
@@ -2045,7 +2049,7 @@ import { loadSavedList } from "../legacy/sessions.js";
       s.className = "tool-step skill-step done";
       s.dataset.tool = "skill_activate";
       s.dataset.finished = "1";
-      s.innerHTML = `<span class="skill-icon">✦</span><span class="tool-step-text">激活 Skill: ${esc(ev.name || "")}</span>`;
+      s.innerHTML = `${iconSpan("spark", { className: "skill-icon", size: 16 })}<span class="tool-step-text">激活 Skill: ${esc(ev.name || "")}</span>`;
       ctx.stepsEl.appendChild(s);
       _scheduleTailActivity(ctx);
       scrollBottom();
@@ -2085,20 +2089,8 @@ import { loadSavedList } from "../legacy/sessions.js";
     job_done:           _onJobDone,
     job_error:          _onJobError,
     job_canceled:       _onJobCanceled,
-    canvas_event:       _onCanvasEvent,
     feishu_sync:        _onFeishuSync,
   };
-
-  function _onCanvasEvent(ev) {
-    const action = ev.canvas_action || ev.action || "";
-    if (action === "diagram_update") {
-      // Auto-open the workbench if not already open
-      if (!document.body.classList.contains("business-canvas-open")) {
-        pfs()?.businessCanvas?.open?.();
-      }
-      pfs()?.businessCanvas?.loadDiagramXml?.(ev.xml || "");
-    }
-  }
 
   const PAINT_BREAK_EVENTS = new Set(["tool_start", "tool_end", "knowledge_refs", "data_refs", "tool_audit", "agent_activity", "skill_matched", "skill_activated"]);
   const STREAM_PAINT_EVENTS = new Set(["text_delta"]);

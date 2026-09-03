@@ -16,6 +16,9 @@ from .reporting import AnalysisRequest, MetricContract, ReportingContractError
 class QueryInterpretationError(ReportingContractError):
     """Raised when a report question cannot be mapped safely."""
 
+    def __init__(self, message: str, *, code: str = "pfs_query_failed") -> None:
+        super().__init__(message, code=code)
+
 
 @dataclass(frozen=True)
 class ParsedReportQuestion:
@@ -44,7 +47,10 @@ def _find_column(columns: Iterable[str], aliases: tuple[str, ...], label: str) -
     matches = [column for column in available if any(alias.lower() in column.lower() for alias in aliases)]
     if len(matches) != 1:
         if not matches:
-            raise QueryInterpretationError(f"问题需要{label}字段，但数据源中没有明确匹配的列")
+            raise QueryInterpretationError(
+                f"问题需要{label}字段，但数据源中没有明确匹配的列",
+                code="source_columns_missing",
+            )
         raise QueryInterpretationError(f"问题匹配到多个{label}字段，请明确列名：" + ", ".join(matches))
     return matches[0]
 

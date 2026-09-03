@@ -56,7 +56,8 @@ globalThis.openOverlay = async (id) => {
 };
 
 // Ensure the Vue island is loaded before opening a side panel.
-globalThis.openSidePanel = async (name) => {
+globalThis.openSidePanel = async (name, trigger = null) => {
+  globalThis.PFS?.sidebar?.rememberSurfaceTrigger?.(name, trigger);
   const requestId = globalThis.PFS?.sidebar?.beginPanelOpen?.(name);
   const island = panelIslands[name];
   if (island) {
