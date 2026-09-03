@@ -15,7 +15,7 @@
 
 | 事实面 | 状态 | 当前结论 |
 |---|---|---|
-| 代码 | `changed-and-verified` | 当前工作区完成报表取消、桌面错误态、Artifact 工作区关联、Run/Workflow → Artifact 用量关联和会话统一审计切片；审计接口按会话隔离并隐藏绝对路径，费用未知保持 unknown，审计弹层支持从内部输入控件按 Escape 关闭。主切片已提交为 `756f358`；push 首次尝试因 GitHub 443 连接超时未完成。 |
+| 代码 | `changed-and-verified` | 当前工作区完成报表取消、桌面错误态、Artifact 工作区关联、Run/Workflow → Artifact 用量关联和会话统一审计切片；审计接口按会话隔离并隐藏绝对路径，费用未知保持 unknown，审计弹层支持从内部输入控件按 Escape 关闭。主切片已提交为 `756f358`，收尾状态另有后续本地提交；push 尚未完成。 |
 | 运行态 | `verified-current` / `pending` | 2026-09-03 隔离 Waitress 回读 `/api/health` 与工作台为 200，draw.io、商业画布和 Google Sheets 路由为 404；桌面报表与固定交付物已有历史回读。无部署和线上 PFS 可用性证据。 |
 | 文档 | `changed-and-verified` | 本文作为现役入口；README、PRODUCT、完整改造计划和能力矩阵按当前边界对齐。 |
 | 规则 | `changed-and-verified` | 项目根目录新增精简 `AGENTS.md`，保存命令、权威入口、状态分层和安全边界。 |
@@ -45,8 +45,8 @@
 |---|---|---|
 | implemented | 已完成本轮切片 | Artifact、治理、错误状态、测试和文档已整合。 |
 | locally verified | 本轮通过 | 2026-09-03 实跑 196 项 Python 测试，全部通过、无失败、无跳过；Ruff、ESLint、Chat production build、Dashboard/Chat build check 和 `git diff --check` 通过。退役范围回归锁定商业画布/Google Sheets 路由、工具、实现和可执行静态资产缺失，并防止旧 Google 凭据回传。临时发布 staging 重建为 489 个文件、37,703,382 bytes，artifact audit 为 0 findings、0 symlink；无退役路径、数据库或本地凭据命中。构建仅有既有 500 kB chunk 提示，不是失败。 |
-| committed | 已完成主提交 | `756f358 feat: close PFS local transformation slice`；本表状态修正将作为后续收尾提交。 |
-| pushed / PR | `pending` / 无 PR | 首次 `git push origin main` 因 GitHub 443 连接超时失败；远端尚未回读到本轮提交。 |
+| committed | 已完成 | 主切片为 `756f358 feat: close PFS local transformation slice`；清场与发布状态已另行提交到本地 `main`。 |
+| pushed / PR | `blocked` / 无 PR | 两次 HTTPS push 均因无法连接 GitHub 443 超时；SSH 通道可达但本机没有该仓库可用的 public key。远端尚未回读到本轮提交。 |
 | deployed | 未执行 | 无 PFS 部署 marker。 |
 | live verified | 未验收 | 无 PFS 线上用户路径证据。 |
 | knowledge closed | 本轮完成 | 文档、规则和获准记忆修正入口已对齐。 |
