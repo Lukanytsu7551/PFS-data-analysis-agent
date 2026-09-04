@@ -40,6 +40,8 @@ class HTTPAPIDataSource(DataSource):
         self.name = display_name or url
         self._conn = _new_conn()
         self._table = "api_data"
+        self._source_tables = {self._table}
+        self._analysis_tables = set()
         self._load()
 
     def _build_headers(self) -> dict:
@@ -96,6 +98,7 @@ class HTTPAPIDataSource(DataSource):
                 ).fetchone()[0]
             except Exception as exc:
                 return f"Error building analysis table: {exc}"
+        self._analysis_tables.add(table_name)
         return _table_schema_str(self._conn, table_name, rows)
 
     def get_preview(self) -> List[dict]:

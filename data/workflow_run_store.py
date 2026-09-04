@@ -73,6 +73,8 @@ CREATE TABLE IF NOT EXISTS workflow_node_runs (
     model_calls INTEGER NOT NULL DEFAULT 0,
     tool_calls INTEGER NOT NULL DEFAULT 0,
     cost_usd REAL,
+    reserved_tokens INTEGER NOT NULL DEFAULT 0,
+    reserved_cost_usd REAL,
     UNIQUE(run_id, node_id, iteration, attempt),
     FOREIGN KEY(run_id) REFERENCES workflow_runs(id)
 );
@@ -80,6 +82,24 @@ CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_run
     ON workflow_node_runs(run_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_job
     ON workflow_node_runs(job_id);
+
+CREATE TABLE IF NOT EXISTS workflow_side_effects (
+    operation_key TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    node_run_id TEXT NOT NULL,
+    effect_type TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    status TEXT NOT NULL,
+    result_json TEXT,
+    error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(run_id) REFERENCES workflow_runs(id)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_side_effects_node
+    ON workflow_side_effects(run_id, node_run_id, effect_type);
 
 CREATE TABLE IF NOT EXISTS workflow_artifact_manifests (
     id TEXT PRIMARY KEY,
@@ -380,6 +400,8 @@ class WorkflowRunStore:
             "model_calls": "INTEGER NOT NULL DEFAULT 0",
             "tool_calls": "INTEGER NOT NULL DEFAULT 0",
             "cost_usd": "REAL",
+            "reserved_tokens": "INTEGER NOT NULL DEFAULT 0",
+            "reserved_cost_usd": "REAL",
         }.items():
             if name not in node_columns:
                 self._conn.execute(
@@ -975,6 +997,234 @@ class WorkflowRunStore:
                 return False
             self._event_locked(run_id, str(event_type), dict(payload))
         return True
+
+    def claim_side_effect(
+        self,
+        *,
+        operation_key: str,
+        run_id: str,
+        node_id: str,
+        node_run_id: str,
+        effect_type: str,
+        request_hash: str,
+    ) -> dict[str, Any]:
+        """Durably claim one side effect before executing it.
+
+        ``workflow_node_runs.operation_key`` identifies a scheduler dispatch;
+        this table identifies the actual effect payload.  The distinction is
+        important when a retry gets a new NodeRun but the same export request.
+        A claim left behind by a crashed process is intentionally not silently
+        reclaimed: the result may already have reached the outside world.
+        """
+        values = {
+            "operation_key": str(operation_key or "").strip(),
+            "run_id": str(run_id or "").strip(),
+            "node_id": str(node_id or "").strip(),
+            "node_run_id": str(node_run_id or "").strip(),
+            "effect_type": str(effect_type or "").strip(),
+            "request_hash": str(request_hash or "").strip(),
+        }
+        if any(not value for value in values.values()):
+            raise ValueError("workflow side-effect claim fields are required")
+        with self._transaction():
+            run = self._conn.execute(
+                "SELECT id FROM workflow_runs WHERE id = ? AND workspace_id = ?",
+                (values["run_id"], self.workspace_id),
+            ).fetchone()
+            if run is None:
+                raise WorkflowRunStoreError(
+                    f"workflow run not found for side effect: {values['run_id']}"
+                )
+            row = self._conn.execute(
+                "SELECT * FROM workflow_side_effects WHERE operation_key = ?",
+                (values["operation_key"],),
+            ).fetchone()
+            if row is not None:
+                if (
+                    str(row["workspace_id"]) != self.workspace_id
+                    or any(
+                        str(row[key]) != values[key]
+                        for key in ("run_id", "node_id", "effect_type", "request_hash")
+                    )
+                ):
+                    raise WorkflowRunStoreError(
+                        "workflow side-effect operation key conflicts with another request"
+                    )
+                status = str(row["status"] or "")
+                result = _load(row["result_json"], None)
+                if status == "failed":
+                    now = _now()
+                    self._conn.execute(
+                        "UPDATE workflow_side_effects SET status = 'claimed', "
+                        "node_run_id = ?, error = '', updated_at = ? "
+                        "WHERE operation_key = ? AND workspace_id = ?",
+                        (
+                            values["node_run_id"],
+                            now,
+                            values["operation_key"],
+                            self.workspace_id,
+                        ),
+                    )
+                    self._event_locked(
+                        values["run_id"],
+                        "workflow_side_effect_reclaimed",
+                        {
+                            "run_id": values["run_id"],
+                            "node_id": values["node_id"],
+                            "node_run_id": values["node_run_id"],
+                            "effect_type": values["effect_type"],
+                            "operation_key": values["operation_key"],
+                            "request_hash": values["request_hash"],
+                        },
+                    )
+                    return {
+                        "operation_key": values["operation_key"],
+                        "status": "claimed",
+                        "acquired": True,
+                        "result": None,
+                    }
+                return {
+                    "operation_key": values["operation_key"],
+                    "status": status,
+                    "acquired": False,
+                    "result": result,
+                    "error": str(row["error"] or ""),
+                    "node_run_id": str(row["node_run_id"] or ""),
+                }
+            now = _now()
+            self._conn.execute(
+                "INSERT INTO workflow_side_effects "
+                "(operation_key, workspace_id, run_id, node_id, node_run_id, "
+                "effect_type, request_hash, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 'claimed', ?, ?)",
+                (
+                    values["operation_key"],
+                    self.workspace_id,
+                    values["run_id"],
+                    values["node_id"],
+                    values["node_run_id"],
+                    values["effect_type"],
+                    values["request_hash"],
+                    now,
+                    now,
+                ),
+            )
+            self._event_locked(
+                values["run_id"],
+                "workflow_side_effect_claimed",
+                {
+                    "run_id": values["run_id"],
+                    "node_id": values["node_id"],
+                    "node_run_id": values["node_run_id"],
+                    "effect_type": values["effect_type"],
+                    "operation_key": values["operation_key"],
+                    "request_hash": values["request_hash"],
+                },
+            )
+        return {
+            "operation_key": values["operation_key"],
+            "status": "claimed",
+            "acquired": True,
+            "result": None,
+        }
+
+    def complete_side_effect(
+        self,
+        operation_key: str,
+        result: Mapping[str, Any],
+    ) -> bool:
+        """Commit the result of a previously claimed side effect exactly once."""
+        key = str(operation_key or "").strip()
+        if not key or not isinstance(result, Mapping):
+            raise ValueError("workflow side-effect completion requires a key and object result")
+        result_json = _dump(dict(result))
+        with self._transaction():
+            row = self._conn.execute(
+                "SELECT * FROM workflow_side_effects "
+                "WHERE operation_key = ? AND workspace_id = ?",
+                (key, self.workspace_id),
+            ).fetchone()
+            if row is None:
+                return False
+            if str(row["status"] or "") == "succeeded":
+                return _load(row["result_json"], {}) == dict(result)
+            if str(row["status"] or "") != "claimed":
+                return False
+            now = _now()
+            self._conn.execute(
+                "UPDATE workflow_side_effects SET status = 'succeeded', result_json = ?, "
+                "error = '', updated_at = ? WHERE operation_key = ? AND workspace_id = ?",
+                (result_json, now, key, self.workspace_id),
+            )
+            self._event_locked(
+                row["run_id"],
+                "workflow_side_effect_completed",
+                {
+                    "run_id": row["run_id"],
+                    "node_id": row["node_id"],
+                    "node_run_id": row["node_run_id"],
+                    "effect_type": row["effect_type"],
+                    "operation_key": key,
+                    "request_hash": row["request_hash"],
+                },
+            )
+        return True
+
+    def fail_side_effect(self, operation_key: str, error: str) -> bool:
+        """Mark a known pre-effect failure; a later retry may reclaim it."""
+        key = str(operation_key or "").strip()
+        with self._transaction():
+            row = self._conn.execute(
+                "SELECT * FROM workflow_side_effects "
+                "WHERE operation_key = ? AND workspace_id = ?",
+                (key, self.workspace_id),
+            ).fetchone()
+            if row is None or str(row["status"] or "") != "claimed":
+                return False
+            message = str(error or "side effect failed")[:2000]
+            self._conn.execute(
+                "UPDATE workflow_side_effects SET status = 'failed', error = ?, "
+                "updated_at = ? WHERE operation_key = ? AND workspace_id = ?",
+                (message, _now(), key, self.workspace_id),
+            )
+            self._event_locked(
+                row["run_id"],
+                "workflow_side_effect_failed",
+                {
+                    "run_id": row["run_id"],
+                    "node_id": row["node_id"],
+                    "node_run_id": row["node_run_id"],
+                    "effect_type": row["effect_type"],
+                    "operation_key": key,
+                    "error": message,
+                },
+            )
+        return True
+
+    def get_side_effect_for_node_run(
+        self,
+        node_run_id: str,
+        *,
+        effect_type: str = "",
+    ) -> dict[str, Any] | None:
+        """Read one side-effect record for restart reconciliation."""
+        query = (
+            "SELECT * FROM workflow_side_effects "
+            "WHERE node_run_id = ? AND workspace_id = ?"
+        )
+        params: list[Any] = [str(node_run_id), self.workspace_id]
+        if effect_type:
+            query += " AND effect_type = ?"
+            params.append(str(effect_type))
+        query += " ORDER BY created_at DESC LIMIT 1"
+        with self._lock:
+            row = self._conn.execute(query, params).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["result"] = _load(result.pop("result_json"), None)
+        return result
+
     def transition_node(
         self,
         node_run_id: str,
@@ -1033,7 +1283,7 @@ class WorkflowRunStore:
             self._conn.execute(
                 "UPDATE workflow_node_runs SET status = ?, output_json = ?, "
                 "output_manifest_id = ?, error = ?, updated_at = ?, started_at = ?, "
-                "finished_at = ? WHERE id = ?",
+                "finished_at = ?, reserved_tokens = ?, reserved_cost_usd = ? WHERE id = ?",
                 (
                     target.value,
                     output_json,
@@ -1042,6 +1292,8 @@ class WorkflowRunStore:
                     now,
                     started,
                     finished,
+                    0 if target is NodeRunStatus.OUTPUT_READY or target in NODE_RUN_TERMINAL_STATUSES else row["reserved_tokens"],
+                    None if target is NodeRunStatus.OUTPUT_READY or target in NODE_RUN_TERMINAL_STATUSES else row["reserved_cost_usd"],
                     node_run_id,
                 ),
             )
@@ -1116,6 +1368,40 @@ class WorkflowRunStore:
         return manifest_id
 
     def claim_node(self, node_run_id: str, operation_key: str) -> bool:
+        return self.claim_node_with_budget(node_run_id, operation_key)
+
+    def claim_node_with_budget(
+        self,
+        node_run_id: str,
+        operation_key: str,
+        *,
+        max_total_tokens: int | None = None,
+        max_total_cost_usd: float | None = None,
+        reserved_tokens: int = 0,
+        reserved_cost_usd: float | None = None,
+    ) -> bool:
+        """Claim a READY node and atomically reserve its graph budget.
+
+        The transaction is deliberately owned by the run store rather than
+        the scheduler.  A second scheduler process therefore observes the
+        first process's reservation before it can claim another node from the
+        same run.  Reservations are released by ``transition_node`` once a
+        node leaves the active execution state.
+        """
+        if isinstance(reserved_tokens, bool) or int(reserved_tokens) < 0:
+            raise ValueError("reserved_tokens must be a non-negative integer")
+        reserved_tokens = int(reserved_tokens)
+        if reserved_cost_usd is not None:
+            reserved_cost_usd = float(reserved_cost_usd)
+            if not math.isfinite(reserved_cost_usd) or reserved_cost_usd < 0:
+                raise ValueError("reserved_cost_usd must be a finite non-negative number")
+        if max_total_tokens is not None:
+            if isinstance(max_total_tokens, bool) or not isinstance(max_total_tokens, int) or max_total_tokens < 1:
+                return False
+        if max_total_cost_usd is not None:
+            max_total_cost_usd = float(max_total_cost_usd)
+            if not math.isfinite(max_total_cost_usd) or max_total_cost_usd <= 0:
+                return False
         with self._transaction():
             row = self._conn.execute(
                 "SELECT n.* FROM workflow_node_runs n "
@@ -1125,13 +1411,43 @@ class WorkflowRunStore:
             ).fetchone()
             if row is None or row["status"] != NodeRunStatus.READY.value:
                 return False
+            if max_total_tokens is not None:
+                usage = self._conn.execute(
+                    "SELECT COALESCE(SUM(input_tokens + output_tokens + reserved_tokens), 0) AS used "
+                    "FROM workflow_node_runs WHERE run_id = ? AND id != ?",
+                    (row["run_id"], node_run_id),
+                ).fetchone()
+                if int(usage["used"] or 0) + reserved_tokens > max_total_tokens:
+                    return False
+            if max_total_cost_usd is not None and reserved_cost_usd is not None:
+                cost_rows = self._conn.execute(
+                    "SELECT input_tokens, output_tokens, cost_usd, reserved_cost_usd "
+                    "FROM workflow_node_runs WHERE run_id = ? AND id != ?",
+                    (row["run_id"], node_run_id),
+                ).fetchall()
+                has_unknown_cost = any(
+                    (int(item["input_tokens"] or 0) or int(item["output_tokens"] or 0))
+                    and item["cost_usd"] is None
+                    for item in cost_rows
+                )
+                if not has_unknown_cost:
+                    used_cost = sum(
+                        float(item["cost_usd"] or 0)
+                        + float(item["reserved_cost_usd"] or 0)
+                        for item in cost_rows
+                    )
+                    if used_cost + reserved_cost_usd > max_total_cost_usd:
+                        return False
             try:
                 self._conn.execute(
                     "UPDATE workflow_node_runs SET status = ?, operation_key = ?, "
-                    "updated_at = ? WHERE id = ? AND status = ?",
+                    "reserved_tokens = ?, reserved_cost_usd = ?, updated_at = ? "
+                    "WHERE id = ? AND status = ?",
                     (
                         NodeRunStatus.QUEUED.value,
                         operation_key,
+                        reserved_tokens,
+                        reserved_cost_usd,
                         _now(),
                         node_run_id,
                         NodeRunStatus.READY.value,
@@ -1146,6 +1462,8 @@ class WorkflowRunStore:
                     "run_id": row["run_id"],
                     "node_run_id": node_run_id,
                     "operation_key": operation_key,
+                    "reserved_tokens": reserved_tokens,
+                    "reserved_cost_usd": reserved_cost_usd,
                 },
             )
         return True
@@ -1657,6 +1975,7 @@ class WorkflowRunStore:
             for table, key, column in (
                 ("workflow_knowledge_candidates", "knowledge_candidates", "run_id"),
                 ("workflow_run_templates", "templates", "run_id"),
+                ("workflow_side_effects", "side_effects", "run_id"),
                 ("workflow_artifact_consumptions", "consumptions", "run_id"),
                 ("workflow_approvals", "approvals", "run_id"),
                 ("workflow_artifact_manifests", "manifests", "run_id"),

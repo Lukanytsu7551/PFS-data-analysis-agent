@@ -5,7 +5,7 @@ import re
 import sqlite3
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +21,13 @@ _QUERY_JOB_ROW_THRESHOLD = 100_000
 
 def _quote_ident(name: str) -> str:
     return '"' + str(name).replace('"', '""') + '"'
+
+
+def _table_name_set(value) -> set[str]:
+    """Normalize a connector's optional raw/derived table registry."""
+    if isinstance(value, (set, list, tuple, frozenset)):
+        return {str(item) for item in value if str(item).strip()}
+    return set()
 
 
 def _execute_analysis(
@@ -51,7 +58,345 @@ def _execute_analysis(
         kwargs["progress_callback"] = progress_callback
     if analysis_name == "AB_Test_Analysis":
         kwargs["analysis_options"] = analysis_options or {}
-    return entry, run_fn(**kwargs)
+    result = run_fn(**kwargs)
+    if analysis_options and analysis_options.get("evaluation_mode"):
+        holdout_evaluation = _build_temporal_holdout_evaluation(
+            analysis_name,
+            df,
+            target_column,
+            groupby_column,
+            n_deciles,
+            analysis_options,
+        )
+        entry = {**entry, "__pfs_model_evaluation__": holdout_evaluation}
+    return entry, result
+
+
+def _holdout_time_column(df, groupby_column: str) -> str:
+    """Resolve a time column without accepting a numeric model hint as one."""
+    import pandas as pd
+
+    hint = str(groupby_column or "").strip()
+    if "," not in hint and hint in df.columns:
+        parsed = pd.to_datetime(df[hint], errors="coerce")
+        if parsed.notna().all():
+            return hint
+    keywords = ("date", "time", "month", "year", "week", "day", "period", "ds", "日期", "时间")
+    for column in df.columns:
+        if not any(keyword in str(column).lower() for keyword in keywords):
+            continue
+        parsed = pd.to_datetime(df[column], errors="coerce")
+        if parsed.notna().all():
+            return str(column)
+    for column in df.columns:
+        if pd.api.types.is_numeric_dtype(df[column]):
+            continue
+        parsed = pd.to_datetime(df[column], errors="coerce")
+        if parsed.notna().all():
+            return str(column)
+    raise ValueError("temporal holdout requires a parseable time column")
+
+
+def _build_temporal_holdout_evaluation(
+    analysis_name: str,
+    df,
+    target_column: str,
+    groupby_column: str,
+    n_deciles: int,
+    analysis_options: Mapping[str, Any],
+    *,
+    include_prediction_rows: bool = False,
+):
+    """Fit a time-series analyzer on the train prefix and score its next rows."""
+    import numpy as np
+    import pandas as pd
+
+    if not analysis_name.startswith(_TIME_SERIES_PREFIX):
+        raise ValueError("temporal_holdout evaluation only supports time-series analyses")
+    if not isinstance(analysis_options, Mapping):
+        raise ValueError("analysis_options must be an object")
+    mode = str(analysis_options.get("evaluation_mode") or "").strip().lower()
+    if mode != "temporal_holdout":
+        raise ValueError("analysis_options.evaluation_mode must be temporal_holdout")
+    time_column = _holdout_time_column(df, groupby_column)
+    if target_column not in df.columns:
+        raise ValueError(f"temporal holdout target column missing: {target_column}")
+
+    work = df[[time_column, target_column, *(
+        [column for column in df.columns if column not in {time_column, target_column}]
+    )]].copy()
+    work[time_column] = pd.to_datetime(work[time_column], errors="coerce")
+    work[target_column] = pd.to_numeric(work[target_column], errors="coerce")
+    if work[time_column].isna().any() or work[target_column].isna().any():
+        raise ValueError("temporal holdout requires complete time and target columns")
+    if not np.isfinite(work[target_column].to_numpy(dtype=float)).all():
+        raise ValueError("temporal holdout target must contain finite numeric values")
+    work = work.sort_values(time_column).reset_index(drop=True)
+    if work[time_column].duplicated().any():
+        raise ValueError("temporal holdout requires unique timestamps")
+
+    raw_horizon = analysis_options.get("holdout_size")
+    if raw_horizon is None or raw_horizon == "":
+        raw_horizon = n_deciles if int(n_deciles or 0) > 0 else 4
+    if isinstance(raw_horizon, bool):
+        raise ValueError("temporal holdout holdout_size must be a positive integer")
+    try:
+        horizon = int(raw_horizon)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("temporal holdout holdout_size must be a positive integer") from exc
+    if horizon < 1 or horizon > 60:
+        raise ValueError("temporal holdout holdout_size must be between 1 and 60")
+    if len(work) - horizon < 8:
+        raise ValueError("temporal holdout leaves too few training rows for the analyzer")
+
+    train = work.iloc[:-horizon].copy()
+    holdout = work.iloc[-horizon:].copy()
+    _inner_entry, inner_result = _execute_analysis(
+        analysis_name,
+        train,
+        target_column,
+        groupby_column,
+        horizon,
+        analysis_options=None,
+    )
+    if not inner_result or not hasattr(inner_result[0], "columns"):
+        raise ValueError("temporal holdout analyzer did not return a result table")
+    forecast_table = inner_result[0]
+    prediction_key = "y_pred"
+    if not _frame_has_columns(forecast_table, {"ds", prediction_key, "segment"}):
+        prediction_key = f"{target_column}_pred"
+    if not _frame_has_columns(forecast_table, {"ds", prediction_key, "segment"}):
+        raise ValueError(
+            "temporal holdout analyzer output lacks ds/prediction/segment columns"
+        )
+    forecast = forecast_table[
+        forecast_table["segment"].astype(str).str.strip().str.lower() == "forecast"
+    ].head(horizon)
+    if len(forecast) != horizon:
+        raise ValueError(
+            f"temporal holdout expected {horizon} forecast rows, got {len(forecast)}"
+    )
+    forecast_times = pd.to_datetime(forecast["ds"], errors="coerce")
+    holdout_times = holdout[time_column]
+    predicted = pd.to_numeric(forecast[prediction_key], errors="coerce")
+    if predicted.isna().any() or not np.isfinite(predicted.to_numpy(dtype=float)).all():
+        raise ValueError("temporal holdout predictions must be finite numeric values")
+
+    alignment = str(analysis_options.get("temporal_alignment") or "exact").strip().lower()
+    if alignment not in {"exact", "month"}:
+        raise ValueError("temporal holdout temporal_alignment must be exact or month")
+    if alignment == "month":
+        # Some local analyzers infer a monthly step as a fixed number of days
+        # (for example 2025-10-02) instead of the source's month-start date.
+        # For a declared monthly business grain, compare calendar periods and
+        # keep the source timestamp as the canonical Evidence locator.
+        forecast_periods = forecast_times.dt.to_period("M")
+        holdout_periods = holdout_times.dt.to_period("M")
+        if not forecast_periods.reset_index(drop=True).equals(
+            holdout_periods.reset_index(drop=True)
+        ):
+            raise ValueError("temporal holdout forecast months do not match source holdout rows")
+    elif forecast_times.isna().any() or not forecast_times.reset_index(drop=True).equals(
+        holdout_times.reset_index(drop=True)
+    ):
+        raise ValueError("temporal holdout forecast timestamps do not match source holdout rows")
+
+    rows = [
+        {
+            "ds": timestamp.isoformat(),
+            "segment": "holdout",
+            "y_actual": float(actual),
+            "y_pred": float(prediction),
+        }
+        for timestamp, actual, prediction in zip(
+            holdout_times,
+            holdout[target_column],
+            predicted,
+        )
+    ]
+    from pfs_agent.model_evaluation import evaluate_time_series_holdout_rows
+
+    evaluation = evaluate_time_series_holdout_rows(
+        rows,
+        case_id=f"{analysis_name}:temporal-holdout",
+        training_end=train[time_column].iloc[-1].isoformat(),
+        thresholds=analysis_options.get("quality_thresholds"),
+    )
+    # Keep only business-safe aggregates in the evaluation contract.  The
+    # raw source rows remain in the uploaded snapshot/Evidence; these totals
+    # make a business acceptance card auditable without duplicating the data.
+    evaluation["time_series"].update(
+        {
+            "holdout_actual_total": round(sum(item["y_actual"] for item in rows), 4),
+            "holdout_predicted_total": round(sum(item["y_pred"] for item in rows), 4),
+        }
+    )
+    if include_prediction_rows:
+        # Internal callers such as rolling backtests need the paired rows to
+        # aggregate folds.  The public business result never includes this
+        # private field, so raw target values are not added to API responses.
+        evaluation["_prediction_rows"] = rows
+    return evaluation
+
+
+def _frame_has_columns(frame, required: set[str]) -> bool:
+    if frame is None:
+        return False
+    return required.issubset(set(getattr(frame, "columns", ())))
+
+
+def _metric_names(frame) -> set[str]:
+    if not _frame_has_columns(frame, {"metric"}):
+        return set()
+    return {str(value) for value in frame["metric"].tolist()}
+
+
+def _model_evaluation_for_result(
+    analysis_name: str,
+    result_df,
+    breakdown_df=None,
+    extra_df=None,
+    target_column: str = "",
+):
+    """Evaluate model output when an analyzer exposes a stable result shape.
+
+    The adapters consume the same tables that are written for the Agent to
+    query: time-series rows, regression residuals, or aggregated confusion
+    rows.  Unsupported analyzer shapes return ``None`` rather than inventing a
+    quality score.
+    """
+    from pfs_agent.model_evaluation import (
+        evaluate_classification_confusion_rows,
+        evaluate_prediction_rows,
+        evaluate_time_series_rows,
+    )
+
+    if analysis_name.startswith(_TIME_SERIES_PREFIX):
+        actual_key = "y_actual"
+        predicted_key = "y_pred"
+        if not _frame_has_columns(result_df, {actual_key, predicted_key}):
+            target = str(target_column or "").strip()
+            if target:
+                actual_key = f"{target}_actual"
+                predicted_key = f"{target}_pred"
+        if not _frame_has_columns(result_df, {actual_key, predicted_key}):
+            return None
+        return evaluate_time_series_rows(
+            result_df,
+            case_id=f"{analysis_name}:paired-history",
+            actual_key=actual_key,
+            predicted_key=predicted_key,
+        )
+
+    if analysis_name == "Regression" and _frame_has_columns(
+        breakdown_df, {"y_actual", "y_pred"}
+    ):
+        return evaluate_prediction_rows(
+            breakdown_df,
+            case_id=f"{analysis_name}:test-residuals",
+            task_type="regression",
+            expected_key="y_actual",
+            predicted_key="y_pred",
+        )
+
+    if analysis_name in {"Decision_Tree", "Logistic_Regression"} and _frame_has_columns(
+        breakdown_df, {"actual", "predicted", "count"}
+    ):
+        return evaluate_classification_confusion_rows(
+            breakdown_df,
+            case_id=f"{analysis_name}:test-confusion",
+        )
+
+    if analysis_name in {"Sklearn_Model", "Torch_MLP"} and _frame_has_columns(
+        extra_df, {"actual", "predicted"}
+    ):
+        task_type = "classification" if "accuracy" in _metric_names(result_df) else "regression"
+        if task_type == "classification" and _frame_has_columns(
+            extra_df, {"count"}
+        ):
+            return evaluate_classification_confusion_rows(
+                extra_df,
+                case_id=f"{analysis_name}:test-confusion",
+            )
+        return evaluate_prediction_rows(
+            extra_df,
+            case_id=f"{analysis_name}:test-predictions",
+            task_type=task_type,
+        )
+    return None
+
+
+def _model_evaluation_table(evaluation: dict[str, Any]):
+    """Build a compact derived table for querying and artifact lineage."""
+    import pandas as pd
+
+    scope = evaluation.get("scope") or {}
+    cases = evaluation.get("cases") or ()
+    case_id = str(cases[0].get("case_id") or "") if cases else ""
+    rows = []
+    for metric, detail in (evaluation.get("metrics") or {}).items():
+        rows.append(
+            {
+                "case_id": case_id,
+                "task_type": evaluation.get("task_type", ""),
+                "metric": metric,
+                "value": detail.get("value"),
+                "sample_count": detail.get("sample_count", 0),
+                "paired_rows": scope.get("paired_rows", scope.get("sample_count", 0)),
+                "total_rows": scope.get("total_rows", scope.get("sample_count", 0)),
+                "quality_passed": (evaluation.get("quality") or {}).get("passed"),
+                "evaluation_scope": (evaluation.get("time_series") or {}).get(
+                    "evaluation_scope", "fixed_rows"
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _model_evaluation_markdown(analysis_name: str, evaluation: dict[str, Any]) -> str:
+    """Format model quality as a bounded, explicit caveat-bearing report."""
+    scope = evaluation.get("scope") or {}
+    metrics = evaluation.get("metrics") or {}
+    metric_text = "；".join(
+        f"{name.upper()}={detail.get('value') if detail.get('value') is not None else '不可用'}"
+        for name, detail in metrics.items()
+    )
+    is_time_series = evaluation.get("task_type") == "time_series"
+    paired = scope.get("paired_rows", scope.get("sample_count", 0))
+    total = scope.get("total_rows", scope.get("sample_count", paired))
+    excluded_forecast = scope.get("excluded_forecast_rows", 0)
+    excluded_unpaired = scope.get("excluded_unpaired_rows", 0)
+    coverage = scope.get("paired_ratio", 1.0)
+    time_series_scope = (evaluation.get("time_series") or {}).get(
+        "evaluation_scope", "paired_history"
+    )
+    warning = ""
+    if is_time_series and excluded_unpaired:
+        warning = (
+            f"；另有 {excluded_unpaired} 行历史记录未形成 actual/predicted 配对，"
+            "覆盖率检查未通过"
+        )
+    if is_time_series:
+        scope_label = "时间切分 holdout 行" if time_series_scope == "temporal_holdout" else "历史配对行"
+        scope_text = (
+            f"{scope_label} {paired}/{total}（覆盖率 {coverage:.2%}），"
+            f"未来 forecast 行排除 {excluded_forecast} 行{warning}"
+        )
+        limitation = (
+            "该结果来自显式训练截止点之后的时间切分 holdout，仍不等于生产预测质量或业务收益。"
+            if time_series_scope == "temporal_holdout"
+            else "该结果来自分析器实际输出的历史拟合配对，不等于时间外推 holdout、生产预测质量或业务收益。"
+        )
+    else:
+        scope_text = f"分析器实际输出中的评估样本 {scope.get('sample_count', 0)} 行"
+        limitation = "该结果来自本地分析器实际输出，不等于生产预测质量或业务收益。"
+    return (
+        "\n\n---\n"
+        f"### 模型质量评估（{analysis_name}）\n"
+        f"> 评估范围：{scope_text}。\n"
+        f"> 观测指标：{metric_text}\n"
+        f"> {limitation}"
+    )
 
 
 class DataToolsMixin:
@@ -426,6 +771,12 @@ class DataToolsMixin:
 
     def _tool_query_data_with_jobs(self, sql: str):
         sql_preview = sql.replace("\n", " ")[:120]
+        validation_error = self._validate_data_sql("query_data", sql)
+        if validation_error:
+            return (
+                f"SQL Error: {validation_error}",
+                self._data_refs_for_sql(sql, self.data_source, None),
+            )
         src, rewritten_sql = self._route_query(sql)
         if not src:
             log.warning("[tools] query_data  no data source  sql=%.80r", sql_preview)
@@ -486,6 +837,64 @@ class DataToolsMixin:
         result, _refs = self._tool_create_analysis_table_with_refs(sql, table_name)
         return result
 
+    def _known_analysis_tables(self, src) -> set[str]:
+        """Return connector-owned derived tables that may be replaced/deleted.
+
+        Connectors intentionally keep raw source tables and transient analysis
+        tables in the same DuckDB catalog. The registry is therefore part of
+        the safety boundary: a table is replaceable only when the connector
+        can prove that it was created as an analysis result.
+        """
+        known = _table_name_set(getattr(src, "_cache_tables", None))
+
+        # MergedDataSource uses a list for derived tables. The in-memory file
+        # connectors use a set, but expose _source_tables to distinguish it
+        # from SQLDataSource's _analysis_tables (which means source scope).
+        scoped = getattr(src, "_analysis_tables", None)
+        if isinstance(scoped, list):
+            known.update(_table_name_set(scoped))
+        elif hasattr(src, "_source_tables"):
+            known.update(_table_name_set(scoped))
+
+        # WorkspacePersistentSource stores raw source ownership in the durable
+        # registry. Any existing table outside that registry is derived, but a
+        # missing/corrupt registry must not silently widen access.
+        db_path = getattr(src, "_db_path", None)
+        if db_path is not None and getattr(src, "_conn", None) is not None:
+            registry_path = Path(db_path).parent / "registry.json"
+            try:
+                import json
+
+                raw = json.loads(registry_path.read_text(encoding="utf-8"))
+                registered = set(raw.keys()) if isinstance(raw, dict) else set()
+                existing = set(src.list_tables() or [])
+                known.update(existing - {str(item) for item in registered})
+            except Exception:
+                # _analysis_table_connection also fails closed when this
+                # registry cannot be read; keep the creation path consistent.
+                pass
+        return known
+
+    def _validate_analysis_table_name(self, src, table_name: str) -> str | None:
+        """Reject unsafe names and prevent replacing a raw source table."""
+        name = str(table_name or "").strip()
+        if not name:
+            return "分析表名不能为空。"
+        if not re.fullmatch(r"[\w$][\w$]*", name, flags=re.UNICODE):
+            return "分析表名只能包含字母、数字、下划线或中文。"
+
+        list_tables = getattr(src, "list_tables", None)
+        if not callable(list_tables):
+            return "无法确认数据源表目录，已拒绝创建分析表。"
+        try:
+            existing = set(list_tables() or [])
+        except Exception as exc:
+            return f"无法确认数据源表目录，已拒绝创建分析表：{exc}"
+
+        if name in existing and name not in self._known_analysis_tables(src):
+            return f"不能覆盖原始数据表 `{name}`；请使用新的分析表名。"
+        return None
+
     def _tool_create_analysis_table_with_refs(
         self, sql: str, table_name: str = "analysis_data"
     ) -> tuple[str, list[dict]]:
@@ -495,6 +904,12 @@ class DataToolsMixin:
         src, rewritten_sql = self._route_query(sql)
         if not src:
             return "No data source connected.", []
+        table_error = self._validate_analysis_table_name(src, table_name)
+        if table_error:
+            refs = self._data_refs_for_sql(sql, src, None)
+            refs[0]["type"] = "分析表"
+            refs[0]["title"] = str(table_name or "analysis_data")
+            return f"Error building analysis table: {table_error}", refs
         result = src.create_analysis_table(rewritten_sql, table_name)
         self._schema_cache = None
         log.info("[tools] create_analysis_table  table=%s  source=%s",
@@ -507,9 +922,22 @@ class DataToolsMixin:
     def _tool_create_analysis_table_with_jobs(
         self, sql: str, table_name: str = "analysis_data"
     ):
+        validation_error = self._validate_data_sql("create_analysis_table", sql)
+        if validation_error:
+            return (
+                f"Error building analysis table: {validation_error}",
+                self._data_refs_for_sql(sql, self.data_source, None),
+            )
         src, rewritten_sql = self._route_query(sql)
         if not src:
             return "No data source connected.", []
+
+        table_error = self._validate_analysis_table_name(src, table_name)
+        if table_error:
+            refs = self._data_refs_for_sql(sql, src, None)
+            refs[0]["type"] = "分析表"
+            refs[0]["title"] = str(table_name or "analysis_data")
+            return f"Error building analysis table: {table_error}", refs
 
         refs = self._data_refs_for_sql(sql, src, None)
         refs[0]["type"] = "分析表"
@@ -581,14 +1009,17 @@ class DataToolsMixin:
 
         # MergedDataSource tracks derived tables separately.
         analysis_tables = getattr(src, "_analysis_tables", None)
-        if isinstance(analysis_tables, list) and table_name in analysis_tables:
+        if isinstance(analysis_tables, (set, list, tuple)) and table_name in analysis_tables:
             conn = getattr(src, "_conn", None)
             if conn is None:
                 return None, None, None, "analysis table connection unavailable"
 
             def cleanup():
-                while table_name in analysis_tables:
-                    analysis_tables.remove(table_name)
+                if isinstance(analysis_tables, set):
+                    analysis_tables.discard(table_name)
+                elif isinstance(analysis_tables, list):
+                    while table_name in analysis_tables:
+                        analysis_tables.remove(table_name)
 
             return conn, getattr(src, "_lock", None), cleanup, ""
 
@@ -807,6 +1238,7 @@ class DataToolsMixin:
                 target_column,
                 groupby_column,
                 n_deciles,
+                analysis_options=analysis_options,
                 progress_callback=_progress,
             )
             ctx.check_canceled()
@@ -872,6 +1304,45 @@ class DataToolsMixin:
                 + f"\n\n⚠️ **结果表写入失败**：{exc}\n"
                 "分析计算已完成，但结果无法存为可查询表格，请联系开发者。"
             )
+
+        try:
+            evaluations = []
+            evaluation = _model_evaluation_for_result(
+                analysis_name,
+                result_df,
+                breakdown_df,
+                extra_df,
+                target_column,
+            )
+            if evaluation is not None:
+                evaluations.append(evaluation)
+            requested_evaluation = entry.get("__pfs_model_evaluation__")
+            if requested_evaluation is not None:
+                evaluations.append(requested_evaluation)
+        except Exception as exc:
+            evaluations = []
+            if analysis_name in {
+                "Regression",
+                "Decision_Tree",
+                "Logistic_Regression",
+                "Sklearn_Model",
+                "Torch_MLP",
+            } or analysis_name.startswith(_TIME_SERIES_PREFIX):
+                markdown += f"\n\n⚠️ **模型质量评估未生成**：{exc}"
+        if evaluations:
+            try:
+                tables = [_model_evaluation_table(item) for item in evaluations]
+                if len(tables) == 1:
+                    evaluation_table = tables[0]
+                else:
+                    import pandas as pd
+
+                    evaluation_table = pd.concat(tables, ignore_index=True)
+                self._write_analysis_df(evaluation_table, "analysis_evaluation")
+            except Exception as exc:
+                markdown += f"\n\n⚠️ **模型质量评估表写入失败**：{exc}"
+            for evaluation in evaluations:
+                markdown += _model_evaluation_markdown(analysis_name, evaluation)
 
         if analysis_name == "K_Means" and "cluster" in breakdown_df.columns:
             markdown += self._kmeans_build_labeled(sql, breakdown_df)

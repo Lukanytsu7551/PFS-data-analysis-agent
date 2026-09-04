@@ -88,9 +88,7 @@ OPTIONAL_FEATURE_DEPENDENCIES = MappingProxyType(
             DependencySpec("pyodbc", "pyodbc", "database"),
             DependencySpec("sqlglot", "sqlglot", "database"),
         ),
-        "external_data": (
-            DependencySpec("lark-oapi", "lark_oapi", "external_data"),
-        ),
+        "external_data": (DependencySpec("lark-oapi", "lark_oapi", "external_data"),),
         "knowledge": (
             DependencySpec("jieba", "jieba", "knowledge"),
             DependencySpec("onnxruntime", "onnxruntime", "knowledge"),

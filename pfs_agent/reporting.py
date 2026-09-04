@@ -33,9 +33,7 @@ def _date_key(value: str, *, code: str) -> tuple[int, int, int]:
     """Return a comparable date key and reject ambiguous source/filter values."""
     text = str(value or "").strip()
     if not any(pattern.fullmatch(text) for pattern in _DATE_PATTERNS):
-        raise ReportingContractError(
-            f"date value must use YYYY-MM or YYYY-MM-DD: {text!r}", code=code
-        )
+        raise ReportingContractError(f"date value must use YYYY-MM or YYYY-MM-DD: {text!r}", code=code)
     date_text = text[:10] if len(text) >= 10 else text
     parts = [int(item) for item in date_text.split("-")]
     year, month = parts[:2]
@@ -46,6 +44,7 @@ def _date_key(value: str, *, code: str) -> tuple[int, int, int]:
         raise ReportingContractError(f"date value has invalid day: {text!r}", code=code)
     # Calendar validation without adding a heavyweight dependency.
     import calendar
+
     if year < 1 or (len(parts) == 3 and day > calendar.monthrange(year, month)[1]):
         raise ReportingContractError(f"date value is not a real calendar date: {text!r}", code=code)
     return year, month, day
@@ -228,9 +227,7 @@ def load_csv_snapshot(
     reader = csv.DictReader(text.splitlines())
     columns = tuple(str(column or "").strip() for column in (reader.fieldnames or ()))
     if not columns or any(not column for column in columns):
-        raise ReportingContractError(
-            "CSV source must have a non-empty header", code="source_header_missing"
-        )
+        raise ReportingContractError("CSV source must have a non-empty header", code="source_header_missing")
     rows: list[dict[str, str]] = []
     null_counts = {column: 0 for column in columns}
     row_fingerprints: set[str] = set()
@@ -272,9 +269,7 @@ def list_xlsx_worksheets(path: str | Path) -> list[str]:
     """Return workbook-order worksheet names without guessing which one to analyze."""
     xlsx_path = Path(path).resolve()
     if not xlsx_path.is_file():
-        raise ReportingContractError(
-            f"XLSX source does not exist: {xlsx_path}", code="source_not_found"
-        )
+        raise ReportingContractError(f"XLSX source does not exist: {xlsx_path}", code="source_not_found")
     try:
         from openpyxl import load_workbook
     except ImportError as exc:
@@ -285,9 +280,7 @@ def list_xlsx_worksheets(path: str | Path) -> list[str]:
         workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
         return list(workbook.sheetnames)
     except Exception as exc:
-        raise ReportingContractError(
-            "XLSX source could not be read", code="source_unreadable"
-        ) from exc
+        raise ReportingContractError("XLSX source could not be read", code="source_unreadable") from exc
     finally:
         try:
             workbook.close()
@@ -317,9 +310,7 @@ def load_xlsx_snapshot(
         workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
         names = list(workbook.sheetnames)
         if not names:
-            raise ReportingContractError(
-                "XLSX source has no worksheets", code="worksheet_missing"
-            )
+            raise ReportingContractError("XLSX source has no worksheets", code="worksheet_missing")
         if worksheet:
             if worksheet not in names:
                 raise ReportingContractError(
@@ -338,23 +329,17 @@ def load_xlsx_snapshot(
     except ReportingContractError:
         raise
     except Exception as exc:
-        raise ReportingContractError(
-            "XLSX source could not be read", code="source_unreadable"
-        ) from exc
+        raise ReportingContractError("XLSX source could not be read", code="source_unreadable") from exc
     finally:
         try:
             workbook.close()
         except UnboundLocalError:
             pass
     if not values:
-        raise ReportingContractError(
-            "XLSX source must have a non-empty header", code="source_header_missing"
-        )
+        raise ReportingContractError("XLSX source must have a non-empty header", code="source_header_missing")
     columns = tuple(str(value or "").strip() for value in values[0])
     if not columns or any(not column for column in columns):
-        raise ReportingContractError(
-            "XLSX source must have a non-empty header", code="source_header_missing"
-        )
+        raise ReportingContractError("XLSX source must have a non-empty header", code="source_header_missing")
     rows: list[dict[str, str]] = []
     null_counts = {column: 0 for column in columns}
     row_fingerprints: set[str] = set()
@@ -362,7 +347,9 @@ def load_xlsx_snapshot(
     dates: list[str] = []
     for values_row in values[1:]:
         row = {
-            column: str(values_row[index] if index < len(values_row) and values_row[index] is not None else "").strip()
+            column: str(
+                values_row[index] if index < len(values_row) and values_row[index] is not None else ""
+            ).strip()
             for index, column in enumerate(columns)
         }
         if not any(row.values()):
@@ -398,17 +385,22 @@ def load_xlsx_snapshot(
 
 
 def load_tabular_snapshot(
-    path: str | Path, *, source_id: str, date_column: str, worksheet: str = "",
+    path: str | Path,
+    *,
+    source_id: str,
+    date_column: str,
+    worksheet: str = "",
     file_name: str = "",
 ) -> DataSnapshot:
     suffix = Path(path).suffix.lower()
     if suffix == ".csv":
-        return load_csv_snapshot(
-            path, source_id=source_id, date_column=date_column, file_name=file_name
-        )
+        return load_csv_snapshot(path, source_id=source_id, date_column=date_column, file_name=file_name)
     if suffix == ".xlsx":
         return load_xlsx_snapshot(
-            path, source_id=source_id, date_column=date_column, worksheet=worksheet,
+            path,
+            source_id=source_id,
+            date_column=date_column,
+            worksheet=worksheet,
             file_name=file_name,
         )
     raise ReportingContractError("PFS deterministic analysis accepts CSV or XLSX files only")
@@ -457,7 +449,10 @@ def analyze_file(
 ) -> AnalysisResult:
     """Analyze a supported CSV or XLSX source with one shared contract."""
     snapshot = load_tabular_snapshot(
-        path, source_id=source_id, date_column=metric.date_column, worksheet=worksheet,
+        path,
+        source_id=source_id,
+        date_column=metric.date_column,
+        worksheet=worksheet,
         file_name=file_name,
     )
     return _analyze_snapshot(snapshot, metric=metric, request=request)
@@ -544,6 +539,7 @@ def _analyze_snapshot(
         date_to=request.date_to or snapshot.max_date,
         columns=snapshot.columns,
     )
+
     top_group = groups[0] if groups else None
     claims = [
         {

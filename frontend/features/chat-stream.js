@@ -806,16 +806,29 @@ import { loadSavedList } from "../legacy/sessions.js";
         return;
       }
       if (!parsed.command) {
-        input.value = "";
-        input.style.height = "auto";
-        hideWelcome();
-        appendMsg("user", text);
-        _localReply(`未知命令：/${parsed.name}\n\n输入 \`/help\` 查看可用命令。`);
-        syncSendButton();
-        return;
+        if (parsed.skill) {
+          pfs()?.skills?.selectSkill?.(parsed.skill.name);
+          text = parsed.arguments;
+          if (!text) {
+            input.value = "";
+            input.style.height = "auto";
+            syncComposerPlaceholder();
+            syncSendButton();
+            return;
+          }
+        } else {
+          input.value = "";
+          input.style.height = "auto";
+          hideWelcome();
+          appendMsg("user", text);
+          _localReply(`未知命令：/${parsed.name}\n\n输入 \`/help\` 查看可用命令。`);
+          syncSendButton();
+          return;
+        }
+      } else {
+        commandDef = parsed.command;
+        text = parsed.arguments;
       }
-      commandDef = parsed.command;
-      text = parsed.arguments;
     }
     if (!text && !commandDef) return;
     _invalidatePromptSuggestion();

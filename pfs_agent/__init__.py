@@ -35,12 +35,44 @@ from .ledger import (
     evidence_identity,
     normalize_http_url,
 )
+from .business_acceptance import (
+    BusinessAcceptanceError,
+    evaluate_city_portfolio,
+    evaluate_city_monthly_pnl,
+)
+from .business_forecast import (
+    BusinessForecastError,
+    SUPPORTED_BUSINESS_THRESHOLDS,
+    evaluate_demand_forecast,
+)
+from .distribution_drift import (
+    DistributionDriftError,
+    evaluate_numeric_distribution_drift,
+    evaluate_numeric_distribution_drift_columns,
+)
+from .model_evaluation import (
+    PredictionEvaluationCase,
+    PredictionEvaluationError,
+    TimeSeriesEvaluationInput,
+    build_prediction_evaluation_case,
+    build_time_series_evaluation_input,
+    evaluate_classification_confusion_rows,
+    evaluate_prediction_quality,
+    evaluate_prediction_rows,
+    evaluate_time_series_holdout_rows,
+    evaluate_time_series_rows,
+)
+from .runs import PersistentAnalysisRunRegistry
 
 __all__ = [
     "ApprovalMode",
     "AnalysisRequest",
     "AnalysisResult",
     "BatchRegistration",
+    "BusinessAcceptanceError",
+    "BusinessForecastError",
+    "DistributionDriftError",
+    "SUPPORTED_BUSINESS_THRESHOLDS",
     "ClaimEvidenceLink",
     "ClaimRecord",
     "ConflictItem",
@@ -52,16 +84,32 @@ __all__ = [
     "LedgerError",
     "MetricContract",
     "PersistentEvidenceLedger",
+    "PersistentAnalysisRunRegistry",
     "PolicyContext",
     "PolicyDecision",
     "PolicyGate",
+    "PredictionEvaluationCase",
+    "PredictionEvaluationError",
+    "TimeSeriesEvaluationInput",
     "ToolCall",
     "ToolRegistry",
     "ToolRisk",
     "ToolSpec",
     "analyze_csv",
     "clean_snippet",
+    "build_prediction_evaluation_case",
+    "build_time_series_evaluation_input",
+    "evaluate_classification_confusion_rows",
     "evidence_identity",
+    "evaluate_city_portfolio",
+    "evaluate_city_monthly_pnl",
+    "evaluate_demand_forecast",
+    "evaluate_numeric_distribution_drift",
+    "evaluate_numeric_distribution_drift_columns",
+    "evaluate_prediction_quality",
+    "evaluate_prediction_rows",
+    "evaluate_time_series_holdout_rows",
+    "evaluate_time_series_rows",
     "load_csv_snapshot",
     "normalize_http_url",
 ]

@@ -225,7 +225,7 @@ AGENT_TOOLS = [
                     },
                     "analysis_options": {
                         "type": "object",
-                        "description": "Analysis-specific options. For AB_Test_Analysis: control_group, metric_type (auto/binary/continuous), expected_allocation.",
+                        "description": "Analysis-specific options. For AB_Test_Analysis: control_group, metric_type (auto/binary/continuous), expected_allocation. For Time_Series_* temporal holdout: evaluation_mode='temporal_holdout', optional holdout_size (1-60), and optional quality_thresholds.",
                     },
                 },
                 "required": ["analysis_name", "sql", "target_column"],

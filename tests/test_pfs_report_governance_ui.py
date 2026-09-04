@@ -8,28 +8,50 @@ STYLES = ROOT / "static" / "css" / "parts" / "modals.css"
 
 
 class PfsReportGovernanceUiTests(unittest.TestCase):
-    def test_report_renders_governance_summary_before_claims(self):
+    def test_report_renders_lightweight_claim_and_source_trace(self):
         source = PREVIEW.read_text(encoding="utf-8")
-        self.assertIn("function renderGovernanceSummary(result)", source)
-        self.assertIn("renderGovernanceSummary(result),", source)
-        self.assertLess(source.index("renderGovernanceSummary(result),"), source.index("renderClaims(result),"))
-        for token in ("supported", "refutes", "supports", "conflicted", "pending", "verification_reason", "human_decision", "renderConflictQueue"):
+        for token in (
+            "function renderClaims(result)",
+            "function renderEvidence(result)",
+            "来源留痕",
+            "supported",
+            "evidence_ids",
+            "source_sha256",
+        ):
             self.assertIn(token, source)
-        self.assertIn("async function decideClaim", source)
-        self.assertIn("/api/pfs/ledger/claims/", source)
-        self.assertIn("确认裁决", source)
-        self.assertIn("dataset.claimDecision", source)
+        for token in (
+            "renderGovernanceSummary",
+            "renderConflictQueue",
+            "/api/pfs/ledger",
+            "approval_status",
+            "deterministic_recompute",
+            "semantic_verification",
+        ):
+            self.assertNotIn(token, source)
 
-    def test_governance_states_have_distinct_visual_treatment(self):
+    def test_report_styles_keep_trace_cards_without_governance_surface(self):
         styles = STYLES.read_text(encoding="utf-8")
-        for token in ("pfs-report-governance", "data-state=\"conflict\"", "data-state=\"pending\"", "pfs-report-claim-details", "pfs-report-conflict-item", "pfs-report-conflict-actions", "pfs-report-evidence-details"):
+        for token in (
+            ".pfs-report-claim",
+            "pfs-report-claim-details",
+            ".pfs-report-evidence",
+            "pfs-report-evidence-details",
+        ):
             self.assertIn(token, styles)
+        for token in (
+            "pfs-report-governance",
+            "pfs-report-conflict",
+            "pfs-report-claim-recompute",
+            "job-audit-center",
+            "job-audit-governance",
+        ):
+            self.assertNotIn(token, styles)
 
     def test_switching_report_source_clears_stale_results(self):
         source = PREVIEW.read_text(encoding="utf-8")
         self.assertIn("function renderIdle()", source)
         self.assertIn('translate("pfs_report.ready_to_run"', source)
-        change_handler = source[source.index('source.addEventListener("change"'):]
+        change_handler = source[source.index('source.addEventListener("change"') :]
         self.assertIn("state.result = null;", change_handler)
         self.assertIn("renderIdle();", change_handler)
         self.assertLess(change_handler.index("state.result = null;"), change_handler.index("renderIdle();"))
@@ -43,7 +65,7 @@ class PfsReportGovernanceUiTests(unittest.TestCase):
         self.assertIn("async function generateDelivery(format)", source)
         self.assertIn("/pfs/deliver", source)
         self.assertIn("renderDeliveryArtifacts();", source)
-        self.assertIn("pfs-report-delivery-lineage", source)
+        self.assertIn("pfs-report-delivery-trace", source)
         self.assertIn("artifact.source_sha256", source)
         delivery_head = styles[styles.index(".pfs-report-delivery-head {") :]
         delivery_status = styles[styles.index(".pfs-report-delivery-status {") :]
@@ -105,9 +127,9 @@ class PfsReportGovernanceUiTests(unittest.TestCase):
         self.assertIn("/api/session/${encodeURIComponent(targetSid)}/lifecycle/artifacts?limit=", history)
         self.assertIn("setRegisteredArtifacts", history)
         self.assertIn("本会话交付物", ui)
-        self.assertIn("job-history-registered-artifact-lineage", ui)
+        self.assertIn("job-history-registered-artifact-meta", ui)
         self.assertIn("读取完整详情", ui)
-        self.assertIn("governance_audit", ui)
+        self.assertNotIn("governance_audit", ui)
         self.assertIn("分析成本", ui)
         self.assertIn("deterministic_no_model", ui)
         self.assertIn("所属工作区", ui)
@@ -118,25 +140,51 @@ class PfsReportGovernanceUiTests(unittest.TestCase):
     def test_job_history_dialog_closes_on_escape_from_internal_controls(self):
         ui = (ROOT / "frontend/features/ui/job-history-ui.js").read_text(encoding="utf-8")
 
-        self.assertIn("onKeydown: event => {", ui)
+        self.assertIn("onKeydown:", ui)
         self.assertIn('event.key !== "Escape" || event.defaultPrevented', ui)
         self.assertIn("event.stopPropagation();", ui)
         self.assertIn("setOpen(false);", ui)
+
+    def test_job_history_keeps_task_and_artifact_history_without_claim_governance(self):
+        history = (ROOT / "frontend/legacy/job_history.js").read_text(encoding="utf-8")
+        ui = (ROOT / "frontend/features/ui/job-history-ui.js").read_text(encoding="utf-8")
+        self.assertIn("onArtifactDetail", history)
+        self.assertIn("本会话交付物", ui)
+        self.assertIn("final_claims", ui)
+        for token in (
+            "onClaimDecision",
+            "onClaimRevision",
+            "expected_revision",
+            "expected_version",
+            "人工审批队列",
+            "job-audit-semantic-recompute",
+            "/api/pfs/ledger",
+        ):
+            self.assertNotIn(token, history + ui)
 
     def test_chat_model_error_has_actionable_configuration_guidance(self):
         source = (ROOT / "frontend/features/chat-stream.js").read_text(encoding="utf-8")
         self.assertIn("model_not_configured", source)
         self.assertIn("配置 DeepSeek", source)
 
-    def test_artifact_history_contract_exposes_lineage_details(self):
+    def test_artifact_history_contract_exposes_safe_metadata(self):
         lifecycle = (ROOT / "api/lifecycle.py").read_text(encoding="utf-8")
-        self.assertIn('artifact["lineage"]', lifecycle)
-        self.assertIn('"claims": claims', lifecycle)
-        self.assertIn('"evidence": list(evidence_by_id.values())', lifecycle)
-        self.assertIn("for evidence_id in (artifact.get(\"evidence_ids\") or [])", lifecycle)
-        self.assertIn("_artifact_governance_audit", lifecycle)
+        self.assertIn("list_registered_artifacts", lifecycle)
+        self.assertNotIn('artifact["lineage"]', lifecycle)
+        self.assertNotIn('"claims": claims', lifecycle)
+        self.assertNotIn('"evidence": list(evidence_by_id.values())', lifecycle)
+        self.assertNotIn("_artifact_governance_audit", lifecycle)
         self.assertIn("detail_url", lifecycle)
         self.assertIn("/download", lifecycle)
+
+    def test_pfs_api_exposes_result_trace_without_evidence_governance_api(self):
+        api = (ROOT / "api/pfs.py").read_text(encoding="utf-8")
+        self.assertIn('"result_trace"', api)
+        self.assertIn('"claims"', api)
+        self.assertIn('"evidence"', api)
+        self.assertNotIn('"evidence_ledger"', api)
+        self.assertNotIn("_governance_result", api)
+        self.assertNotIn('"/api/pfs/ledger"', api)
 
 
 if __name__ == "__main__":

@@ -29,6 +29,12 @@ const pfs = () => globalThis.PFS;
     return raw.replace(/(^|[-\s])([a-z])/g, (_, sep, ch) => sep + ch.toUpperCase());
   }
 
+  function getSkill(name) {
+    const key = String(name || "").trim().toLowerCase();
+    if (!key) return null;
+    return SKILLS.find(skill => String(skill.name || "").toLowerCase() === key) || null;
+  }
+
   function esc(value) {
     return String(value || "").replace(/[&<>"']/g, ch => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -127,8 +133,9 @@ const pfs = () => globalThis.PFS;
   }
 
   function selectSkill(name) {
-    const skill = SKILLS.find(item => item.name === name) || { name };
+    const skill = getSkill(name) || { name };
     pfs()?.slash?.clearCmd?.();
+    pfs()?.slash?.closeSlashPopup?.();
     state.activeSkill = skill.name;
     $("skill-badge-text").textContent = displaySkillName(skill);
     $("skill-badge")?.classList.add("show");
@@ -158,7 +165,7 @@ const pfs = () => globalThis.PFS;
    */
   function activateSkill(name) {
     if (!name) return;
-    const skill = SKILLS.find(item => item.name === name) || { name };
+    const skill = getSkill(name) || { name };
     state.activeSkill = skill.name;
     $("skill-badge-text").textContent = displaySkillName(skill);
     $("skill-badge")?.classList.add("show");
@@ -540,7 +547,7 @@ const pfs = () => globalThis.PFS;
   search?.addEventListener("keydown", onKeyDown);
 
 export const skills = Object.freeze({
-    SKILLS, open, close, isOpen, render, loadSkills, selectSkill, clearSkill,
+    SKILLS, open, close, isOpen, render, loadSkills, getSkill, selectSkill, clearSkill,
     showMatchedSkills, activateSkill, sourceLabel,
     onSearch, onKeyDown, openSkillModal, closeSkillModal, saveSkill, deleteSkill,
 });

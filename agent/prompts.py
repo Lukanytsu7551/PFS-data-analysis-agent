@@ -50,6 +50,15 @@ def _build_chart_ids() -> str:
 _ANALYZE_GUIDE = _build_analyze_guide()
 _CHART_IDS = _build_chart_ids()
 
+_TEMPORAL_HOLDOUT_GUIDANCE = (
+    "\n\n评估边界：只有当用户明确要求回测、时间切分验证或留出集评估时，"
+    "才在 run_analysis 中传入 analysis_options={\"evaluation_mode\":\"temporal_holdout\","
+    "\"holdout_size\":<正整数> }；holdout_size 表示从时间排序后的末尾留出多少个真实行。"
+    "需要自定义质量门时，可额外传 quality_thresholds。普通预测请求不要传该选项，"
+    "因为历史拟合配对不等于时间外推 holdout；工具会校验时间列、训练截止点、"
+    "预测长度和 holdout 时间戳完全对齐，校验失败时不要自行改写成通过。"
+)
+
 # ── Slash-command → system-hint mapping ──────────────────────────────────────
 
 COMMAND_HINTS: Dict[str, str] = {
@@ -176,6 +185,7 @@ COMMAND_HINTS: Dict[str, str] = {
         "      Randomly scattered residuals around 0 indicate a good fit.\n"
         "   c) Display analysis_metrics table (AIC/BIC/MAE/RMSE) as a formatted table.\n"
         "6. Conclude with a 2-4 sentence interpretation: trend direction, forecast confidence, and model order chosen."
+        + _TEMPORAL_HOLDOUT_GUIDANCE
     ),
     "sarima": (
         "The user issued the /sarima command for SARIMA seasonal time series forecasting.\n"
@@ -198,6 +208,7 @@ COMMAND_HINTS: Dict[str, str] = {
         "      Also plot seasonal column to visualize seasonality.\n"
         "   c) Display analysis_metrics table (AIC/BIC/MAE/RMSE/seasonal period) as a table.\n"
         "6. Conclude with trend direction, detected seasonality pattern, and forecast summary."
+        + _TEMPORAL_HOLDOUT_GUIDANCE
     ),
     "var": (
         "The user issued the /var command for VAR (Vector Autoregression) multivariate forecasting.\n"
@@ -216,6 +227,7 @@ COMMAND_HINTS: Dict[str, str] = {
         "      Highlight significant cells (p_value < 0.05).\n"
         "   c) Display analysis_metrics table (VAR lag, AIC/BIC, per-variable MAE) as a table.\n"
         "7. Conclude with key Granger causal relationships and forecast direction for the target variable."
+        + _TEMPORAL_HOLDOUT_GUIDANCE
     ),
     "prophet": (
         "The user issued the /prophet command for Prophet-style additive time series decomposition.\n"
@@ -238,6 +250,7 @@ COMMAND_HINTS: Dict[str, str] = {
         "      If yearly column is non-zero, also plot yearly seasonality.\n"
         "   c) Display analysis_metrics table (R²/MAE/RMSE, active changepoints) as a table.\n"
         "6. Conclude with trend direction, seasonal pattern strength, and changepoint highlights."
+        + _TEMPORAL_HOLDOUT_GUIDANCE
     ),
     "gru": (
         "The user issued the /gru command for GRU (Gated Recurrent Unit) deep learning time series forecasting.\n"
@@ -265,6 +278,7 @@ COMMAND_HINTS: Dict[str, str] = {
         "      A smoothly decreasing curve indicates successful training.\n"
         "   c) Display analysis_metrics table (R²/MAE/RMSE/final loss) as a table.\n"
         "6. Conclude with forecast trend, model convergence quality, and uncertainty interpretation."
+        + _TEMPORAL_HOLDOUT_GUIDANCE
     ),
     "logistic": (
         "The user issued the /logistic command for Logistic Regression analysis.\n"

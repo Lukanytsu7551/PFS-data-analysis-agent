@@ -24,6 +24,11 @@ class CSVDataSource(DataSource):
         self._conn = _new_conn()
         table = _clean_identifier(filename.rsplit(".", 1)[0]) or "data"
         self._table = table
+        # Keep raw and derived tables separate so the Agent can protect the
+        # uploaded source while still allowing explicit cleanup of analysis
+        # results created in this connection.
+        self._source_tables = {table}
+        self._analysis_tables = set()
 
         # DuckDB can read CSV directly — fastest path for large files
         try:
@@ -82,6 +87,7 @@ class CSVDataSource(DataSource):
                 ).fetchone()[0]
             except Exception as exc:
                 return f"Error building analysis table: {exc}"
+        self._analysis_tables.add(table_name)
         return _table_schema_str(self._conn, table_name, rows)
 
     def get_preview(self) -> List[dict]:

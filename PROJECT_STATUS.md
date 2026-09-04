@@ -38,7 +38,7 @@
 - 当时 GitHub 回读确认仓库尚无远程分支；随后网络恢复并已成功建立远端 `main`。部署和线上验收仍未开始。
 - 交付方式已确定为双入口：普通用户通过 `install.sh`、`start.command` 或 `start.bat` 使用本地 Python 环境；开发/部署人员通过 `Dockerfile` 构建和运行 PFS。普通用户不被要求安装 Docker。
 
-当前最主要的未完成项是：原项目全部能力的逐项真实复验、多轮/长任务/跨进程工作流恢复、真实多 provider 成本对账、外部数据源和 MCP/飞书、完整审批/语义核验、复杂报表的 Office 视觉与跨平台打开验收、桌面安装包、Docker 多服务和真实部署。单个 Agent、委托节点和工作流图级费用硬阻断、Agent/Workflow Artifact 成本关联、Artifact 本地跨进程工作区关联与会话统一审计 Escape 交互已完成本地验证，但不等于真实供应商账单、分布式恢复或完整生产治理已完成。详见功能矩阵。
+当前最主要的未完成项是：原项目全部能力的逐项真实复验、多轮/长任务/跨进程工作流恢复、真实多 provider 成本对账、外部数据源和 MCP/飞书、真实业务语义评测/独立事实核查、复杂报表的 Office 视觉与跨平台打开验收、桌面安装包、Docker 多服务和真实部署。完整审批状态机与确定性 Claim–Evidence 关系核验已进入 P1 本地切片；P2 已新增一个 10 城经营组合业务验收场景，但仍不等于生产数据、14 类模型、事实核查或线上验收。详见功能矩阵。
 
 ### 2026-08-30 报表下载闭环（当前迭代）
 
@@ -631,3 +631,102 @@
 - 发布预演：独立临时 staging 为 489 个文件、37,703,382 bytes；artifact audit 为 0 findings、0 symlink，路径回读未发现 draw.io、shape_libs、business_canvas 或 gsheets，文件回读未发现数据库和本地凭据。
 - 隔离运行：当前工作树在 `127.0.0.1:5023` 启动 Waitress，`/api/health` 和主工作台返回 200；`/static/drawio/index.html`、`/api/business-canvas` 和 `/api/connect-gsheets` 均返回 404。回读后测试服务已停止。
 - 清场与发布边界：用户在完整汇报后确认删除两份临时 staging、一份隔离运行目录和未跟踪的 `direction-approved.md`，清理后逐项回读为不存在。被忽略的本地凭据、数据库、上传、输出和参考快照继续保留且不进入发布包。主切片已提交为 `756f358 feat: close PFS local transformation slice`，清场与状态已另行提交到本地 `main`；两次 HTTPS push 均因 GitHub 443 连接超时失败，SSH 通道因本机无可用 public key 拒绝认证，远端尚未回读到本轮提交。桌面安装包、部署和线上验收仍未执行。
+
+### 2026-09-03 P1 Claim 核验与审批状态机第一切片
+
+- Ledger 新增 `deterministic_claim_evidence/v1` 关系核验：根据已登记 supports/refutes、置信度和 Evidence 覆盖形成 verdict、风险和理由。它不读取自由文本判断现实真伪，不替代业务审核。
+- Claim 新增 pending/approved/rejected/changes_requested/deferred 状态、服务端审核身份、审批修订号、决定时间/理由和 Claim 版本。会话 API 新增审批队列、重新核验和退回后修订；审批修订号与 Claim 版本使用乐观锁，跨会话请求继续拒绝。
+- 任务历史审计中心新增待审批数量、高风险数量、机器核验卡、Evidence 关系及批准/拒绝/暂缓/退回交互。退回后可以修订文本；修订会清空旧 Evidence 关联并回到 pending，避免旧证据继承给新结论。核验、审批和修订进入安全审计时间线，不记录业务文本到生命周期日志。
+- 门禁：201 项 Python 测试通过、无失败、无跳过；Ruff、ESLint、Chat production build、Dashboard/Chat build check 和 `git diff --check` 通过。Chat 主 bundle 513.13 kB，只有既有 500 kB 体积提示。ego-browser 在隔离数据目录完成 2 条 Claim 展示、批准、退回、修订 v1→v2、Evidence 清空、insufficient 回退和无横向溢出回读；空间和服务已关闭，临时目录移入系统废纸篓。P1 尚未 commit、push 或重建发布 staging。
+
+### 2026-09-03 P2 真实业务验收第一切片
+
+- 场景：使用项目随附、匿名化的 `deploy/samples/Sample-data.xlsx` 中 `10城数据包`，回答经营负责人关于城市规模、增长、单位贡献与关注优先级的问题。该样本不是公司生产数据。
+- 数据门禁：执行城市编号唯一、关键字段完整、数值可解析、比例/金额范围、整行重复和四类订单结构逐城加总 100% 六项检查。重复城市编号或订单结构不勾稽的反例会返回 `needs_revision`，并停止输出指标、排名和结论。
+- 独立真值：10 城、日均 760 千单、按 365 天年化 277,400,000 单、年化 GMV 15,629,300,000 元（156.293 亿元）、订单量加权客单价 56.34 元；规模前三为泉州、惠州、徐州。源表 9/10 城状态含“亏损”。
+- 业务边界：单位贡献余量只计算客单价减履约成本及补贴营销，不称为利润；源表缺少佣金收入、商家结算、总部费用和其他损益项，不能据此解释亏损原因。横截面的订单年增速也不能独立复算。
+- 产品入口：新增会话安全的 `POST /api/session/<sid>/pfs/business-acceptance` 和口径预览中的“运行经营验收”。结果页展示是否可汇报、质量勾稽、四张指标卡、规模前三、可陈述结论和汇报限制；业务验收结果暂不启用旧的通用报表下载/交付按钮，避免错误套用 grouped SUM 导出合同。
+- 真实桌面：Ego 浏览器在 `http://127.0.0.1:5038` 上传同一 XLSX、选择 `10城数据包` 并点击运行；页面回读“可汇报，但必须带限制条件”、6 项通过/0 项阻断、156.293 亿元、760 千单、56.34 元、9 个亏损城市及三条管理结论。弹窗宽度为 920px，页面无横向溢出；首次截图调用超时，因此不把截图列为完成证据。
+- 门禁：207 项 Python 测试全部通过、无失败、无跳过；Ruff、ESLint、Chat production build、Dashboard/Chat build check 与 `git diff --check` 通过。Chat 主 bundle 517.40 kB，只有既有 500 kB 体积提示。P1/P2 当前仍未 commit、push、重建 staging、deploy 或 live 验收。
+
+### 2026-09-03 P2 城市月度损益验收第二切片
+
+- 新增 `data/fixtures/pfs_city_monthly_pnl.csv` 匿名化演示数据，覆盖徐州、泉州、桂林三城 2025/2026 年 1–3 月。它不是生产数据，不用于宣称真实经营结果。
+- 自动识别城市月度损益结构；校验城市月唯一性、必填、数值、月份格式、逐城同比覆盖、连续月份、非负范围、GMV/收入关系、贡献利润与经营利润桥接及重复行。任何阻断项都会停止输出指标和结论。
+- 独立真值：2026 年 1–3 月收入 18,780.3 万元，同比 +15.42%；经营利润 1,636.225 万元，同比增加 935.725 万元；经营利润率 8.71%。桂林经营利润 -1,362.325 万元，只标记为核查对象，不推断原因。
+- 结果已进入会话 Evidence Ledger：三条 Claim 关联同一快照证据，限制性结论保留 `business_status=supported_with_caveat` 并进入人工复核。JSON/CSV 下载会由服务端重新读取上传快照并重跑业务场景，避免套用普通销售额导出。
+- 门禁：211 项 Python 测试全部通过、无失败、无跳过；Ruff、ESLint、Chat production build、Dashboard/Chat build check 与 `git diff --check` 通过。Chat 主 bundle 518.58 kB，仅有既有 500 kB 体积提示。当前仍未 commit、push、重建 staging、deploy 或 live 验收。
+- Ego 桌面验收在隔离数据目录与 `http://127.0.0.1:5040` 完成：真实上传 18 行 CSV 后自动识别场景，页面回读 8 项通过、0 阻断、4 张指标卡、3 城利润表、3 条 Claim、1 条 Evidence 和 1 条待复核限制性结论。验收发现 Evidence 挂接会把默认置信度覆盖为 0%，已修复并新增断言；复验显示两条确定性结论 95%、限制性结论 75%。人工选择“保留待确认”后审批状态变为 `deferred` 并显示决策，JSON 下载回读“已下载”；页面与弹窗横向溢出均为 0，Office 交付保持禁用。
+
+### 2026-09-03 P1 Evidence Ledger 跨进程持久化第二切片
+
+- JSON Ledger 写入现在使用 OS 级互斥锁；每次变更前重载最新磁盘快照，写入唯一临时文件并 fsync 后原子替换，异常时清理临时文件。读操作继续依赖原子替换，不读取半写入内容。
+- 并发回归启动两个独立 Python 进程，分别注册 Evidence 与 Claim；最终 Ledger 同时保留两个进程的记录，证明本地跨进程写入不会发生最后写入者覆盖。该证据不等同于数据库事务、压力测试或分布式故障恢复。
+- 门禁：本轮完整 Python 回归为 216 项通过、无失败、无跳过；Ruff、ESLint、Chat production build、Dashboard/Chat build check 和 `git diff --check` 通过。P1/P2 当前仍未 commit、push、重建 staging、deploy 或 live 验收。
+
+### 2026-09-03 P2 用户—供给效率验收第三切片
+
+- 新增 `city_user_supply_v1` 场景和口径预览选择器，针对匿名化 `Sample-data.xlsx` 的 `10城数据包` 校验城市主键唯一、字段完整、数值与比例范围、非负值、正向分母和重复行；阻断时不输出指标、排名或结论。
+- 独立真值：10 城、718.0 万月活用户、150.2 万高价值用户、加权高价值用户占比 20.92%、日均订单量 760 千单、整体日均下单频次 0.106、商家日均订单量 60.95；高价值规模前三为泉州/惠州/徐州，双低观察城市为赣州/宜昌/桂林/威海/洛阳。结论仅用于横截面筛查，不推断留存、转化或因果关系。
+- 结果登记到会话 Evidence Ledger，包含 3 条 Claim、1 条 Evidence；确定性结论置信度 95%，限制性筛查结论置信度 75%。服务端重读上传快照并重算，避免下载时套用普通销售额导出；结果页继续禁用 Office 交付。
+- Ego 浏览器在隔离服务 `http://127.0.0.1:5051` 真实上传 XLSX、显式选择场景并运行；页面回读 `已完成`、7 项通过/0 阻断、4 张指标卡、排名表、5 个双低城市、3 条 Claim、1 条 Evidence，且页面和弹窗横向溢出均为 0。
+- 门禁：216 项 Python 测试、Ruff、ESLint、Chat production build、Dashboard/Chat build check 和 `git diff --check` 全部通过；当前仍未 commit、push、重建 staging、deploy 或 live 验收。
+
+### 2026-09-03 P1 Evidence 治理第二版：快照绑定与审批失效
+
+- 治理函数现在要求报告带有效的源快照 SHA-256，并逐条校验 Evidence 的 `content_sha256` 与当前分析快照一致；缺失或不一致分别返回 `evidence_snapshot_missing` / `evidence_snapshot_mismatch`，不再把来源相近但内容不同的证据登记到同一份报告。
+- Ledger 的 Claim 证据关系发生实质变化时，会清空审核人、人工决定、决定理由和决定时间，使审批状态回到 `pending` 并递增 `approval_revision`；相同证据关系的重复分析保持既有审批，避免重算导致无意义的审批丢失。
+- 报表预览治理摘要新增“快照已绑定 · N 条证据”标识，保留现有 Claim/Evidence 详情和人工裁决交互。UI 契约新增哈希不一致回归；Ledger 回归覆盖证据变化后的旧审批失效，HTTP 回归覆盖正常快照绑定、重复分析后已批准状态保持和不一致哈希拒绝。
+- 门禁：本轮完整 Python 回归为 218 项通过、无失败、无跳过；Ruff、ESLint、Chat production build、Dashboard/Chat build check、`pnpm run format:check` 和 `git diff --check` 全部通过。Chat 主 bundle 为 521.57 kB，仅有既有 500 kB 体积提示。
+- Ego 浏览器在隔离服务 `http://127.0.0.1:5051` 真实上传 `Sample-data.xlsx` 的 `10城数据包`，显式选择“用户—供给效率”并运行；页面回读 7 项通过/0 项阻断、4 张指标卡、3 条 Claim、1 条 Evidence 和“快照已绑定 · 1 条证据”。页面点击“确认支持”后重新运行，已批准状态仍保持；页面与报表弹层横向溢出均为 0。验收空间、服务和临时目录已关闭/移入废纸篓。
+- 边界：这是本地 JSON Ledger 与确定性分析的快照完整性门禁，不是数据库事务、分布式 Ledger、独立事实核查或生产级语义评测；P1/P2 当前仍未 commit、push、重建发布 staging、deploy 或 live 验收。
+
+### 2026-09-03 P2 需求预测业务护栏切片
+
+- 输入：`data/fixtures/pfs_monthly_demand.csv` 匿名化月度订单/GMV 样本；本轮没有使用生产数据、外部数据源或供应商模型服务。
+- 改造：`pfs_agent/business_forecast.py` 新增可选 `business_thresholds.max_total_delta_pct`，独立检查末尾 temporal holdout 的预测订单总量绝对偏差；缺少护栏时返回 `needs_review`，超出护栏时返回 `needs_revision`，不把模型误差通过误写成经营计划准入。口径预览增加模型、Holdout 月数和总量偏差上限控件，并将参数发送到会话 API。
+- 验证：`PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B -m unittest tests.test_pfs_business_forecast tests.test_pfs_analysis_accuracy tests.test_pfs_agent_vertical_slice -q`，27 项通过；Ruff 和前端 ESLint 通过。专项覆盖 Prophet/ARIMA/SARIMA/VAR/GRU、未配置护栏、显式通过、超限阻断、非法阈值、API 转发和 UI 参数契约。
+- 关键回读：样本末尾 3 个月 holdout 的订单总量绝对偏差为 6.06%；`max_total_delta_pct=100` 通过该护栏，`max_total_delta_pct=0` 返回 `needs_revision`。前端和 API 仍支持只报告、不作准入结论的默认路径。
+- 边界：这是匿名本地业务形态和 HTTP/API 回归，不是生产数据、预测收益/库存护栏、数据漂移、校准、公平性、浏览器本轮复验或线上部署证明；当前切片未 commit、push、deploy 或 live 验收。
+
+### 2026-09-03 P2 需求预测多指标分布漂移增量
+
+- 改造：新增 `pfs_agent/distribution_drift.py`，对训练段与真实 holdout 订单样本计算确定性的两样本 KS 距离，并输出 10/50/90 分位数作为解释信息；不计算 p-value，不推断漂移原因，也不把小样本信号包装成生产稳定性结论。
+- 护栏：新增可选 `business_thresholds.max_holdout_orders_ks_distance` / `max_holdout_gmv_ks_distance`，均限定在 0–1；留空返回 `needs_review`，超限返回 `needs_revision`，与预测总量偏差和训练→holdout 均值漂移独立计入业务护栏。工作台新增订单/GMV KS 上限和滚动窗口控件，API 与 JSON/CSV 导出重算沿用同一参数。
+- 口径：订单和 GMV 分别计算列边际两样本 KS 距离与 10/50/90 分位数，聚合状态在任一列失败时阻断；该切片不声称联合分布、统计显著性、生产监控、收益或库存结论。
+- 验证：分布漂移与需求预测专项共 14 项通过；随后全项目 `pnpm run quality` 为 290 项 Python 测试通过、无失败/无跳过，Ruff、ESLint、Dashboard/Chat build check、Chat production build 和 `git diff --check` 通过；Chat 主 bundle 为 525.55 kB，只有既有 500 kB 体积提示。
+- 边界：KS 只是当前需求预测场景的数值分布漂移第一版，仍未完成真实脱敏生产数据、跨场景/多变量漂移、校准、公平性、预测收益/库存护栏、复杂图表/Office 视觉、部署和线上验收；本轮仍未 commit、push、deploy 或 live 验收。
+
+### 2026-09-03 P2 需求预测桌面交互复验
+
+- 修复：需求预测的 8 个参数控件原先置于横向 flex，验收区被撑出报告弹窗；“运行经营验收”按钮视觉可见但实际落在遮罩层下，无法命中。现改为明确的场景/运行按钮行与参数换行网格，600px 视口切换为单列布局。
+- Ego 回读：隔离服务 `http://127.0.0.1:5012` 使用真实上传的 `pfs_monthly_demand.csv`，设置滚动窗口=2、GMV KS 上限=1 后点击运行；页面回读 `已完成`、9 项通过/5 项待确认/0 项阻断、GMV KS=0.9630、滚动 2 个窗口。JSON/CSV 下载状态均为“已下载”。1280px 桌面按钮可直接命中；600px 视口无横向溢出，滚动到按钮后仍可命中。
+- 边界：本轮证明的是本地匿名样本的前端布局、点击、结果展示和下载交互；不代表生产数据、生产预测质量、部署或线上状态。当前工作树仍未 commit/push/deploy。
+
+### 2026-09-03 P2 需求预测可解释基线增量
+
+- 改造：需求预测现在在同一末尾 holdout 和滚动窗口内生成 `last_value_naive` 最后一期延续基线，逐项比较模型与基线 WAPE，并把可选 `business_thresholds.min_model_wape_lift_pct` 作为模型改善下限；未配置时为 `needs_review`，配置后低于下限会阻断计划准入。
+- 独立回读：匿名月度样本使用 Prophet 时，末尾 holdout 模型 WAPE 为 6.0569%、last-value 基线为 14.4737%、相对改善 58.1524%；滚动窗口模型 WAPE 为 4.1517%、基线为 10.7728%、相对改善 61.4613%。设置改善下限 0% 时基线护栏通过，设置 100% 时返回 `needs_revision`。
+- 产品接线：工作台新增“相对朴素基线 WAPE 改善下限（%）”控件；结果明细展示模型/基线/改善值；请求、JSON/CSV 服务端重算和 Claim 均保留该参数与结果。此前 Ego 任务空间被用户接管前，当前源码在 `http://127.0.0.1:5013` 已回读请求中的 `min_model_wape_lift_pct=0`、页面 `10 项通过/5 项待确认/0 项阻断`、GMV KS `0.9630` 和 JSON “已下载”；Ego 后续操作按控制权规则暂停。
+- 门禁：需求预测专项 10 项回归通过；本轮全量 `pnpm run quality` 为 291 项 Python 测试通过、无失败/无跳过，Ruff、ESLint、Dashboard/Chat build check、Chat production build、格式检查和 `git diff --check` 全部通过。Chat 主 bundle 为 526.85 kB，保留既有 500 kB 体积提示；当前工作树仍未 commit、push、deploy 或 live 验收。
+- 边界：last-value 只表示最近一期延续法，不代表季节性、预算、供给约束、生产收益或因果效果；该切片仍未完成真实脱敏生产数据、跨场景联合漂移、校准/公平性、预测收益/库存护栏、复杂图表/Office 视觉、部署和线上验收。
+
+### 2026-09-03 Workflow 启动恢复与副作用重放保护
+
+- 改造：`WorkflowRuntime` 新建时会按会话扫描未终态 Run 并调用 `WorkflowScheduler.recover_interrupted_runs`。`JobsStore` 重开后留下的中断 Job 会重新进入既有节点重试/调度路径；暂停和待审批 Run 不会被启动恢复流程强行唤醒，恢复过程和结果写入 Workflow 事件流。
+- 安全边界：节点声明 `write_data`、`export_file` 或 `network` 且绑定 Job 因进程重启收口时，不自动创建下一次执行；节点失败并返回稳定的 `workflow_restart_replay_blocked`，Run 记录 `workflow_side_effect_replay_blocked`，要求人工检查外部状态后再走显式重试。读数据节点仍服从原有 `max_attempts` 和 `max_total_node_runs` 门禁。
+- 验证：`tests/test_pfs_reliability.py` 新增跨存储重开后只读节点恢复和副作用重放阻断两项回归；本地专项 8 项全部通过。该证据覆盖同一台机器上的 SQLite Workflow/Job 存储重开，不代表跨服务队列、强制中断、分布式一致性或生产账单对账。
+- 门禁：本轮全量质量门更新为 293 项 Python 测试通过、无失败/无跳过；Ruff、ESLint、Dashboard/Chat build check、Chat production build、格式检查和 `git diff --check` 通过。Chat 主 bundle 保留既有 500 kB 体积提示；当前工作树仍未 commit、push、deploy 或 live 验收。
+
+### 2026-09-03 Workflow 导出副作用幂等切片
+
+- 改造：`workflow_run_store.py` 新增本地 SQLite `workflow_side_effects` 登记表和 claim/complete/fail 事务；导出动作以 Run、节点、显式迭代和目标形成稳定操作身份，以内容哈希检测同一动作的载荷变化。文件写出使用同目录临时文件、`fsync` 和原子替换，避免产生半写入 Artifact。
+- 恢复：同一导出动作若已完成，会先核验 Artifact 仍存在且内容哈希一致，再复用已完成结果；载荷变化返回幂等冲突；已 claim 但未 complete 的动作保持人工复核，不自动再次写出。重启时若已完成登记存在，Workflow 可回收节点结果而不重放导出；该切片只覆盖本地 `export_file`，不宣称网络、飞书或数据库写入已具备通用幂等协议。
+- 验证：新增导出重复调用复用 Artifact、内容变化冲突和重启后已完成导出回收回归；导出幂等专项 2 项及恢复相关回归通过。随后全量 `pnpm run quality` 为 295 项 Python 测试通过、无失败/无跳过，Ruff、ESLint、Dashboard/Chat build check、Chat production build、格式检查和 `git diff --check` 通过；Chat 主 bundle 保留既有 500 kB 体积提示。
+- 边界：这是同一台机器上的 SQLite + 本地 Artifact 幂等合同，不是跨服务幂等键、外部 API 去重、供应商账单对账或分布式恢复；本轮仍未 commit、push、deploy 或 live 验收。
+
+### 2026-09-04 P0 当前本地切片收口复核
+
+- 质量门：在当前工作树重新执行 `pnpm quality`，格式检查、ESLint、Dashboard/Chat build check、Chat production build、295 项 Python 测试、Ruff 和格式差异检查全部通过。Chat bundle 仍有既有 500 kB 体积提示，不影响构建退出状态。
+- 发布预演：按当前源码执行 allowlist staging，生成 492 个文件、37,836,179 bytes；`packaging/audit_artifact.py` 回读为 0 findings、0 symlink。新增城市月度损益和月度需求匿名 fixture 已加入明确的 reviewed offline fixture 白名单，其余 CSV/数据库/用户文档扩展名仍保持拒绝。
+- 版本边界：当前本地 `HEAD` 为 `67d6c34`，远端 `origin/main` 为 `ffa0ec1`，远端包含本地历史基线；P1/P2 和本轮 staging 策略改动仍在工作树，尚未 commit、push、deploy 或 live 验收。此前 489 文件 staging 为历史 P0 记录，本条为当前切片的最新 staging 证据。

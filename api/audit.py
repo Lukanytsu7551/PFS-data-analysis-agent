@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 
-from infrastructure.artifact_lifecycle import lifecycle_audit, list_registered_artifacts
+from infrastructure.artifact_lifecycle import list_registered_artifacts
 from pfs_agent.audit import build_session_audit
 
 from .state import require_session_ownership, session_manager
@@ -33,7 +33,7 @@ def _all_job_events(runner) -> list[dict]:
 @bp.get("/api/session/<sid>/audit")
 @require_session_ownership
 def get_session_audit(sid: str):
-    """Return one session's safe task, lineage, governance and cost trail."""
+    """Return one session's safe task, artifact and cost trail."""
     try:
         limit = int(request.args.get("limit", "300"))
     except (TypeError, ValueError):
@@ -43,8 +43,7 @@ def get_session_audit(sid: str):
 
     audit_type = str(request.args.get("type") or "all").strip().lower()
     allowed_types = {
-        "all", "job", "run", "model", "tool", "retry", "error", "approval",
-        "artifact", "claim", "evidence", "cost",
+        "all", "job", "run", "model", "tool", "retry", "error", "artifact", "cost",
     }
     if audit_type not in allowed_types:
         return jsonify({"ok": False, "error": "type 筛选值无效"}), 400
@@ -54,31 +53,14 @@ def get_session_audit(sid: str):
     events = _all_job_events(sess.job_runner)
     artifacts = list_registered_artifacts(session_id=str(sid)[:160], limit=200)
 
-    from .pfs import _ledger
-
-    ledger = _ledger()
-    task_prefix = f"{sid}:"
-    claims = [
-        item.to_dict() for item in ledger.list_claims()
-        if str(item.task_id or "").startswith(task_prefix)
-    ]
-    evidence = [
-        item.to_dict() for item in ledger.list_evidence()
-        if str(item.task_id or "").startswith(task_prefix)
-    ]
-    governance = [
-        item for item in lifecycle_audit(200)
-        if str(item.get("session_id") or "") == str(sid)
-    ]
-
     payload = build_session_audit(
         session_id=sid,
         jobs=jobs,
         events=events,
         artifacts=artifacts,
-        claims=claims,
-        evidence=evidence,
-        lifecycle_events=governance,
+        claims=(),
+        evidence=(),
+        lifecycle_events=(),
         usage_breakdowns=list(getattr(sess, "usage_breakdowns", []) or [])[-100:],
         command_metrics=list(getattr(sess, "command_metrics", []) or [])[-200:],
         filters={

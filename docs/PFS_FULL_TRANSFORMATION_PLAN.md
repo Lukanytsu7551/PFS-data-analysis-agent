@@ -2,9 +2,10 @@
 
 > 制定日期：2026-08-28  
 > 目标：保留并重新验证 Data-Analysis-Agent 的全部功能，同时完成 PFS 的独立产品身份、用户界面、内部标识、文档、安装和发布体系。  
-> 当前基线：CSV/XLSX + PFS 口径 + Claim/Evidence + JSON/CSV + Excel/Word/PPT/Dashboard 桌面即时交付、会话 Artifact/Lineage、DeepSeek 单任务和 Docker 单容器已有分层本地证据；完整兼容复验、动态 Evidence/HITL、跨进程恢复、安装包、部署和线上验收仍未完成。不要用百分比替代功能矩阵状态。
+> 当前基线：CSV/XLSX + PFS 口径 + 轻量 Claim/Evidence/来源快照 + JSON/CSV + Excel/Word/PPT/Dashboard 桌面即时交付、会话 Artifact 历史、DeepSeek 单任务和 Docker 单容器已有分层本地证据；业务验收、模型预测质量、Workflow 恢复/幂等、Agent 派生表 raw/derived 生命周期和实现层 SQL 二次校验已有对应本地切片。Evidence Ledger 治理、Evidence 质量门、语义复算、人工审批/修订、SQLite Ledger 后端/迁移及治理 UI/API 已撤回，不属于当前运行基线；生产级事实核查、跨服务恢复、外部副作用幂等协议、安装包、部署和线上验收仍未完成。不要用百分比替代功能矩阵状态。
 > 范围更新：当前产品只要求桌面端工作台。手机端适配、移动端完整分析流程和移动端下载不再纳入完成标准；已有 390×844 验收记录作为历史证据保留。
 > 2026-09-02 范围更新：商业画布和 Google Sheets 已决定退役并从代码、依赖和验收矩阵删除；Teams、Hooks、GPU/远程、飞书机器人和云端登录保留但暂不启用。
+> 2026-09-04 范围回滚：只撤销本轮新增的 Evidence 治理层；保留参考 Agent 原有的工具结果轻量持久化、PFS 的轻量 Claim/Evidence/来源快照、UI/品牌、确定性数据分析、业务验收、模型评估、交付物和任务/Artifact 历史。后文出现的 Ledger、质量门、语义复算、审批/修订和 SQLite Ledger 内容均按历史设计或后续候选理解，不代表当前已启用能力。
 
 ## 1. 完成目标如何判定
 
@@ -23,20 +24,22 @@
 
 - PFS 名称、产品图标、服务标识、启动脚本、部分安装和发布标识已建立。
 - PFS 主工作台与静态设计稿已经形成独立视觉方向。
-- 固定/上传 CSV/XLSX、基础分组统计、Metric Contract、Evidence Ledger、Claim–Evidence、幂等和冲突记录已完成第一段。
+- 固定/上传 CSV/XLSX、基础分组统计、Metric Contract、轻量 Claim/Evidence/来源快照、JSON/CSV 与 Office/Dashboard 交付已完成第一段；参考 Agent 的工具结果留痕、Artifact 历史、业务验收、模型评估、幂等交付和本地跨进程取消注册表继续保留。Evidence Ledger、质量门、语义复算、审批/修订、SQLite Ledger 后端/迁移和治理 UI/API 已按当前范围撤回。
 - JSON/CSV 服务端重算下载和 Excel/Word/PPT/Dashboard 统一交付区已接入；固定报表的 Office 结构、HTTP 下载和 Dashboard 桌面打开已验证。
-- DeepSeek 单任务、停止路径、Job 重启收口、Workflow 节点重试、工具/Token/费用硬上限已有对应本地证据。
-- 第一段只读工具策略门和单元测试已存在。
+- DeepSeek 单任务、停止路径、Job 重启收口、Workflow 节点重试、工具/Token/费用硬上限已有对应本地证据；普通 Agent 的轮数、工具调用、Token 和运行时长已增加校验后的环境预算合同，并由 Agent/JobRunner 内部门禁执行；Workflow 图级 Token/费用/NodeRun guard 已有本地合同。
+- 第一段只读工具策略门和单元测试已存在；查询/建表后台路径已在工具实现层重复校验，派生表可追踪、可替换、可删除且原始表保护已有固定 CSV 回归。
 - `pnpm run build:chat`、`pnpm run build:check` 以及当前 PFS 测试基线已通过。
 - 本地 5012 服务和 `/api/health` 已回读成功。
 
 ### 尚未完成
 
+- 2026-09-03 进展：需求预测已增加训练/holdout 订单与 GMV 的列边际两样本 KS 距离、10/50/90 分位数解释、可选 `max_holdout_orders_ks_distance` / `max_holdout_gmv_ks_distance` 护栏，以及模型相对 last-value 朴素基线的 WAPE 改善和可选 `min_model_wape_lift_pct` 下限；Workflow 导出节点又增加本地 SQLite 副作用登记，同一 Run/节点/迭代复用已完成 Artifact，内容变化触发幂等冲突，未知完成状态保持人工复核。缺失阈值仍待确认，KS 只用于当前场景的小样本风险提示，基线改善不代表生产收益。跨场景/联合分布漂移、统计显著性、校准、公平性、生产预测收益、库存护栏、外部副作用幂等协议和跨服务恢复仍未完成。
+
 - 原项目所有 API、工具、数据源、分析方法、图表、导出和扩展能力尚未形成逐项验收台账。
 - 真实模型驱动的多轮、复杂数据和长任务分析尚未验收。
 - 复杂 Excel、生产 SQL、外部 HTTP、飞书等真实数据连接尚未逐项验收。
-- 14 类分析和 41 个图表目前主要是固定夹具结果证据；Office 输出尚未完成复杂内容、原生应用视觉和跨平台核验。
-- 多轮 SSE、流中断、跨进程工作流恢复、完整审批、团队、Hooks、Memory、Knowledge、MCP 等尚未完成生产级验证。
+- 14 类分析和 41 个图表目前主要是固定夹具结果证据；P2 已完成 10 城经营组合、城市月度损益、用户—供给效率和月度需求预测四个匿名化业务验收场景，另补了分类/回归固定 holdout 预测质量评估合同，并将 Regression、Decision_Tree、Logistic_Regression、Sklearn_Model、Torch_MLP 和 ARIMA/SARIMA/VAR/Prophet/GRU 的实际输出接入统一 `analysis_evaluation` 表，分别覆盖质量阻断、利润桥接/同期同比、用户供给筛查、Evidence/Claim、人工复核、双低观察、重算下载、显式指标阈值、分类混淆矩阵、forecast 覆盖率边界和五类时间序列真实 temporal holdout；需求预测另有可配置滚动时间起点、窗口误差区间、月度自然月对齐、源表升序校验、训练→holdout 均值漂移、订单/GMV 列边际 KS 漂移、last-value 朴素基线 WAPE 改善和预测总量偏差护栏（可选 `max_total_delta_pct` / `max_holdout_orders_mean_shift_pct` / `max_holdout_orders_ks_distance` / `max_holdout_gmv_ks_distance` / `min_model_wape_lift_pct`，缺失时待确认）；时间切分入口要求显式训练截止点并在训练前缀上重拟合。尚未覆盖真实脱敏生产数据、跨场景联合分布漂移、其余分析模型、校准/公平性、生产预测质量或复杂图表视觉；Office 输出尚未完成复杂内容、原生应用视觉和跨平台核验。
+- 多轮 SSE、流中断重连/续传、跨服务工作流恢复、独立事实核查、团队、Hooks、Memory、Knowledge、MCP 等尚未完成生产级验证；报表分析的本地 SQLite 跨进程取消和崩溃 owner 回收已有切片，Workflow Run 的持久化 pause/resume、启动时未终态 Run 恢复、导出副作用幂等登记和副作用重放保护已补齐本地入口，普通 Agent 校验环境预算、Workflow 图级预算 guard、跨进程原子预算预留、未知价格 fail-closed、SSE 客户端断开收尾、轻量来源/结论展示和固定预测质量评估已完成本地切片，但尚未经过生产并发、真实业务语义/预测质量评测或跨服务恢复验收。Evidence 治理扩展不再作为当前未完成项推进。
 - 真实工作台与静态 `index.html` 仍是两套表面；还没有收敛成一个产品入口。
 - 内部仍有历史命名与兼容标识需要审计，例如前端全局命名空间、旧配置键、存储文件名和数据结构。
 - 本机尚无具体厂商 ODBC 驱动；内置流程图链路已有本地回归，但真实 MCP 连接仍待验证。
@@ -308,7 +311,9 @@
 
 ## 11. 推荐执行顺序与里程碑
 
-现役顺序以 [`docs/HANDOFF.md`](HANDOFF.md) 第 5 节为准：既有基线已提交并推送，但当前本地切片仍未 commit/push。桌面错误态、已知本地工作区 Artifact 重开关联、动态 Evidence/Claim、统一审计 Escape 和 Agent/Workflow Artifact 成本已完成本地收口；下一步依次完成语义核验与完整审批、原能力兼容复验、长任务/分布式工作流恢复、Office/安装包和部署/live 验收。
+- 2026-09-03 最新：需求预测场景已补订单与 GMV 的列边际 KS 距离、可选独立护栏、滚动窗口页面控件、last-value 朴素基线 WAPE 比较及可选改善下限，并完成页面/API/导出参数一致性回归；Workflow 导出节点又补本地 SQLite 幂等登记、内容冲突阻断和已完成 Artifact 复用，并完成重启后恢复回归；这只推进了当前场景的多指标边际漂移、可解释基线和单机导出副作用第一版，不改变真实脱敏数据、联合分布/生产语义、生产预测收益、外部副作用协议和跨服务恢复仍未完成的边界。
+
+现役顺序以 [`docs/HANDOFF.md`](HANDOFF.md) 第 5 节为准：P0 当前收口复核已完成本地质量门和 492 文件 staging 重建，但当前工作树仍未提交；远端 `origin/main` 已回读，尚不包含本轮工作树改动。P1/P2 当前保留确定性数据分析、业务验收、模型预测质量评估、普通 Agent/Workflow 预算与恢复、导出幂等、SSE 客户端断开收尾、Artifact 成本记录和轻量 Claim/Evidence/来源快照；本轮新增的 Claim–Evidence 治理关系核验、Evidence Ledger JSON/SQLite、质量门、语义复算、审批/修订和对应 UI/API 已撤回。下一步接入真实脱敏业务数据并验证生产语义/预测质量，再完成生产数据库与分布式恢复、外部副作用幂等协议、独立事实核查、原能力兼容复验、Office/安装包和部署/live 验收。
 
 不再用主观百分比表达改造完成度；真正状态来自功能兼容矩阵的逐项证据。
 
@@ -334,7 +339,7 @@
 - 应用入口：`api/__init__.py:create_app()` 注册各 API 模块。
 - 对话主链：`POST /api/session/<sid>/chat`，停止入口为 `POST /api/session/<sid>/stop`。
 - 数据接入：上传、数据库、HTTP API、来源列表和数据预览位于 `api/datasource.py`。
-- PFS 第一段：`/api/pfs/capabilities`、`/api/pfs/fixture`、会话报表分析和 Ledger 接口位于 `api/pfs.py`。
+- PFS 第一段：`/api/pfs/capabilities`、`/api/pfs/fixture`、会话报表分析和轻量结果导出位于 `api/pfs.py`；Evidence Ledger 接口已按当前范围撤回。
 - 工具契约：`get_schema`、`query_data`、`run_analysis`、`select_chart`、`generate_chart`、`profile_data`、清洗和导出等位于 `agent/tools/schemas.py`。
 - 分析注册：14 类分析由 `Function/Analyze/registry.py` 提供。
 - 工作流运行：创建、事件、审批、取消、继续、重试和 fork 位于 `api/workflow_runs.py`。

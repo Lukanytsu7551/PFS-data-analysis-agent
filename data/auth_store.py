@@ -41,7 +41,8 @@ def _get_conn() -> sqlite3.Connection:
 
 
 def _ensure_schema() -> None:
-    with _get_conn() as conn:
+    conn = _get_conn()
+    try:
         # --- migration: drop legacy username-based users table ---
         cols = [r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
         if cols and "email" not in cols:
@@ -71,6 +72,8 @@ def _ensure_schema() -> None:
             );
         """)
         conn.commit()
+    finally:
+        conn.close()
 
 
 _ensure_schema()

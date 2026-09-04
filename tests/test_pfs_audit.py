@@ -180,29 +180,15 @@ class SessionAuditHttpTests(unittest.TestCase):
         other_job = self.other.job_runner.begin_tracked("conversation_analysis", "其他会话")
         self.other.job_runner.succeed_tracked(other_job, {"answer": "private"})
 
-        ledger = EvidenceLedger()
-        ledger.create_claim(ClaimRecord(
-            claim_id="current-claim", task_id=f"{self.sid}:{current_job}", text="当前结论",
-        ))
-        ledger.create_claim(ClaimRecord(
-            claim_id="other-claim", task_id=f"{self.other_sid}:{other_job}", text="其他结论",
-        ))
-
-        with patch("api.pfs._ledger", return_value=ledger), patch(
-            "api.audit.list_registered_artifacts", return_value=[]
-        ), patch("api.audit.lifecycle_audit", return_value=[{
-            "event": "claim_decision", "session_id": self.other_sid,
-            "claim_id": "other-claim", "decision": "approved",
-        }]):
+        with patch("api.audit.list_registered_artifacts", return_value=[]):
             response = self.client.get(f"/api/session/{self.sid}/audit")
 
         self.assertEqual(200, response.status_code)
         payload = response.get_json()
         serialized = json.dumps(payload, ensure_ascii=False)
         self.assertIn(current_job, serialized)
-        self.assertIn("current-claim", serialized)
         self.assertNotIn(other_job, serialized)
-        self.assertNotIn("other-claim", serialized)
+        self.assertNotIn("其他会话", serialized)
 
     def test_endpoint_validates_filters(self):
         response = self.client.get(f"/api/session/{self.sid}/audit?type=unknown")

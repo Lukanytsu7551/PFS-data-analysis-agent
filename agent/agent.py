@@ -480,6 +480,8 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
         max_iterations: Optional[int] = None,
         max_tool_calls: Optional[int] = None,
         max_total_tokens: Optional[int] = None,
+        max_run_seconds: Optional[int] = None,
+        max_job_seconds: Optional[int] = None,
         input_price_per_million: Optional[float] = None,
         output_price_per_million: Optional[float] = None,
         max_cost_usd: Optional[float] = None,
@@ -559,6 +561,12 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
             max(1, int(max_total_tokens))
             if max_total_tokens is not None and int(max_total_tokens) > 0
             else None
+        )
+        self._max_run_seconds = max(
+            1, int(max_run_seconds or self.MAX_RUN_SECONDS)
+        )
+        self._max_job_seconds = max(
+            1, int(max_job_seconds or self.MAX_RUN_SECONDS)
         )
         self._input_price_per_million = input_price_per_million
         self._output_price_per_million = output_price_per_million
@@ -1215,11 +1223,25 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
         self._active_job_id = jid
         self._job_start_ts = time.monotonic()
         try:
-            for event in self._job_runner.iter_events(jid):
+            for event in self._job_runner.iter_events(
+                jid, timeout=self._max_job_seconds,
+            ):
                 yield event
             job = self._job_runner.get_status(jid)
             if job is None:
                 raise RuntimeError(f"job disappeared: {jid}")
+            from data.jobs_store import _TERMINAL
+            if job["status"] not in _TERMINAL:
+                # JobRunner cancellation is cooperative: this returns a
+                # bounded Agent result while the worker finishes at its next
+                # ctx.check_canceled() checkpoint.
+                self._job_runner.cancel(jid)
+                timed_out = dict(job)
+                timed_out["status"] = "canceled"
+                timed_out["error"] = (
+                    f"后台任务超过 {self._max_job_seconds} 秒，已请求取消。"
+                )
+                return timed_out
             return job
         finally:
             current = self._job_runner.get_status(jid)
@@ -1986,9 +2008,8 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
         _run_total_cost_usd = 0.0
         _pfs_total_tool_calls = 0
         _run_start = time.monotonic()
-        _MAX_RUN_SECONDS = self.MAX_RUN_SECONDS
+        _MAX_RUN_SECONDS = self._max_run_seconds
         _MAX_CONSECUTIVE_ERRORS = 3
-        _MAX_JOB_SECONDS = 1800          # wall-clock cap for a single job execution (prevents hung tools)
         _job_start_ts = 0.0
         _fallback_excluded_providers = {
             str(self._provider or "").strip(),

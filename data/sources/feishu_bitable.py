@@ -26,6 +26,8 @@ class FeishuBitableDataSource(DataSource):
         self.name = str(name or "飞书多维表格")
         self._conn = _new_conn()
         self._table = _clean_identifier(table_name) or "bitable"
+        self._source_tables = {self._table}
+        self._analysis_tables = set()
         frame = pd.DataFrame(records)
         if frame.empty and not list(frame.columns):
             frame = pd.DataFrame({"_feishu_record_id": pd.Series(dtype="string")})
@@ -69,6 +71,7 @@ class FeishuBitableDataSource(DataSource):
                 rows = self._conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
             except Exception as exc:
                 return f"Error building analysis table: {exc}"
+        self._analysis_tables.add(table_name)
         return _table_schema_str(self._conn, table_name, rows)
 
     def get_preview(self) -> List[dict]:

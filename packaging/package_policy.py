@@ -57,9 +57,13 @@ PUBLIC_RUNTIME_ASSETS = (
     ("docx", "templates", "default.docx"),
 )
 
-# A bounded, reviewed fixture is safe to ship with the offline PFS preview.
+# Bounded, reviewed fixtures are safe to ship with the offline PFS preview.
 # Other CSV/TSV files remain blocked so user data cannot enter a package.
-PUBLIC_REPORT_FIXTURE = ("data", "fixtures", "pfs_sales.csv")
+PUBLIC_REPORT_FIXTURES = frozenset({
+    ("data", "fixtures", "pfs_sales.csv"),
+    ("data", "fixtures", "pfs_city_monthly_pnl.csv"),
+    ("data", "fixtures", "pfs_monthly_demand.csv"),
+})
 
 
 def normalized_relative(value: str) -> str:
@@ -109,7 +113,7 @@ def classify_path(value: str) -> tuple[str, str]:
     runtime_layout = bool(parts and parts[0] in {"_internal", "contents"}) or (
         len(parts) > 1 and parts[0].endswith(".app") and parts[1] == "contents"
     )
-    if parts == PUBLIC_REPORT_FIXTURE:
+    if parts in PUBLIC_REPORT_FIXTURES:
         return "allow", "reviewed offline report fixture"
     public_runtime_asset = runtime_layout and any(
         len(parts) >= len(suffix) and parts[-len(suffix):] == suffix

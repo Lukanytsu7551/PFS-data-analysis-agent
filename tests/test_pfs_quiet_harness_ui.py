@@ -11,6 +11,8 @@ APP = (ROOT / "frontend" / "legacy" / "app.js").read_text(encoding="utf-8")
 I18N = (ROOT / "frontend" / "legacy" / "i18n.js").read_text(encoding="utf-8")
 ICONS = (ROOT / "frontend" / "core" / "icons.js").read_text(encoding="utf-8")
 SKILLS = (ROOT / "frontend" / "features" / "skills.js").read_text(encoding="utf-8")
+SLASH = (ROOT / "frontend" / "features" / "slash.js").read_text(encoding="utf-8")
+CHAT_STREAM = (ROOT / "frontend" / "features" / "chat-stream.js").read_text(encoding="utf-8")
 MODELS = (ROOT / "frontend" / "features" / "models.js").read_text(encoding="utf-8")
 SETTINGS_UI = (ROOT / "frontend" / "features" / "ui" / "settings-ui.js").read_text(encoding="utf-8")
 LLM_CONFIG = (ROOT / "LLM" / "llm_config_manager.py").read_text(encoding="utf-8")
@@ -96,6 +98,17 @@ class QuietHarnessUiContractTests(unittest.TestCase):
         self.assertIn('import { iconSpan, svgMarkup }', SKILLS)
         self.assertIn('svgMarkup("check"', SKILLS)
         self.assertNotIn("<svg", SKILLS)
+
+    def test_welcome_skill_shortcuts_use_skill_activation(self):
+        """Skill shortcuts must not be sent as unknown slash commands."""
+        self.assertIn('data-i18n="hint.ppt"', TEMPLATE)
+        self.assertIn('data-i18n="hint.dashboard"', TEMPLATE)
+        self.assertIn("function getSkill(name)", SKILLS)
+        self.assertIn("getSkill, selectSkill", SKILLS)
+        self.assertIn("skill: command ? null : getSkill(name)", SLASH)
+        self.assertIn("pfs()?.skills?.selectSkill?.(skill.name)", SLASH)
+        self.assertIn("text = parsed.arguments", CHAT_STREAM)
+        self.assertIn("if (parsed.skill)", CHAT_STREAM)
 
     def test_app_registers_and_initializes_sidebar_rail(self):
         self.assertIn("toggleSidebarRail: () => sidebar.toggleSidebarRail()", APP)

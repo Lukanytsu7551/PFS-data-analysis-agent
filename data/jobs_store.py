@@ -23,6 +23,12 @@ STATUS_FAILED = "failed"
 STATUS_CANCELING = "canceling"
 STATUS_CANCELED = "canceled"
 
+# A JobRunner owns the executable callback in process memory. When the
+# process disappears, a reopened store cannot safely replay that callback;
+# keep the recovery reason stable so higher-level workflow code can distinguish
+# a restart from an ordinary provider failure.
+RESTART_RECOVERY_ERROR = "Application restarted before the job completed."
+
 _TERMINAL = {STATUS_SUCCEEDED, STATUS_FAILED, STATUS_CANCELED}
 
 EVENT_RETENTION_DAYS = 30
@@ -188,7 +194,7 @@ class JobsStore:
                 }
             else:
                 status = STATUS_FAILED
-                error = "Application restarted before the job completed."
+                error = RESTART_RECOVERY_ERROR
                 event = {
                     "type": "job_error", "job_id": row["id"],
                     "status": STATUS_FAILED, "error": error,

@@ -1,4 +1,5 @@
 """Stable WF0 contracts for deterministic workflow execution."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -22,6 +23,9 @@ class WorkflowErrorCode(str, Enum):
     CONCURRENCY_LIMIT_REACHED = "workflow_concurrency_limit_reached"
     OUTPUT_CONTRACT_VIOLATION = "workflow_output_contract_violation"
     APPROVAL_ALREADY_DECIDED = "workflow_approval_already_decided"
+    NODE_RUN_LIMIT_REACHED = "workflow_node_run_limit_reached"
+    UNKNOWN_PRICE = "workflow_unknown_price"
+    RESTART_REPLAY_BLOCKED = "workflow_restart_replay_blocked"
 
 
 class WorkflowContractError(ValueError):
@@ -76,55 +80,72 @@ class WorkflowRunMode(str, Enum):
     EXCEPTION_REVIEW = "exception_review"
 
 
-RUN_TERMINAL_STATUSES = frozenset({
-    RunStatus.CANCELED,
-    RunStatus.SUCCEEDED,
-    RunStatus.FAILED,
-})
-
-NODE_RUN_TERMINAL_STATUSES = frozenset({
-    NodeRunStatus.SUCCEEDED,
-    NodeRunStatus.REJECTED,
-    NodeRunStatus.SKIPPED,
-    NodeRunStatus.FAILED,
-    NodeRunStatus.CANCELED,
-})
-
-APPROVAL_TERMINAL_STATUSES = frozenset({
-    ApprovalStatus.DECIDED,
-    ApprovalStatus.CANCELED,
-})
-
-RUN_TRANSITIONS = {
-    RunStatus.CREATED: frozenset({
-        RunStatus.RUNNING,
-        RunStatus.CANCELING,
+RUN_TERMINAL_STATUSES = frozenset(
+    {
         RunStatus.CANCELED,
-        RunStatus.FAILED,
-    }),
-    RunStatus.RUNNING: frozenset({
-        RunStatus.WAITING_APPROVAL,
-        RunStatus.PAUSED,
-        RunStatus.CANCELING,
         RunStatus.SUCCEEDED,
         RunStatus.FAILED,
-    }),
-    RunStatus.WAITING_APPROVAL: frozenset({
-        RunStatus.RUNNING,
-        RunStatus.PAUSED,
-        RunStatus.CANCELING,
-        RunStatus.FAILED,
-    }),
-    RunStatus.PAUSED: frozenset({
-        RunStatus.RUNNING,
-        RunStatus.CANCELING,
-        RunStatus.CANCELED,
-        RunStatus.FAILED,
-    }),
-    RunStatus.CANCELING: frozenset({
-        RunStatus.CANCELED,
-        RunStatus.FAILED,
-    }),
+    }
+)
+
+NODE_RUN_TERMINAL_STATUSES = frozenset(
+    {
+        NodeRunStatus.SUCCEEDED,
+        NodeRunStatus.REJECTED,
+        NodeRunStatus.SKIPPED,
+        NodeRunStatus.FAILED,
+        NodeRunStatus.CANCELED,
+    }
+)
+
+APPROVAL_TERMINAL_STATUSES = frozenset(
+    {
+        ApprovalStatus.DECIDED,
+        ApprovalStatus.CANCELED,
+    }
+)
+
+RUN_TRANSITIONS = {
+    RunStatus.CREATED: frozenset(
+        {
+            RunStatus.RUNNING,
+            RunStatus.CANCELING,
+            RunStatus.CANCELED,
+            RunStatus.FAILED,
+        }
+    ),
+    RunStatus.RUNNING: frozenset(
+        {
+            RunStatus.WAITING_APPROVAL,
+            RunStatus.PAUSED,
+            RunStatus.CANCELING,
+            RunStatus.SUCCEEDED,
+            RunStatus.FAILED,
+        }
+    ),
+    RunStatus.WAITING_APPROVAL: frozenset(
+        {
+            RunStatus.RUNNING,
+            RunStatus.PAUSED,
+            RunStatus.CANCELING,
+            RunStatus.FAILED,
+        }
+    ),
+    RunStatus.PAUSED: frozenset(
+        {
+            RunStatus.RUNNING,
+            RunStatus.WAITING_APPROVAL,
+            RunStatus.CANCELING,
+            RunStatus.CANCELED,
+            RunStatus.FAILED,
+        }
+    ),
+    RunStatus.CANCELING: frozenset(
+        {
+            RunStatus.CANCELED,
+            RunStatus.FAILED,
+        }
+    ),
     RunStatus.CANCELED: frozenset(),
     RunStatus.SUCCEEDED: frozenset(),
     # A failed Run may only be reopened by the explicit manual retry path.
@@ -133,41 +154,53 @@ RUN_TRANSITIONS = {
 }
 
 NODE_RUN_TRANSITIONS = {
-    NodeRunStatus.PENDING: frozenset({
-        NodeRunStatus.READY,
-        NodeRunStatus.SKIPPED,
-        NodeRunStatus.CANCELED,
-    }),
-    NodeRunStatus.READY: frozenset({
-        NodeRunStatus.QUEUED,
-        NodeRunStatus.SKIPPED,
-        NodeRunStatus.FAILED,
-        NodeRunStatus.SKIPPED,
-        NodeRunStatus.CANCELED,
-    }),
-    NodeRunStatus.QUEUED: frozenset({
-        NodeRunStatus.RUNNING,
-        NodeRunStatus.FAILED,
-        NodeRunStatus.CANCELED,
-    }),
-    NodeRunStatus.RUNNING: frozenset({
-        NodeRunStatus.OUTPUT_READY,
-        NodeRunStatus.FAILED,
-        NodeRunStatus.CANCELED,
-    }),
-    NodeRunStatus.OUTPUT_READY: frozenset({
-        NodeRunStatus.WAITING_APPROVAL,
-        NodeRunStatus.SUCCEEDED,
-        NodeRunStatus.FAILED,
-        NodeRunStatus.CANCELED,
-    }),
-    NodeRunStatus.WAITING_APPROVAL: frozenset({
-        NodeRunStatus.SUCCEEDED,
-        NodeRunStatus.REJECTED,
-        NodeRunStatus.FAILED,
-        NodeRunStatus.SKIPPED,
-        NodeRunStatus.CANCELED,
-    }),
+    NodeRunStatus.PENDING: frozenset(
+        {
+            NodeRunStatus.READY,
+            NodeRunStatus.SKIPPED,
+            NodeRunStatus.CANCELED,
+        }
+    ),
+    NodeRunStatus.READY: frozenset(
+        {
+            NodeRunStatus.QUEUED,
+            NodeRunStatus.SKIPPED,
+            NodeRunStatus.FAILED,
+            NodeRunStatus.SKIPPED,
+            NodeRunStatus.CANCELED,
+        }
+    ),
+    NodeRunStatus.QUEUED: frozenset(
+        {
+            NodeRunStatus.RUNNING,
+            NodeRunStatus.FAILED,
+            NodeRunStatus.CANCELED,
+        }
+    ),
+    NodeRunStatus.RUNNING: frozenset(
+        {
+            NodeRunStatus.OUTPUT_READY,
+            NodeRunStatus.FAILED,
+            NodeRunStatus.CANCELED,
+        }
+    ),
+    NodeRunStatus.OUTPUT_READY: frozenset(
+        {
+            NodeRunStatus.WAITING_APPROVAL,
+            NodeRunStatus.SUCCEEDED,
+            NodeRunStatus.FAILED,
+            NodeRunStatus.CANCELED,
+        }
+    ),
+    NodeRunStatus.WAITING_APPROVAL: frozenset(
+        {
+            NodeRunStatus.SUCCEEDED,
+            NodeRunStatus.REJECTED,
+            NodeRunStatus.FAILED,
+            NodeRunStatus.SKIPPED,
+            NodeRunStatus.CANCELED,
+        }
+    ),
     NodeRunStatus.SUCCEEDED: frozenset(),
     NodeRunStatus.REJECTED: frozenset(),
     NodeRunStatus.SKIPPED: frozenset(),
@@ -176,10 +209,12 @@ NODE_RUN_TRANSITIONS = {
 }
 
 APPROVAL_TRANSITIONS = {
-    ApprovalStatus.PENDING: frozenset({
-        ApprovalStatus.DECIDED,
-        ApprovalStatus.CANCELED,
-    }),
+    ApprovalStatus.PENDING: frozenset(
+        {
+            ApprovalStatus.DECIDED,
+            ApprovalStatus.CANCELED,
+        }
+    ),
     ApprovalStatus.DECIDED: frozenset(),
     ApprovalStatus.CANCELED: frozenset(),
 }
@@ -197,6 +232,7 @@ NODE_LIMIT_RANGES = {
     "max_run_seconds": (10, 900),
     # Delegated execution is capped at 50 rounds × 4 calls per round.
     "max_tool_calls": (0, 200),
+    "max_total_tokens": (1, 2_000_000),
 }
 NODE_COST_LIMIT_MAX_USD = 1_000_000.0
 
@@ -255,9 +291,9 @@ class AgentProfile:
                 raise ValueError(f"agent profile {field_name} is required")
         if self.revision < 1:
             raise ValueError("agent profile revision must be positive")
-        normalized = tuple(dict.fromkeys(
-            str(tool).strip() for tool in self.allowed_tools if str(tool).strip()
-        ))
+        normalized = tuple(
+            dict.fromkeys(str(tool).strip() for tool in self.allowed_tools if str(tool).strip())
+        )
         if normalized != self.allowed_tools:
             object.__setattr__(self, "allowed_tools", normalized)
 
@@ -276,9 +312,7 @@ def _required_text(item: Mapping[str, Any], key: str, label: str) -> str:
 def _validate_retry_edge(edge: Mapping[str, Any], edge_id: str) -> None:
     raw_limit = edge.get("max_iterations")
     if isinstance(raw_limit, bool) or not isinstance(raw_limit, int) or raw_limit < 1:
-        raise _graph_error(
-            f"retry_loop edge {edge_id} requires a positive max_iterations"
-        )
+        raise _graph_error(f"retry_loop edge {edge_id} requires a positive max_iterations")
 
 
 def _validate_acyclic_forward_graph(
@@ -358,19 +392,13 @@ def validate_workflow_graph(graph: Mapping[str, Any]) -> dict[str, Any]:
         if node_type in {"validation", "router", "sql", "export"} and not workflow_feature_enabled(
             "deterministic_nodes"
         ):
-            raise _graph_error(
-                f"deterministic node {node_id} is disabled by workflow feature flag"
-            )
+            raise _graph_error(f"deterministic node {node_id} is disabled by workflow feature flag")
         if node_type == "verifier" and not workflow_feature_enabled("verifier_nodes"):
-            raise _graph_error(
-                f"verifier node {node_id} is disabled by workflow feature flag"
-            )
+            raise _graph_error(f"verifier node {node_id} is disabled by workflow feature flag")
         if node_type in {"agent", "verifier"}:
             _required_text(raw_node, "agent_profile_id", f"agent node {node_id}")
         elif "agent_profile_id" in raw_node:
-            raise _graph_error(
-                f"deterministic node {node_id} must not declare agent_profile_id"
-            )
+            raise _graph_error(f"deterministic node {node_id} must not declare agent_profile_id")
         if node_type == "validation":
             validation = raw_node.get("validation")
             if not isinstance(validation, Mapping):
@@ -380,18 +408,13 @@ def validate_workflow_graph(graph: Mapping[str, Any]) -> dict[str, Any]:
                 if not isinstance(values, list) or any(
                     not isinstance(item, str) or not item.strip() for item in values
                 ):
-                    raise _graph_error(
-                        f"validation node {node_id} {key} must be a string array"
-                    )
+                    raise _graph_error(f"validation node {node_id} {key} must be a string array")
             for key in ("field_types", "min_items", "max_items", "equals"):
                 values = validation.get(key, {})
                 if not isinstance(values, Mapping) or any(
-                    not isinstance(name, str) or not name.strip()
-                    for name in values
+                    not isinstance(name, str) or not name.strip() for name in values
                 ):
-                    raise _graph_error(
-                        f"validation node {node_id} {key} must be an object"
-                    )
+                    raise _graph_error(f"validation node {node_id} {key} must be an object")
             for key in ("min_items", "max_items"):
                 if any(
                     isinstance(value, bool) or not isinstance(value, int) or value < 0
@@ -413,20 +436,18 @@ def validate_workflow_graph(graph: Mapping[str, Any]) -> dict[str, Any]:
                 raise _graph_error(f"export node {node_id} requires export")
             _required_text(export, "source", f"export node {node_id}")
             if str(export.get("format") or "markdown") not in {"markdown", "json", "text"}:
-                raise _graph_error(
-                    f"export node {node_id} format must be markdown, json, or text"
-                )
+                raise _graph_error(f"export node {node_id} format must be markdown, json, or text")
         if node_type == "verifier":
             verifier = raw_node.get("verifier")
             if not isinstance(verifier, Mapping):
                 raise _graph_error(f"verifier node {node_id} requires verifier")
             standards = verifier.get("standards")
-            if not isinstance(standards, list) or not standards or any(
-                not isinstance(item, str) or not item.strip() for item in standards
+            if (
+                not isinstance(standards, list)
+                or not standards
+                or any(not isinstance(item, str) or not item.strip() for item in standards)
             ):
-                raise _graph_error(
-                    f"verifier node {node_id} standards must be a non-empty string array"
-                )
+                raise _graph_error(f"verifier node {node_id} standards must be a non-empty string array")
         join_policy = str(raw_node.get("join_policy") or "all_success")
         if join_policy not in ALLOWED_JOIN_POLICIES:
             raise _graph_error(f"unsupported join_policy for {node_id}: {join_policy}")
@@ -446,13 +467,10 @@ def validate_workflow_graph(graph: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(forbidden, list) or any(
             not isinstance(item, str) or not item.strip() for item in forbidden
         ):
-            raise _graph_error(
-                f"{node_id} output_validation.forbidden_substrings must be a string array"
-            )
+            raise _graph_error(f"{node_id} output_validation.forbidden_substrings must be a string array")
         artifact_types = raw_node.get("output_artifacts", {})
         if not isinstance(artifact_types, Mapping) or any(
-            key not in raw_node.get("output_contract", [])
-            or value not in ALLOWED_ARTIFACT_TYPES
+            key not in raw_node.get("output_contract", []) or value not in ALLOWED_ARTIFACT_TYPES
             for key, value in artifact_types.items()
         ):
             raise _graph_error(
@@ -460,43 +478,38 @@ def validate_workflow_graph(graph: Mapping[str, Any]) -> dict[str, Any]:
             )
         side_effects = raw_node.get("side_effects", [])
         if not isinstance(side_effects, list) or any(
-            not isinstance(item, str) or item not in ALLOWED_SIDE_EFFECTS
-            for item in side_effects
+            not isinstance(item, str) or item not in ALLOWED_SIDE_EFFECTS for item in side_effects
         ):
-            raise _graph_error(
-                f"{node_id} side_effects must be known capability names"
-            )
+            raise _graph_error(f"{node_id} side_effects must be known capability names")
         if node_type in {"validation", "router", "sql"} and any(
             item in {"write_data", "export_file", "network"} for item in side_effects
         ):
-            raise _graph_error(
-                f"deterministic node {node_id} cannot declare external side effects"
-            )
+            raise _graph_error(f"deterministic node {node_id} cannot declare external side effects")
         if node_type == "export" and "export_file" not in side_effects:
-            raise _graph_error(
-                f"export node {node_id} must declare export_file side effect"
-            )
+            raise _graph_error(f"export node {node_id} must declare export_file side effect")
         node_limits = raw_node.get("limits", {})
         if not isinstance(node_limits, Mapping):
             raise _graph_error(f"{node_id} limits must be an object")
         for key, (minimum, maximum) in NODE_LIMIT_RANGES.items():
             value = node_limits.get(key)
             if value is not None and (
-                isinstance(value, bool)
-                or not isinstance(value, int)
-                or not minimum <= value <= maximum
+                isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum
             ):
-                raise _graph_error(
-                    f"{node_id} {key} must be an integer between {minimum} and {maximum}"
-                )
+                raise _graph_error(f"{node_id} {key} must be an integer between {minimum} and {maximum}")
         cost_limit = node_limits.get("max_cost_usd")
         if cost_limit is not None:
             try:
                 cost_limit = float(cost_limit)
             except (TypeError, ValueError):
                 raise _graph_error(f"{node_id} max_cost_usd must be a finite number greater than 0")
-            if isinstance(node_limits.get("max_cost_usd"), bool) or not math.isfinite(cost_limit) or not 0 < cost_limit <= NODE_COST_LIMIT_MAX_USD:
-                raise _graph_error(f"{node_id} max_cost_usd must be a finite number between 0 and {NODE_COST_LIMIT_MAX_USD}")
+            if (
+                isinstance(node_limits.get("max_cost_usd"), bool)
+                or not math.isfinite(cost_limit)
+                or not 0 < cost_limit <= NODE_COST_LIMIT_MAX_USD
+            ):
+                raise _graph_error(
+                    f"{node_id} max_cost_usd must be a finite number between 0 and {NODE_COST_LIMIT_MAX_USD}"
+                )
         node_ids.add(node_id)
         nodes.append(raw_node)
 
@@ -530,9 +543,7 @@ def validate_workflow_graph(graph: Mapping[str, Any]) -> dict[str, Any]:
             _validate_retry_edge(raw_edge, edge_id)
         if edge_type is EdgeType.CONDITIONAL:
             if not workflow_feature_enabled("conditional_edges"):
-                raise _graph_error(
-                    f"conditional edge {edge_id} is disabled by workflow feature flag"
-                )
+                raise _graph_error(f"conditional edge {edge_id} is disabled by workflow feature flag")
             condition = raw_edge.get("condition")
             if not isinstance(condition, Mapping):
                 raise _graph_error(f"conditional edge {edge_id} requires condition")
@@ -557,7 +568,8 @@ def validate_workflow_graph(graph: Mapping[str, Any]) -> dict[str, Any]:
     ]
     for node_id in high_risk_nodes:
         verifier_approvals = [
-            edge for edge in edges
+            edge
+            for edge in edges
             if edge.get("type") == EdgeType.APPROVAL.value
             and str(edge.get("to_node")) == node_id
             and str(nodes_by_id[str(edge.get("from_node"))].get("type")) == "verifier"
@@ -570,13 +582,9 @@ def validate_workflow_graph(graph: Mapping[str, Any]) -> dict[str, Any]:
     for raw_node in nodes:
         max_attempts = raw_node.get("max_attempts")
         if max_attempts is not None and (
-            isinstance(max_attempts, bool)
-            or not isinstance(max_attempts, int)
-            or max_attempts < 1
+            isinstance(max_attempts, bool) or not isinstance(max_attempts, int) or max_attempts < 1
         ):
-            raise _graph_error(
-                f"{raw_node['node_id']} max_attempts must be a positive integer"
-            )
+            raise _graph_error(f"{raw_node['node_id']} max_attempts must be a positive integer")
 
     run_policy = graph.get("run_policy", {})
     if not isinstance(run_policy, Mapping):
@@ -590,26 +598,35 @@ def validate_workflow_graph(graph: Mapping[str, Any]) -> dict[str, Any]:
                 "run_policy.mode must be full_auto, key_approval, or exception_review"
             ) from exc
     if high_risk_nodes and raw_mode != WorkflowRunMode.KEY_APPROVAL.value:
-        raise _graph_error(
-            "graphs with high-risk side effects require run_policy.mode=key_approval"
-        )
+        raise _graph_error("graphs with high-risk side effects require run_policy.mode=key_approval")
 
     limits = graph.get("limits", {})
     if not isinstance(limits, Mapping):
         raise _graph_error("workflow limits must be an object")
     for key in ("max_run_minutes", "max_total_node_runs", "max_total_tokens", "max_concurrent_node_runs"):
         value = limits.get(key)
-        if value is not None and (
-            isinstance(value, bool) or not isinstance(value, int) or value < 1
-        ):
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 1):
             raise _graph_error(f"{key} must be a positive integer")
+    max_total_node_runs = limits.get("max_total_node_runs")
+    if (
+        isinstance(max_total_node_runs, int)
+        and not isinstance(max_total_node_runs, bool)
+        and max_total_node_runs < len(raw_nodes)
+    ):
+        raise _graph_error("max_total_node_runs must be at least the number of workflow nodes")
     total_cost_limit = limits.get("max_total_cost_usd")
     if total_cost_limit is not None:
         try:
             total_cost_limit = float(total_cost_limit)
         except (TypeError, ValueError):
             raise _graph_error("max_total_cost_usd must be a finite number greater than 0")
-        if isinstance(limits.get("max_total_cost_usd"), bool) or not math.isfinite(total_cost_limit) or not 0 < total_cost_limit <= NODE_COST_LIMIT_MAX_USD:
-            raise _graph_error(f"max_total_cost_usd must be a finite number between 0 and {NODE_COST_LIMIT_MAX_USD}")
+        if (
+            isinstance(limits.get("max_total_cost_usd"), bool)
+            or not math.isfinite(total_cost_limit)
+            or not 0 < total_cost_limit <= NODE_COST_LIMIT_MAX_USD
+        ):
+            raise _graph_error(
+                f"max_total_cost_usd must be a finite number between 0 and {NODE_COST_LIMIT_MAX_USD}"
+            )
 
     return dict(graph)

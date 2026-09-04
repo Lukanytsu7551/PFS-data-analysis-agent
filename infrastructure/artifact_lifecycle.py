@@ -87,21 +87,6 @@ def _record(event: str, payload: dict[str, Any]) -> None:
         log.warning("[lifecycle] audit write failed: %s", exc)
 
 
-def record_governance_decision(
-    *, claim_id: str, task_id: str, previous_decision: str, decision: str,
-    reason: str, session_id: str = "",
-) -> None:
-    """Record a human Claim decision without exposing filesystem paths."""
-    _record("claim_decision", {
-        "claim_id": claim_id,
-        "task_id": task_id,
-        "previous_decision": previous_decision,
-        "decision": decision,
-        "reason": reason,
-        "session_id": session_id,
-    })
-
-
 def register_session_file(path: Path, *, session_id: str, autosave: bool) -> None:
     """Record an owned session artifact without exposing its contents."""
     _record("session_registered", {
@@ -710,7 +695,7 @@ def list_registered_artifacts(*, session_id: str = "", limit: int = 50) -> list[
     safe_fields = (
         "id", "type", "session_id", "workspace_id", "created_at", "size_bytes",
         "sha256", "run_id", "source_id", "source_sha256", "worksheet",
-        "included_rows", "metric_contract", "claim_ids", "evidence_ids",
+        "included_rows", "metric_contract",
         "analysis_parameters", "sql", "chart_specs", "final_claims", "warnings",
         "cost",
         "download_count", "download_history",

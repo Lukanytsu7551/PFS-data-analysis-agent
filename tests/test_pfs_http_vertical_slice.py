@@ -55,11 +55,7 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         )
 
     def _upload_missing_metric_csv(self):
-        csv = (
-            "month,region,orders\n"
-            "2026-01,华东,12\n"
-            "2026-02,华南,8\n"
-        ).encode("utf-8")
+        csv = ("month,region,orders\n2026-01,华东,12\n2026-02,华南,8\n").encode("utf-8")
         return self.client.post(
             f"/api/session/{self.sid}/upload",
             data={"file": (io.BytesIO(csv), "missing-sales.csv")},
@@ -105,10 +101,9 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         self.assertEqual(result["snapshot"]["content_sha256"], evidence["content_sha256"])
         self.assertIn("quarterly_sales.csv#sha256=", evidence["locator"])
         self.assertEqual([evidence["evidence_id"]], result["claims"][0]["evidence_ids"])
-        self.assertEqual([evidence["evidence_id"]], [link["evidence_id"] for link in result["claims"][0]["evidence_links"]])
         self.assertEqual("http-upload-run", result["request"]["run_id"])
 
-    def test_active_uploaded_analysis_can_be_canceled_before_governance_persistence(self):
+    def test_active_uploaded_analysis_can_be_canceled_before_result_commit(self):
         uploaded = self._upload()
         source_id = uploaded.get_json()["added"][0]["source_id"]
         run_id = "http-cancel-run"
@@ -134,16 +129,12 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
                     },
                 )
 
-        with patch("api.pfs.analyze_file", side_effect=slow_analysis), patch(
-            "api.pfs._governance_result"
-        ) as govern:
+        with patch("api.pfs.analyze_file", side_effect=slow_analysis):
             worker = threading.Thread(target=post_analysis, daemon=True)
             worker.start()
             try:
                 self.assertTrue(analysis_started.wait(timeout=2))
-                canceled = self.client.post(
-                    f"/api/session/{self.sid}/pfs/runs/{run_id}/cancel"
-                )
+                canceled = self.client.post(f"/api/session/{self.sid}/pfs/runs/{run_id}/cancel")
                 self.assertEqual(202, canceled.status_code)
                 self.assertEqual("cancel_requested", canceled.get_json()["status"])
             finally:
@@ -151,16 +142,12 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
                 worker.join(timeout=3)
 
             self.assertFalse(worker.is_alive())
-            govern.assert_not_called()
-
         response = response_holder["response"]
         self.assertEqual(409, response.status_code)
         self.assertEqual("pfs_analysis_canceled", response.get_json()["code"])
 
     def test_cancel_rejects_run_that_is_not_active_in_session(self):
-        response = self.client.post(
-            f"/api/session/{self.sid}/pfs/runs/not-running/cancel"
-        )
+        response = self.client.post(f"/api/session/{self.sid}/pfs/runs/not-running/cancel")
         self.assertEqual(404, response.status_code)
         self.assertEqual("pfs_analysis_run_not_active", response.get_json()["code"])
 
@@ -178,10 +165,7 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         self.assertEqual("upload_file_too_large", payload["code"])
 
     def test_invalid_date_source_remains_selectable_and_analysis_explains_repair(self):
-        csv = (
-            "month,region,sales_amount\n"
-            "2026-02-30,华东,1200\n"
-        ).encode("utf-8")
+        csv = ("month,region,sales_amount\n2026-02-30,华东,1200\n").encode("utf-8")
         uploaded = self.client.post(
             f"/api/session/{self.sid}/upload",
             data={"file": (io.BytesIO(csv), "invalid-date.csv")},
@@ -290,7 +274,67 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual("implemented_server_recomputed", payload["reporting"]["report_export_json"])
         self.assertEqual("verified_local_http", payload["models"]["deepseek_chat"])
+        self.assertEqual(
+            "implemented_local_contract_v1_with_agent_model_output_adapters",
+            payload["models"]["prediction_quality_evaluation"],
+        )
+        self.assertEqual(
+            "implemented_validated_environment_contract_v1",
+            payload["runtime"]["agent_runtime_budget"],
+        )
+        self.assertEqual(
+            "implemented_graph_limits_atomic_reservation_v2",
+            payload["runtime"]["workflow_budget"],
+        )
         self.assertIn("other_connectors_pending", payload["runtime"]["external_sources"])
+
+    def test_closing_sse_before_agent_build_cancels_tracked_turn(self):
+        response = self.client.post(
+            f"/api/session/{self.sid}/chat",
+            json={"message": "测试断开"},
+            buffered=False,
+        )
+        stream = iter(response.response)
+        self.assertIn("agent_activity", next(stream).decode("utf-8"))
+        jobs = session_manager.get(self.sid).job_runner.list_jobs(limit=10)
+        self.assertEqual(1, len(jobs))
+        job_id = jobs[0]["id"]
+
+        stream.close()
+        response.close()
+
+        status = session_manager.get(self.sid).job_runner.get_status(job_id)
+        self.assertEqual("canceled", status["status"])
+
+    def test_closing_sse_after_partial_event_cancels_without_emitting_done(self):
+        class FakeAgent:
+            _artifact_metadata = {}
+            _provider = "test"
+            model = "stream-close-test"
+
+            def run(self, *_args, **_kwargs):
+                yield {"type": "text", "content": "部分结果"}
+
+        with patch("api.chat._build_agent", return_value=FakeAgent()):
+            response = self.client.post(
+                f"/api/session/{self.sid}/chat",
+                json={"message": "测试部分断开"},
+                buffered=False,
+            )
+            stream = iter(response.response)
+            next(stream)
+            partial = next(stream).decode("utf-8")
+            self.assertIn("部分结果", partial)
+            jobs = session_manager.get(self.sid).job_runner.list_jobs(limit=10)
+            self.assertEqual(1, len(jobs))
+            job_id = jobs[0]["id"]
+
+            stream.close()
+            response.close()
+
+        status = session_manager.get(self.sid).job_runner.get_status(job_id)
+        self.assertEqual("canceled", status["status"])
+        self.assertNotIn('"type": "done"', partial)
 
     def test_natural_language_query_uses_deterministic_analysis(self):
         uploaded = self._upload()
@@ -370,19 +414,8 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         body = response.get_data(as_text=True)
         self.assertIn("pfs_result", body)
         self.assertIn("4400", body)
-        self.assertIn("Claim", body)
-
-        ledger = self.client.get(
-            f"/api/pfs/ledger?task_id={self.sid}:chat-pfs-run"
-        ).get_json()
-        self.assertTrue(ledger["ok"])
-        self.assertEqual(2, len(ledger["claims"]))
-        self.assertEqual(1, len(ledger["evidence"]))
-        self.assertEqual("quarterly_sales.csv", ledger["evidence"][0]["file_name"])
-        self.assertEqual(
-            [ledger["evidence"][0]["evidence_id"]],
-            ledger["claims"][0]["evidence_ids"],
-        )
+        self.assertIn('"claims"', body)
+        self.assertIn('"evidence"', body)
 
     def test_chat_deterministic_mode_requires_source(self):
         response = self.client.post(
@@ -499,18 +532,8 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         )
         self.assertEqual(200, chat.status_code)
         self.assertIn("pfs_result", chat.get_data(as_text=True))
-        chat_ledger = self.client.get(
-            f"/api/pfs/ledger?task_id={self.sid}:chat-xlsx-run"
-        ).get_json()
-        self.assertTrue(chat_ledger["ok"])
-        self.assertEqual(2, len(chat_ledger["claims"]))
-        self.assertEqual(1, len(chat_ledger["evidence"]))
-        self.assertEqual("monthly_sales.xlsx", chat_ledger["evidence"][0]["file_name"])
-        self.assertEqual("Monthly Sales", chat_ledger["evidence"][0]["worksheet"])
-        self.assertEqual(
-            [chat_ledger["evidence"][0]["evidence_id"]],
-            chat_ledger["claims"][0]["evidence_ids"],
-        )
+        self.assertIn('"claims"', chat.get_data(as_text=True))
+        self.assertIn('"evidence"', chat.get_data(as_text=True))
 
         exported = self.client.post(
             f"/api/session/{self.sid}/pfs/export",
@@ -565,69 +588,21 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         self.assertEqual(400, unknown.status_code)
         self.assertEqual("worksheet_not_found", unknown.get_json()["code"])
 
-    def test_report_governance_is_idempotent_and_session_scoped(self):
+    def test_report_keeps_lightweight_trace_without_governance_endpoint(self):
         uploaded = self._upload()
         source_id = uploaded.get_json()["added"][0]["source_id"]
-        request = {
-            "source_id": source_id,
-            "run_id": "governance-idempotent",
-            "value_column": "sales_amount",
-            "date_column": "month",
-            "dimension": "region",
-        }
-
-        first = self.client.post(f"/api/session/{self.sid}/pfs/analyze", json=request)
-        second = self.client.post(f"/api/session/{self.sid}/pfs/analyze", json=request)
-        self.assertEqual(200, first.status_code)
-        self.assertEqual(200, second.status_code)
-        first_result = first.get_json()["result"]
-        second_result = second.get_json()["result"]
-        self.assertEqual(
-            [claim["claim_id"] for claim in first_result["claims"]],
-            [claim["claim_id"] for claim in second_result["claims"]],
+        response = self.client.post(
+            f"/api/session/{self.sid}/pfs/analyze",
+            json={"source_id": source_id, "run_id": "light-trace-run"},
         )
-        task_id = f"{self.sid}:governance-idempotent"
-        ledger = self.client.get(f"/api/pfs/ledger?task_id={task_id}").get_json()
-        self.assertEqual(2, len(ledger["claims"]))
-        self.assertEqual(1, len(ledger["evidence"]))
-
-        claim_id = first_result["claims"][0]["claim_id"]
-        decided = self.client.post(
-            f"/api/session/{self.sid}/pfs/ledger/claims/{claim_id}/decision",
-            json={
-                "task_id": task_id,
-                "decision": "支持",
-                "reason": "端到端核验",
-            },
-        )
-        self.assertEqual(200, decided.status_code, decided.get_data(as_text=True))
-        self.assertEqual("支持", decided.get_json()["claim"]["human_decision"])
-        detail = self.client.get(
-            f"/api/session/{self.sid}/pfs/ledger/claims/{claim_id}?task_id={task_id}"
-        )
-        self.assertEqual(200, detail.status_code, detail.get_data(as_text=True))
-        self.assertEqual(claim_id, detail.get_json()["claim"]["claim_id"])
-        self.assertEqual(1, len(detail.get_json()["evidence"]))
-        wrong_task = self.client.get(
-            f"/api/session/{self.sid}/pfs/ledger/claims/{claim_id}?task_id={self.sid}:other"
-        )
-        self.assertEqual(404, wrong_task.status_code)
-
-        other_sid = f"pfs-http-other-{uuid.uuid4().hex[:12]}"
-        session_manager.get_or_create(other_sid)
-        try:
-            forbidden = self.client.post(
-                f"/api/session/{other_sid}/pfs/ledger/claims/{claim_id}/decision",
-                json={
-                    "task_id": task_id,
-                    "decision": "反驳",
-                    "reason": "不应跨会话裁决",
-                },
-            )
-            self.assertEqual(404, forbidden.status_code)
-        finally:
-            session_manager.remove(other_sid)
-
+        self.assertEqual(200, response.status_code, response.get_data(as_text=True))
+        result = response.get_json()["result"]
+        self.assertTrue(result["claims"])
+        self.assertTrue(result["evidence"])
+        self.assertTrue(result["claims"][0]["evidence_ids"])
+        self.assertNotIn("governance", result)
+        self.assertNotIn("approval_status", result["claims"][0])
+        self.assertEqual(404, self.client.get("/api/pfs/ledger").status_code)
 
 if __name__ == "__main__":
     unittest.main()

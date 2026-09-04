@@ -221,6 +221,22 @@ def cancel_workflow_run(sid: str, run_id: str):
     except WorkflowContractError as exc:
         return _error(exc)
     return jsonify({"ok": True, **detail})
+
+
+@bp.post("/api/session/<sid>/workflow-runs/<run_id>/pause")
+@require_session_ownership
+def pause_workflow_run(sid: str, run_id: str):
+    body = request.get_json(silent=True) or {}
+    try:
+        detail = workflow_runtime_manager.get(sid).scheduler.pause(
+            run_id,
+            reason=str(body.get("reason") or ""),
+        )
+    except WorkflowContractError as exc:
+        return _error(exc)
+    return jsonify({"ok": True, **detail})
+
+
 @bp.post("/api/session/<sid>/workflow-runs/<run_id>/resume")
 @require_session_ownership
 def resume_workflow_run(sid: str, run_id: str):

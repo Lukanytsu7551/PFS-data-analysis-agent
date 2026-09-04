@@ -115,66 +115,8 @@ def get_registered_artifacts():
         limit = int(request.args.get("limit", "50"))
     except ValueError:
         return jsonify({"ok": False, "error": "limit 必须是整数"}), 400
-    artifacts = _enrich_registered_artifacts(list_registered_artifacts(session_id=sid, limit=limit))
+    artifacts = list_registered_artifacts(session_id=sid, limit=limit)
     return jsonify({"ok": True, "artifacts": artifacts})
-
-
-def _artifact_governance_audit(artifact, session_id: str = ""):
-    """Return only human Claim decisions belonging to this artifact/session."""
-    claim_ids = {str(value) for value in (artifact.get("claim_ids") or []) if value}
-    task_ids = {str(value) for value in (artifact.get("task_ids") or []) if value}
-    if artifact.get("task_id"):
-        task_ids.add(str(artifact["task_id"]))
-    if not claim_ids and not task_ids:
-        return []
-    result = []
-    for event in lifecycle_audit(200):
-        if event.get("event") != "claim_decision":
-            continue
-        if session_id and str(event.get("session_id") or "") != str(session_id):
-            continue
-        if str(event.get("claim_id") or "") not in claim_ids and str(event.get("task_id") or "") not in task_ids:
-            continue
-        result.append({key: event.get(key, "") for key in (
-            "at", "claim_id", "task_id", "previous_decision", "decision", "reason",
-        )})
-    return result
-
-
-def _enrich_registered_artifacts(artifacts, *, session_id: str = ""):
-    """Attach safe ledger lineage to already session-filtered artifacts."""
-    # Enrich only explicitly recorded Claim/Evidence IDs; local paths remain hidden.
-    try:
-        from api.pfs import _ledger
-        ledger = _ledger()
-        for artifact in artifacts:
-            claims = []
-            evidence_by_id = {}
-            for claim_id in (artifact.get("claim_ids") or []):
-                try:
-                    detail = ledger.claim_detail(str(claim_id))
-                except Exception:
-                    continue
-                claim = detail.get("claim")
-                if isinstance(claim, dict):
-                    claims.append(claim)
-                for evidence in detail.get("evidence") or []:
-                    if isinstance(evidence, dict) and evidence.get("evidence_id"):
-                        evidence_by_id[str(evidence["evidence_id"])] = evidence
-            for evidence_id in (artifact.get("evidence_ids") or []):
-                evidence = ledger.get_evidence(str(evidence_id))
-                if evidence is not None:
-                    evidence_by_id[str(evidence_id)] = evidence.to_dict()
-            artifact["lineage"] = {
-                "claims": claims,
-                "evidence": list(evidence_by_id.values()),
-                "governance_audit": _artifact_governance_audit(artifact, session_id),
-                "available": bool(claims or evidence_by_id),
-            }
-    except Exception:
-        for artifact in artifacts:
-            artifact["lineage"] = {"claims": [], "evidence": [], "governance_audit": [], "available": False}
-    return artifacts
 
 
 @bp.get("/api/session/<sid>/lifecycle/artifacts")
@@ -185,7 +127,7 @@ def get_session_registered_artifacts(sid: str):
         limit = int(request.args.get("limit", "50"))
     except ValueError:
         return jsonify({"ok": False, "error": "limit 必须是整数"}), 400
-    # Keep the history list cheap; full lineage is fetched by the detail route.
+    # Keep the history list cheap; detail exposes the same safe metadata plus URLs.
     artifacts = list_registered_artifacts(session_id=str(sid)[:160], limit=limit)
     for item in artifacts:
         item["download_url"] = f"/api/session/{sid}/lifecycle/artifacts/{item['id']}/download"
@@ -196,12 +138,12 @@ def get_session_registered_artifacts(sid: str):
 @bp.get("/api/session/<sid>/lifecycle/artifacts/<artifact_id>")
 @require_session_ownership
 def get_session_registered_artifact(sid: str, artifact_id: str):
-    """Read one active artifact and its lineage within the owning session."""
+    """Read one active artifact's safe metadata within the owning session."""
     artifacts = list_registered_artifacts(session_id=str(sid)[:160], limit=200)
     matches = [item for item in artifacts if str(item.get("id") or "") == str(artifact_id)]
     if not matches:
         return jsonify({"ok": False, "error": "产物不存在或不属于此会话", "code": "artifact_not_found"}), 404
-    artifact = _enrich_registered_artifacts(matches, session_id=str(sid)[:160])[0]
+    artifact = matches[0]
     artifact["download_url"] = f"/api/session/{sid}/lifecycle/artifacts/{artifact['id']}/download"
     artifact["detail_url"] = f"/api/session/{sid}/lifecycle/artifacts/{artifact['id']}"
     return jsonify({"ok": True, "artifact": artifact})

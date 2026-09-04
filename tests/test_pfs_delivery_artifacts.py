@@ -15,6 +15,7 @@ from api import create_app
 from api.state import session_manager
 from data.workspace import WorkspaceManager
 from data.workspace_metadata import WorkspaceMetadataStore
+from data.workflow_run_store import WorkflowRunStore, WorkflowRunStoreError
 from infrastructure.artifact_lifecycle import (
     list_registered_artifacts,
     prune_registry_for_paths,
@@ -40,7 +41,7 @@ class PfsDeliveryArtifactTests(unittest.TestCase):
     def tearDown(self):
         session_manager.remove(self.sid)
 
-    def test_session_artifact_history_is_scoped_and_returns_lineage_metadata(self):
+    def test_session_artifact_history_is_scoped_and_returns_safe_result_metadata(self):
         other_sid = f"pfs-other-{uuid.uuid4().hex[:12]}"
         session_manager.get_or_create(other_sid)
         try:
@@ -63,7 +64,10 @@ class PfsDeliveryArtifactTests(unittest.TestCase):
                 detail = self.client.get(f"/api/session/{self.sid}/lifecycle/artifacts/{artifact_id}")
                 self.assertEqual(200, detail.status_code)
                 self.assertEqual(artifact_id, detail.get_json()["artifact"]["id"])
-                self.assertIn("lineage", detail.get_json()["artifact"])
+                detail_artifact = detail.get_json()["artifact"]
+                self.assertNotIn("lineage", detail_artifact)
+                self.assertNotIn("claim_ids", detail_artifact)
+                self.assertNotIn("evidence_ids", detail_artifact)
                 downloaded = self.client.get(f"/api/session/{self.sid}/lifecycle/artifacts/{artifact_id}/download")
                 self.assertEqual(200, downloaded.status_code)
                 self.assertEqual(b"pfs artifact", downloaded.data)
@@ -193,6 +197,62 @@ class PfsDeliveryArtifactTests(unittest.TestCase):
             )
             self.assertIsNone(unknown["amount"])
             self.assertEqual("provider_usage_price_unknown", unknown["source"])
+
+    def test_workflow_export_reuses_completed_side_effect_without_duplicate_artifact(self):
+        with TemporaryDirectory() as tmp, patch.dict(
+            os.environ, {"PFS_DATA_DIR": tmp}, clear=False,
+        ):
+            workspace_id = "workflow-idempotency-workspace"
+            db_path = Path(tmp) / "workflow.sqlite3"
+            run_store = WorkflowRunStore(db_path, workspace_id)
+            try:
+                graph = {
+                    "nodes": [{"node_id": "export", "type": "export"}],
+                    "edges": [],
+                    "entry_node_ids": ["export"],
+                }
+                run = run_store.create_run(
+                    workflow_version_id="workflow-version",
+                    session_id=self.sid,
+                    graph=graph,
+                    inputs={},
+                )
+                node_run = run_store.list_node_runs(run["id"])[0]
+                artifact_dir = data_path("outputs", "workflow")
+                runtime = WorkflowRuntime.__new__(WorkflowRuntime)
+                runtime.session_id = self.sid
+                runtime.workspace = type("Workspace", (), {
+                    "artifacts_dir": artifact_dir,
+                    "workspace_id": workspace_id,
+                })()
+                runtime.run_store = run_store
+                node = {
+                    "node_id": "export",
+                    "output_contract": ["delivery"],
+                    "export": {"source": "report", "format": "markdown"},
+                    "__pfs_workflow_context__": {
+                        "run_id": run["id"],
+                        "node_run_id": node_run["id"],
+                        "node_id": "export",
+                    },
+                }
+                first = runtime._execute_export_node(node, {"report": "# idempotent report"})
+                second = runtime._execute_export_node(node, {"report": "# idempotent report"})
+
+                self.assertEqual(first, second)
+                self.assertEqual(1, len(list_registered_artifacts(session_id=self.sid)))
+                with self.assertRaises(WorkflowRunStoreError):
+                    runtime._execute_export_node(node, {"report": "# changed payload"})
+                effect = run_store.get_side_effect_for_node_run(
+                    node_run["id"], effect_type="export_file",
+                )
+                self.assertEqual("succeeded", effect["status"])
+                self.assertEqual(first, effect["result"])
+                event_types = [item["type"] for item in run_store.list_events(run["id"])]
+                self.assertIn("workflow_side_effect_claimed", event_types)
+                self.assertIn("workflow_side_effect_completed", event_types)
+            finally:
+                run_store.close()
 
     def test_unknown_provider_price_keeps_tokens_but_never_fakes_zero_cost(self):
         with TemporaryDirectory() as tmp, patch.dict(
@@ -364,8 +424,8 @@ class PfsDeliveryArtifactTests(unittest.TestCase):
             self.assertEqual(artifact_id, process_item["id"])
             self.assertEqual("restore-run", process_item["run_id"])
             self.assertEqual(1, process_item["download_count"])
-            self.assertEqual(["claim-1"], process_item["claim_ids"])
-            self.assertEqual(["evidence-1"], process_item["evidence_ids"])
+            self.assertNotIn("claim_ids", process_item)
+            self.assertNotIn("evidence_ids", process_item)
             repeated = self.client.post(f"/api/lifecycle/artifact-trash/{trash_id}/restore")
             self.assertEqual(404, repeated.status_code)
 
@@ -507,8 +567,6 @@ class PfsDeliveryArtifactTests(unittest.TestCase):
                         "output_tokens": 0,
                     }, artifact["cost"])
                     self.assertTrue(artifact["source_sha256"])
-                    self.assertEqual(2, len(artifact["claim_ids"]))
-                    self.assertEqual(1, len(artifact["evidence_ids"]))
                     self.assertIn("analysis_parameters", artifact)
                     self.assertTrue(artifact["sql"])
                     self.assertEqual(2, len(artifact["chart_specs"]))
@@ -532,7 +590,7 @@ class PfsDeliveryArtifactTests(unittest.TestCase):
             presentation = Presentation(next(Path(tmp).glob("*.pptx")))
             self.assertEqual(4, len(presentation.slides))
 
-    def test_uploaded_delivery_artifact_detail_reads_dynamic_ledger_lineage(self):
+    def test_uploaded_delivery_artifact_detail_keeps_safe_result_metadata(self):
         csv = (
             "month,region,sales_amount\n"
             "2026-04,华东,2100\n"
@@ -568,22 +626,13 @@ class PfsDeliveryArtifactTests(unittest.TestCase):
             )
             self.assertEqual(200, detail_response.status_code, detail_response.get_data(as_text=True))
             artifact = detail_response.get_json()["artifact"]
-            lineage = artifact["lineage"]
-            self.assertTrue(lineage["available"])
-            self.assertEqual(2, len(lineage["claims"]))
-            self.assertEqual(1, len(lineage["evidence"]))
-            evidence = lineage["evidence"][0]
-            self.assertEqual("uploaded-lineage.csv", evidence["file_name"])
-            self.assertEqual(2, evidence["included_rows"])
-            self.assertEqual(artifact["source_sha256"], evidence["content_sha256"])
-            self.assertEqual(
-                ["supports"],
-                [link["relation"] for link in lineage["claims"][0]["evidence_links"]],
-            )
-            self.assertEqual(
-                {evidence["evidence_id"]},
-                set(lineage["claims"][0]["evidence_ids"]),
-            )
+            self.assertEqual("uploaded-lineage-run", artifact["run_id"])
+            self.assertEqual(2, artifact["included_rows"])
+            self.assertTrue(artifact["source_sha256"])
+            self.assertTrue(artifact.get("final_claims"))
+            self.assertNotIn("lineage", artifact)
+            self.assertNotIn("claim_ids", artifact)
+            self.assertNotIn("evidence_ids", artifact)
 
     def test_fixture_delivery_generates_dashboard_links_and_pfs_content(self):
         import api.dashboard as dashboard_module

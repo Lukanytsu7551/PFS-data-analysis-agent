@@ -332,6 +332,8 @@ class ExcelDataSource(DataSource):
         self.file_path = file_path
         self._conn = _new_conn()
         self._tables: List[str] = []
+        self._source_tables = set()
+        self._analysis_tables = set()
         self._load(file_path)
 
     @classmethod
@@ -343,6 +345,8 @@ class ExcelDataSource(DataSource):
         obj._db_path = Path(db_path)
         obj._conn = duckdb.connect(str(obj._db_path))
         obj._tables = _list_tables(obj._conn)
+        obj._source_tables = set(obj._tables)
+        obj._analysis_tables = set()
         if not obj._tables:
             obj._conn.close()
             raise ValueError("解析数据库中没有可用工作表。")
@@ -361,6 +365,7 @@ class ExcelDataSource(DataSource):
             log.info("[ExcelDS] register → table=%r  rows=%d", table, len(df))
             _register(self._conn, table, df)
             self._tables.append(table)
+            self._source_tables.add(table)
 
         if not self._tables:
             raise ValueError("Excel 文件中未发现有效工作表。")
@@ -392,6 +397,7 @@ class ExcelDataSource(DataSource):
         # Track the new table so get_schema / list_tables include it.
         if table_name not in self._tables:
             self._tables.append(table_name)
+        self._analysis_tables.add(table_name)
         return _table_schema_str(self._conn, table_name, rows)
 
     def list_tables(self) -> List[str]:

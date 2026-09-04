@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import sys
 import time
 import uuid
 from ast import literal_eval
@@ -34,6 +35,7 @@ from infrastructure.compat import (
     workspace_hidden_dir,
 )
 from agent.pricing import validate_cost_limit
+from agent.budget import BudgetConfigurationError, load_runtime_budget
 
 
 def _pfs_deterministic_chat_response(sid: str, message: str, payload: dict, sess):
@@ -70,13 +72,9 @@ def _pfs_deterministic_chat_response(sid: str, message: str, payload: dict, sess
             worksheet=worksheet,
             file_name=display_file_name,
         )
-        # Keep the chat bridge on the same governance path as the direct PFS
-        # endpoints.  The SSE payload must point to the records that were
-        # actually persisted, otherwise the UI would show orphan Claims and
-        # Evidence that cannot be recovered from the Ledger later.
-        from api.pfs import _governance_result
-
-        governed_result = _governance_result(result, sid)
+        # Keep the chat bridge aligned with the direct PFS endpoints while
+        # retaining only the report's lightweight result trace.
+        result_dict = result.to_dict()
     except (TypeError, ValueError, OSError) as exc:
         return jsonify({"ok": False, "error": str(exc), "code": "pfs_query_failed"}), 400
 
@@ -84,14 +82,13 @@ def _pfs_deterministic_chat_response(sid: str, message: str, payload: dict, sess
         from agent.events import serialize_event
         return "data: " + json.dumps(serialize_event(obj), ensure_ascii=False) + "\n\n"
 
-    result_dict = governed_result
     total = result_dict.get("total", 0)
     groups = result_dict.get("groups", [])
     lines = ["已按确定性口径完成报表分析：" + parsed.interpretation, "合计：" + str(total)]
     if groups:
         lines.append("分组结果：")
         lines.extend("- " + str(item.get("dimension")) + "：" + str(item.get("value")) for item in groups)
-    lines.append("本次结果已附带 Claim 与 Evidence，可在报表口径预览中回看。")
+    lines.append("本次结果保留来源快照与轻量结论留痕，可在报表口径预览中回看。")
     answer = "\n".join(lines)
     sess.add_user(message)
     sess.add_assistant(answer)
@@ -525,6 +522,10 @@ def _build_agent(
         max_cost_usd = validate_cost_limit(os.environ.get("PFS_MAX_COST_USD"))
     except ValueError as exc:
         raise ValueError(f"PFS_MAX_COST_USD 配置无效：{exc}") from exc
+    try:
+        runtime_budget = load_runtime_budget()
+    except BudgetConfigurationError as exc:
+        raise ValueError(f"Agent 运行预算配置无效：{exc}") from exc
     # Use cached schema when available; recompute only after data source changes
     # (cache is invalidated by add_source / remove_source / toggle_source / data_source setter).
     if source_snapshot is not None:
@@ -599,6 +600,11 @@ def _build_agent(
         job_runner=sess.job_runner,
         context_window=getattr(cfg, "context_window", None),
         max_output_tokens=getattr(cfg, "max_output_tokens", None),
+        max_iterations=runtime_budget.max_iterations,
+        max_tool_calls=runtime_budget.max_tool_calls,
+        max_total_tokens=runtime_budget.max_total_tokens,
+        max_run_seconds=runtime_budget.max_run_seconds,
+        max_job_seconds=runtime_budget.max_job_seconds,
         input_price_per_million=getattr(cfg, "input_price_per_million", None),
         output_price_per_million=getattr(cfg, "output_price_per_million", None),
         max_cost_usd=max_cost_usd,
@@ -982,13 +988,32 @@ def chat_stream(sid: str):
         return f"data: {json.dumps(serialize_event(obj), ensure_ascii=False)}\n\n"
 
     def generate():
+        runner = sess.job_runner
+        stream_closed = False
         # Yield immediately so Flask flushes response headers before any blocking
         # setup work (agent build, hook loading, schema snapshot). Without this,
         # the frontend `await fetch()` blocks until the first real event arrives,
         # keeping the typing-dots invisible for the entire setup phase.
-        yield _sse({"type": "agent_activity", "message": ""})
+        try:
+            yield _sse({"type": "agent_activity", "message": ""})
+        except GeneratorExit:
+            # The client can close the response before Agent construction
+            # begins. There is no later ``finally`` block to release this
+            # request's snapshot, so close the tracked turn at this boundary.
+            stream_closed = True
+            try:
+                runner.cancel_tracked(conversation_job_id)
+            except Exception:
+                log.exception("[chat] early stream cancellation failed sid=%s", sid)
+            if file_history is not None and file_history_snapshot_id:
+                try:
+                    file_history.finalize_snapshot(file_history_snapshot_id, "canceled")
+                except FileHistoryError:
+                    log.exception("[filehistory] early snapshot finalize failed sid=%s", sid)
+            source_snapshot.release()
+            sess.cancel_requested = False
+            raise
 
-        runner = sess.job_runner
         command_metric_recorded = False
 
         def _record_prompt_command_metric(outcome: str, error_code: str = "") -> None:
@@ -1594,8 +1619,14 @@ def chat_stream(sid: str):
 
         finally:
             conversation_scope.__exit__(None, None, None)
+            generator_exception = sys.exc_info()[1]
+            stream_closed = stream_closed or isinstance(generator_exception, GeneratorExit)
             current = runner.get_status(conversation_job_id)
-            if current and current.get("status") not in {"succeeded", "failed", "canceled"}:
+            if stream_closed:
+                if current and current.get("status") not in {"succeeded", "failed", "canceled"}:
+                    runner.cancel_tracked(conversation_job_id)
+                sess.cancel_requested = False
+            elif current and current.get("status") not in {"succeeded", "failed", "canceled"}:
                 if sess.cancel_requested:
                     runner.cancel_tracked(conversation_job_id)
                     sess.cancel_requested = False
@@ -1622,7 +1653,8 @@ def chat_stream(sid: str):
                 "success" if status == "succeeded" else "error",
                 "" if status == "succeeded" else (status or "stream_incomplete"),
             )
-            yield _sse({"type": "done"})
+            if not stream_closed:
+                yield _sse({"type": "done"})
 
     return Response(
         generate(),

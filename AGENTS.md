@@ -27,7 +27,8 @@
 ## 当前边界
 
 - 当前只交付桌面端；手机端不是完成条件。
-- 最新本地基线为 196 项 Python 测试通过，Ruff、ESLint、Dashboard/Chat production build 和差异格式检查通过；当前发布 staging 为 489 个文件且 artifact audit 为 0 findings、0 symlink。
+- 当前 Evidence 边界：保留 `reporting.py` 的轻量 Claim/Evidence/来源快照和参考 Agent 的工具结果留痕；新增 Evidence Ledger、质量门、语义复算、审批/修订、SQLite Ledger 后端/迁移及治理 UI/API 不属于现役运行能力。
+- 最新本地基线为 267 项 Python 测试通过，Ruff、ESLint、Dashboard/Chat production build 和差异格式检查通过；本轮 Evidence 治理回滚与 P1/P2 代码已通过项目质量门，发布 staging 需按当前提交重新生成并审计。
 - 固定/上传 CSV/XLSX 分析、JSON/CSV 下载、Excel/Word/PPT/Dashboard 交付和会话 Artifact 历史已有本地证据；工作区 Artifact 已验证独立应用进程重开关联，复杂 Office 视觉仍未完成。
 - GitHub 私有仓库 `main` 已建立并接收当前提交；仍须分别验证后续 commit、push、deploy 和 live 状态。
 

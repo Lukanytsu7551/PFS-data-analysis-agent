@@ -8,6 +8,8 @@ PFS（可追踪、可核验的报表数据分析工作台）是一个面向报�
 >
 > 当前状态：PFS 独立产品表面、CSV/XLSX 确定性报表、Claim/Evidence、统一审计、Run/Workflow → Artifact 成本、工作区 Artifact 重开关联、临时 PostgreSQL、Docker 单容器和 DeepSeek 单任务已有分层本地证据；多轮/分布式恢复、生产数据源、完整 Evidence/HITL、安装包、部署和线上验收仍未完成。现役交接见 [`docs/HANDOFF.md`](docs/HANDOFF.md)。
 
+> 当前范围决定（2026-09-04）：撤销新增的 Evidence Ledger 治理、质量门、语义复算、审批/修订和 SQLite 迁移链路；保留参考 Agent 的轻量工具结果留痕、PFS 报表结果中的 `claims/evidence` 来源信息，以及 PFS 的 UI、品牌、数据分析和交付能力。历史文档中的治理切片不代表当前运行时。
+
 ## 产品边界
 
 PFS 的核心链路是：
@@ -29,13 +31,13 @@ PFS 的核心链路是：
 
 | 能力 | 当前状态 | 证据边界 |
 |---|---|---|
-| Flask 应用、SSE 对话和数据分析工具 | 本地真实通过第一段 | DeepSeek 实际读取 schema、执行只读 SQL、返回结果并记录 Token；停止和 Job 存储重启收口已实测，多轮和工作流恢复待验证 |
+| Flask 应用、SSE 对话和数据分析工具 | 本地真实通过第一段 | DeepSeek 实际读取 schema、执行只读 SQL、返回结果并记录 Token；停止和 Job 存储重启收口已实测，多轮和工作流恢复待验证；报表分析取消支持显式 `PFS_RUN_REGISTRY_BACKEND=sqlite` 的本地跨进程协作式取消 |
 | Excel/CSV、DuckDB、图表和导出 | 固定样例本地通过；临时 PostgreSQL 连接与分组查询通过 | 固定报表的 Office 结构与 Dashboard 已回读；复杂业务文件、生产数据库、视觉和跨平台质量待验证 |
 | PFS 产品身份、图标和服务标识 | 已实现 | 已做静态编译与模板入口检查 |
 | PFS 工具契约与策略门 | 已实现第一段 | `get_schema`、`query_data`、`run_analysis` 等只读/计算调用已接入；写入类仍沿用原流程 |
 | PFS 报表口径预览 | 已实现第一段 | 主聊天页可读取固定 fixture，也可选择当前会话上传的 CSV，展示指标、分组、Claim、Evidence 和数据快照哈希 |
-| PFS 报表下载与交付 | 已实现桌面第一段 | 服务端重新计算 JSON/CSV；Excel/Word/PPT/Dashboard 已登记为会话 Artifact，可读取 lineage、裁决审计、成本与下载历史；已知本地工作区在独立应用进程重开后仍可关联，分布式恢复仍待实现 |
-| Evidence Ledger、Claim–Evidence、冲突队列 | 已实现第一段 | `pfs_agent/ledger.py` 与 `/api/pfs/ledger` 已支持稳定身份、批量幂等、冲突检测和原子 JSON 持久化；语义核验待实现 |
+| PFS 报表下载与交付 | 已实现桌面第一段 | 服务端重新计算 JSON/CSV；Excel/Word/PPT/Dashboard 已登记为会话 Artifact，保留安全元数据、来源快照、成本与下载历史；已知本地工作区在独立应用进程重开后仍可关联，分布式恢复仍待实现 |
+| 轻量结果留痕 | 已实现第一段 | 报表结果保留 `claims/evidence`、来源 ID、文件/工作表、纳入行数、定位信息和快照哈希；参考 Agent 的工具结果持久化继续保留。Evidence Ledger、质量门、审批/修订、同源复算治理和 `/api/pfs/ledger` 不属于当前运行链路 |
 | Docker 单容器 | 本地真实通过 | 镜像内容审计、健康检查、首页和 CSV 分析通过；多服务全栈及部署待验证 |
 | MCP、Feishu、生产数据源、恢复和部署 | 部分验证 | 临时 PostgreSQL 与本地 Job 恢复已通过；MCP/Feishu、生产权限、多服务恢复和部署仍需真实场景逐项验收 |
 

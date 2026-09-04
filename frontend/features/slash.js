@@ -18,6 +18,10 @@ const pfs = () => globalThis.PFS;
     return COMMANDS.find(c => c.cmd === key || (c.aliases || []).includes(key));
   }
 
+  function getSkill(name) {
+    return pfs()?.skills?.getSkill?.(name) || null;
+  }
+
   function getAvailability(command) {
     if (!command) {
       return { available: false, code: "unknown_command", reason: "未知命令。" };
@@ -50,11 +54,15 @@ const pfs = () => globalThis.PFS;
     }
     const match = remainder.match(/^([^\s]+)(?:\s+([\s\S]*))?$/);
     const name = String(match?.[1] || "").toLowerCase();
+    const command = getCommand(name);
     return {
       isCommand: true,
       name,
       arguments: String(match?.[2] || "").trim(),
-      command: getCommand(name),
+      command,
+      // Analysis Skills intentionally stay out of the command catalog, but
+      // their explicit shortcuts still need to be routable from the composer.
+      skill: command ? null : getSkill(name),
     };
   }
 
@@ -231,6 +239,13 @@ const pfs = () => globalThis.PFS;
         autoResize(e.target);
         return;
       }
+      const skill = getSkill(mFull[1]);
+      if (skill) {
+        pfs()?.skills?.selectSkill?.(skill.name);
+        e.target.value = "";
+        autoResize(e.target);
+        return;
+      }
     }
 
     // "/cmd args..." — select command, keep args as input text
@@ -239,6 +254,13 @@ const pfs = () => globalThis.PFS;
       const found = getCommand(mFullCmd[1]);
       if (found) {
         selectCommand(found.cmd);
+        e.target.value = mFullCmd[2];
+        autoResize(e.target);
+        return;
+      }
+      const skill = getSkill(mFullCmd[1]);
+      if (skill) {
+        pfs()?.skills?.selectSkill?.(skill.name);
         e.target.value = mFullCmd[2];
         autoResize(e.target);
         return;
@@ -323,6 +345,17 @@ const pfs = () => globalThis.PFS;
         $("msg-input").value = m[2];
         return;
       }
+      const skill = getSkill(m[1]);
+      if (skill) {
+        pfs()?.skills?.selectSkill?.(skill.name);
+        const input = $("msg-input");
+        input.value = m[2] || "";
+        autoResize(input);
+        input.focus();
+        pfs()?.chatStream?.syncComposerPlaceholder?.();
+        pfs()?.chatStream?.syncSendButton?.();
+        return;
+      }
     }
     $("msg-input").value = txt;
     pfs()?.chatStream?.sendMessage?.();
@@ -372,6 +405,6 @@ const pfs = () => globalThis.PFS;
 export const slash = Object.freeze({
     COMMANDS, COMMAND_DIAGNOSTICS,
     buildSlashPopup, openSlashPopup, closeSlashPopup, isSlashOpen,
-    selectCommand, clearCmd, getCommand, getAvailability, parseSlashInput,
+    selectCommand, clearCmd, getCommand, getSkill, getAvailability, parseSlashInput,
     onInput, onKeyDown, autoResize, fillHint, loadCommands,
 });
