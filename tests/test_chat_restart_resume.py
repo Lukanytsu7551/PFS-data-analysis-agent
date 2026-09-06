@@ -26,7 +26,7 @@ from data.jobs_store import (
 )
 
 
-_CHAT_PROCESS_RESTART_LEASE_SECONDS = 1.0
+_CHAT_PROCESS_RESTART_LEASE_SECONDS = 5.0
 
 
 def _stop_process(process) -> None:
