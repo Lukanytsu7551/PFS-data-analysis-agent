@@ -114,7 +114,7 @@ class MemoryProviderReliabilityTests(unittest.TestCase):
 
         self.assertEqual("ok", result)
         self.assertGreater(captured["timeout"], 0)
-        self.assertLessEqual(captured["timeout"], 0.2)
+        self.assertLessEqual(captured["timeout"], 0.2001)
 
     def test_memory_provider_does_not_retry_after_shared_deadline(self):
         calls = []

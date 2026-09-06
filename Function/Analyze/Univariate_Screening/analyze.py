@@ -104,6 +104,20 @@ def _try_scipy(y: np.ndarray, x: np.ndarray) -> Dict[str, float]:
         yv, xv = y[mask], x[mask]
         if len(yv) < _MIN_OBS:
             return {}
+        # scipy.linregress emits platform/version-dependent values for a
+        # constant predictor.  There is no identifiable slope or inferential
+        # p-value in that case, so keep the result explicit and stable across
+        # the local and Windows runtimes.
+        if np.allclose(xv, xv[0], rtol=0.0, atol=1e-12):
+            return {
+                "intercept": float(np.nanmean(yv)),
+                "coefficient": 0.0,
+                "std_err": float("nan"),
+                "t_stat": float("nan"),
+                "p_value": float("nan"),
+                "r_squared": 0.0,
+                "n_obs": int(mask.sum()),
+            }
         res = _sp.linregress(xv, yv)
         return {
             "intercept":   float(res.intercept),
@@ -203,7 +217,7 @@ def run(
             "n_obs":       stats["n_obs"],
             "significant": p < alpha,
             "stars":       _significance_stars(p),
-            "direction":   "+" if coef > 0 else "-",
+            "direction":   "" if not np.isfinite(coef) or coef == 0 else ("+" if coef > 0 else "-"),
         })
 
     # ── 构建输出表 ────────────────────────────────────────────────────────

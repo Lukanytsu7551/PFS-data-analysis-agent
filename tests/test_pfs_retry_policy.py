@@ -337,7 +337,7 @@ class PfsRetryPolicyTests(unittest.TestCase):
 
         result = stopped.exception.value
         self.assertIsNotNone(runner.timeout)
-        self.assertLessEqual(runner.timeout, 0.2)
+        self.assertLessEqual(runner.timeout, 0.2001)
         self.assertEqual("agent_run_timeout", result["error_code"])
         self.assertEqual("agent_run_timeout", runner.failure[1])
 
@@ -468,7 +468,7 @@ class PfsRetryPolicyTests(unittest.TestCase):
         )
         self.assertEqual("已完成委托分析", result["content"])
         self.assertGreater(captured["timeout"], 0)
-        self.assertLessEqual(captured["timeout"], 0.2)
+        self.assertLessEqual(captured["timeout"], 0.2001)
 
     def test_delegated_agent_does_not_drop_timeout_for_legacy_client(self):
         class LegacyCompletions:

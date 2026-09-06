@@ -96,38 +96,41 @@ class PfsDataSourceTests(unittest.TestCase):
                 )
 
             source = ExcelDataSource(str(path), "sales.xlsx")
-            self.assertEqual({"Sales", "Orders"}, set(source.list_tables()))
-            self.assertEqual(["Sales", "Orders"], [item["name"] for item in source.get_preview()])
-            frame, error = source.execute_query(
-                "SELECT SUM(sales) AS total_sales FROM Sales"
-            )
-            self.assertEqual("", error)
-            self.assertEqual(70, int(frame.iloc[0]["total_sales"]))
-            self.assertEqual(2, source.get_preview()[0]["total_rows"])
-            self.assertIn("Orders", source.get_schema())
+            try:
+                self.assertEqual({"Sales", "Orders"}, set(source.list_tables()))
+                self.assertEqual(["Sales", "Orders"], [item["name"] for item in source.get_preview()])
+                frame, error = source.execute_query(
+                    "SELECT SUM(sales) AS total_sales FROM Sales"
+                )
+                self.assertEqual("", error)
+                self.assertEqual(70, int(frame.iloc[0]["total_sales"]))
+                self.assertEqual(2, source.get_preview()[0]["total_rows"])
+                self.assertIn("Orders", source.get_schema())
 
-            agent = BusinessAgent(
-                client=None,
-                model="pfs-excel-table-lifecycle",
-                data_source=source,
-                session_id="pfs-excel-table-lifecycle",
-            )
-            blocked = agent._tool_create_analysis_table(
-                "SELECT SUM(sales) AS total_sales FROM Sales",
-                "Sales",
-            )
-            self.assertIn("不能覆盖原始数据表", blocked)
-            created = agent._tool_create_analysis_table(
-                "SELECT SUM(sales) AS total_sales FROM Sales",
-                "excel_summary",
-            )
-            self.assertIn("excel_summary", created)
-            deleted = agent._tool_delete_analysis_tables(["excel_summary"], confirm=True)
-            self.assertIn("excel_summary", deleted)
-            self.assertNotIn("excel_summary", source.list_tables())
-            raw_delete = agent._tool_delete_analysis_tables(["Sales"], confirm=True)
-            self.assertIn("原始源表和无法判定的表会被保护", raw_delete)
-            self.assertIn("Sales", source.list_tables())
+                agent = BusinessAgent(
+                    client=None,
+                    model="pfs-excel-table-lifecycle",
+                    data_source=source,
+                    session_id="pfs-excel-table-lifecycle",
+                )
+                blocked = agent._tool_create_analysis_table(
+                    "SELECT SUM(sales) AS total_sales FROM Sales",
+                    "Sales",
+                )
+                self.assertIn("不能覆盖原始数据表", blocked)
+                created = agent._tool_create_analysis_table(
+                    "SELECT SUM(sales) AS total_sales FROM Sales",
+                    "excel_summary",
+                )
+                self.assertIn("excel_summary", created)
+                deleted = agent._tool_delete_analysis_tables(["excel_summary"], confirm=True)
+                self.assertIn("excel_summary", deleted)
+                self.assertNotIn("excel_summary", source.list_tables())
+                raw_delete = agent._tool_delete_analysis_tables(["Sales"], confirm=True)
+                self.assertIn("原始源表和无法判定的表会被保护", raw_delete)
+                self.assertIn("Sales", source.list_tables())
+            finally:
+                source.close()
 
     def test_http_json_and_csv_are_loaded_from_local_fixture_server(self):
         json_source = HTTPAPIDataSource(f"{self.base_url}/sales.json", display_name="远程销售 JSON")

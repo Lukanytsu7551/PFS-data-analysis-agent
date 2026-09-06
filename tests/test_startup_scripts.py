@@ -1,3 +1,4 @@
+import os
 import re
 from pathlib import Path
 import stat
@@ -36,6 +37,8 @@ class StartupScriptTests(unittest.TestCase):
                 self.assertIn("optional={}", text)
 
     def test_macos_launcher_is_executable(self):
+        if os.name == "nt":
+            self.skipTest("POSIX executable bits are not available on Windows checkout")
         mode = (PROJECT_ROOT / "start.command").stat().st_mode
         self.assertTrue(mode & stat.S_IXUSR)
 

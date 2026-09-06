@@ -14,10 +14,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 class ExtensionCrossProcessTests(unittest.TestCase):
     @staticmethod
     def _run(script: str, env: dict[str, str]) -> str:
+        child_env = {**env, "PYTHONIOENCODING": "utf-8"}
         result = subprocess.run(
             [sys.executable, "-B", "-c", textwrap.dedent(script)],
             cwd=PROJECT_ROOT,
-            env=env,
+            env=child_env,
             capture_output=True,
             text=True,
             check=True,

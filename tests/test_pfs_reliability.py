@@ -343,7 +343,9 @@ class PfsDurableRecoveryTests(unittest.TestCase):
     def test_job_runner_heartbeat_keeps_a_long_job_live(self):
         with tempfile.TemporaryDirectory(prefix="pfs-job-heartbeat-") as temp_dir:
             db_path = Path(temp_dir) / "jobs.db"
-            store = JobsStore(db_path, lease_seconds=0.1)
+            # Keep enough scheduling margin for hosted CI while still waiting
+            # past the lease to prove the heartbeat is renewing it.
+            store = JobsStore(db_path, lease_seconds=0.5)
             runner = JobRunner("heartbeat-session", store, max_workers=1)
             started = threading.Event()
             release = threading.Event()
@@ -356,8 +358,8 @@ class PfsDurableRecoveryTests(unittest.TestCase):
             try:
                 job_id = runner.create(worker, job_type="analysis")
                 self.assertTrue(started.wait(timeout=2))
-                time.sleep(0.22)
-                reopened_store = JobsStore(db_path, lease_seconds=0.1)
+                time.sleep(0.75)
+                reopened_store = JobsStore(db_path, lease_seconds=0.5)
                 try:
                     current = reopened_store.get(job_id)
                     self.assertEqual(STATUS_RUNNING, current["status"])
@@ -375,7 +377,7 @@ class PfsDurableRecoveryTests(unittest.TestCase):
     def test_job_runner_heartbeat_keeps_a_queued_job_live(self):
         with tempfile.TemporaryDirectory(prefix="pfs-job-queued-heartbeat-") as temp_dir:
             db_path = Path(temp_dir) / "jobs.db"
-            store = JobsStore(db_path, lease_seconds=0.1)
+            store = JobsStore(db_path, lease_seconds=0.5)
             runner = JobRunner("queued-heartbeat-session", store, max_workers=1)
             first_started = threading.Event()
             release_first = threading.Event()
@@ -394,9 +396,9 @@ class PfsDurableRecoveryTests(unittest.TestCase):
                 first_id = runner.create(first_worker, job_type="analysis")
                 self.assertTrue(first_started.wait(timeout=2))
                 second_id = runner.create(second_worker, job_type="analysis")
-                time.sleep(0.22)
+                time.sleep(0.75)
 
-                reopened_store = JobsStore(db_path, lease_seconds=0.1)
+                reopened_store = JobsStore(db_path, lease_seconds=0.5)
                 try:
                     queued = reopened_store.get(second_id)
                     self.assertEqual("queued", queued["status"])
@@ -417,7 +419,7 @@ class PfsDurableRecoveryTests(unittest.TestCase):
     def test_live_job_lease_survives_a_real_child_process_read(self):
         with tempfile.TemporaryDirectory(prefix="pfs-job-child-process-") as temp_dir:
             db_path = Path(temp_dir) / "jobs.db"
-            store = JobsStore(db_path, lease_seconds=0.1)
+            store = JobsStore(db_path, lease_seconds=0.5)
             runner = JobRunner("child-process-session", store, max_workers=1)
             started = threading.Event()
             release = threading.Event()

@@ -316,16 +316,20 @@ class ChatRestartResumeTests(unittest.TestCase):
                 owner_id="chat-service-after-unsafe-restart",
                 lease_seconds=0.1,
             )
-            self.store = recovered_store
-            recovered = recovered_store.get(job["id"])
-            self.assertEqual(STATUS_FAILED, recovered["status"])
-            self.assertEqual(CHAT_UNSAFE_RECOVERY_CODE, recovered["error_code"])
-            self.assertEqual(CHAT_UNSAFE_RECOVERY_ACTION, recovered["recovery_action"])
-            events = recovered_store.list_events(self.sid, job_id=job["id"])
-            error_event = next(item for item in events if item["type"] == "job_error")
-            self.assertFalse(error_event["automatic_replay"])
-            self.assertFalse(error_event["resume_available"])
-            self.assertEqual("tool_call", error_event["recovery_phase"])
+            try:
+                self.store = recovered_store
+                recovered = recovered_store.get(job["id"])
+                self.assertEqual(STATUS_FAILED, recovered["status"])
+                self.assertEqual(CHAT_UNSAFE_RECOVERY_CODE, recovered["error_code"])
+                self.assertEqual(CHAT_UNSAFE_RECOVERY_ACTION, recovered["recovery_action"])
+                events = recovered_store.list_events(self.sid, job_id=job["id"])
+                error_event = next(item for item in events if item["type"] == "job_error")
+                self.assertFalse(error_event["automatic_replay"])
+                self.assertFalse(error_event["resume_available"])
+                self.assertEqual("tool_call", error_event["recovery_phase"])
+            finally:
+                recovered_store.close()
+                self.store = None
 
     def test_agent_resumes_from_a_safe_model_prefix_without_repeating_it(self):
         class FakeCompletions:
@@ -852,50 +856,55 @@ class ChatRestartResumeTests(unittest.TestCase):
                 owner_id="chat-service-after-restart",
                 lease_seconds=0.1,
             )
-            self.session._job_runner = JobRunner(self.sid, self.store, max_workers=1)
-            recovered = self.session.job_runner.get_status(job["id"])
-            self.assertEqual(STATUS_FAILED, recovered["status"])
-            self.assertEqual("job_interrupted_after_restart", recovered["error_code"])
+            try:
+                self.session._job_runner = JobRunner(self.sid, self.store, max_workers=1)
+                recovered = self.session.job_runner.get_status(job["id"])
+                self.assertEqual(STATUS_FAILED, recovered["status"])
+                self.assertEqual("job_interrupted_after_restart", recovered["error_code"])
 
-            listed = self.client.get(f"/api/session/{self.sid}/jobs")
-            self.assertEqual(200, listed.status_code)
-            listed_job = listed.get_json()["jobs"][0]
-            self.assertTrue(listed_job["resume_available"])
+                listed = self.client.get(f"/api/session/{self.sid}/jobs")
+                self.assertEqual(200, listed.status_code)
+                listed_job = listed.get_json()["jobs"][0]
+                self.assertTrue(listed_job["resume_available"])
 
-            class FakeAgent:
-                _artifact_metadata = {}
-                _provider = "test"
-                model = "chat-resume-test"
+                class FakeAgent:
+                    _artifact_metadata = {}
+                    _provider = "test"
+                    model = "chat-resume-test"
 
-                def run(self, *_args, **_kwargs):
-                    yield {"type": "text", "content": "已从原请求继续完成"}
+                    def run(self, *_args, **_kwargs):
+                        yield {"type": "text", "content": "已从原请求继续完成"}
 
-            with patch("api.chat._build_agent", return_value=FakeAgent()):
-                response = self.client.post(
+                with patch("api.chat._build_agent", return_value=FakeAgent()):
+                    response = self.client.post(
+                        f"/api/session/{self.sid}/chat/{job['id']}/resume",
+                    )
+                    response_body = response.get_data(as_text=True)
+
+                self.assertEqual(200, response.status_code)
+                self.assertIn("已从原请求继续完成", response_body)
+                self.assertNotIn("job_interrupted_after_restart", response_body)
+                final = self.store.get(job["id"])
+                self.assertEqual(STATUS_SUCCEEDED, final["status"])
+                conversation_jobs = [
+                    item
+                    for item in self.store.list_by_session(self.sid)
+                    if item.get("type") == "conversation_analysis"
+                ]
+                self.assertEqual(1, len(conversation_jobs))
+                event_types = [event["type"] for event in self.store.list_events(self.sid, job_id=job["id"])]
+                self.assertIn("job_resume_requested", event_types)
+                self.assertIn("conversation_stream_event", event_types)
+
+                second_attempt = self.client.post(
                     f"/api/session/{self.sid}/chat/{job['id']}/resume",
                 )
-                response_body = response.get_data(as_text=True)
-
-            self.assertEqual(200, response.status_code)
-            self.assertIn("已从原请求继续完成", response_body)
-            self.assertNotIn("job_interrupted_after_restart", response_body)
-            final = self.store.get(job["id"])
-            self.assertEqual(STATUS_SUCCEEDED, final["status"])
-            conversation_jobs = [
-                item
-                for item in self.store.list_by_session(self.sid)
-                if item.get("type") == "conversation_analysis"
-            ]
-            self.assertEqual(1, len(conversation_jobs))
-            event_types = [event["type"] for event in self.store.list_events(self.sid, job_id=job["id"])]
-            self.assertIn("job_resume_requested", event_types)
-            self.assertIn("conversation_stream_event", event_types)
-
-            second_attempt = self.client.post(
-                f"/api/session/{self.sid}/chat/{job['id']}/resume",
-            )
-            self.assertEqual(409, second_attempt.status_code)
-            self.assertEqual("chat_resume_terminal", second_attempt.get_json()["code"])
+                self.assertEqual(409, second_attempt.status_code)
+                self.assertEqual("chat_resume_terminal", second_attempt.get_json()["code"])
+            finally:
+                self.session.shutdown_job_runner(wait=True)
+                self.store.close()
+                self.store = None
 
     def test_durable_chat_handler_completes_from_a_reconstructable_snapshot(self):
         with TemporaryDirectory(prefix="pfs-durable-chat-") as temp_dir:
