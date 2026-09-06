@@ -79,7 +79,7 @@ const pfs = () => globalThis.PFS;
   }
 
   function _teamsEnabledFromStorage() {
-    return pfsStorage.get("teams_enabled", "0") === "1";
+    return pfsStorage.get("teams_enabled", "1") === "1";
   }
 
   function _autoMatchSkillFromStorage() {
@@ -947,7 +947,7 @@ const pfs = () => globalThis.PFS;
       Vue.h("label", { class: "app-setting-row" }, [
         Vue.h("span", { class: "app-setting-copy" }, [
           Vue.h("strong", null, "Teams"),
-          Vue.h("span", null, "开启后 Agent 会自动构建轻量分析团队并委派子任务，以更多 token 换取准确度和速度。默认关闭。"),
+          Vue.h("span", null, "Agent 默认启用轻量分析团队；可随时关闭。启用后会增加 token 消耗，并将分析任务分配给团队成员。"),
         ]),
         renderSwitch(uiState.teamsEnabled, setTeamsEnabled),
       ]),

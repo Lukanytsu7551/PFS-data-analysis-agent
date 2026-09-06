@@ -22,7 +22,7 @@
     pendingMessages: [],
     editingQueuedId: "",
     promptSuggestionEnabled: storage.get("prompt_suggestion_enabled", "1") !== "0",
-    teamsEnabled: storage.get("teams_enabled", "0") === "1",
+    teamsEnabled: storage.get("teams_enabled", "1") === "1",
     autoMatchSkill: storage.get("auto_match_skill", "1") !== "0",
     memoryEnabled: storage.get("memory_enabled", "1") !== "0",
     promptSuggestionRequestId: 0,

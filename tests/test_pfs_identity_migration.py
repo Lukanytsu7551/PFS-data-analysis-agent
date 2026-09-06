@@ -68,17 +68,26 @@ class PfsIdentityMigrationTests(unittest.TestCase):
         self.assertEqual("/pfs", env_from(environ, "PFS_DATA_DIR", "/default"))
         self.assertEqual("/default", env_from({}, "PFS_DATA_DIR", "/default"))
 
-    def test_cloud_login_is_retained_but_opt_in(self):
-        self.assertFalse(cloud_login_enabled({"RAILWAY_PROJECT_ID": "project"}))
+    def test_cloud_login_is_enabled_by_default_only_on_cloud_host(self):
+        self.assertTrue(cloud_login_enabled({"RAILWAY_PROJECT_ID": "project"}))
+        self.assertFalse(cloud_login_enabled({"PFS_ENABLE_CLOUD_LOGIN": "0", "RAILWAY_PROJECT_ID": "project"}))
         self.assertTrue(cloud_login_enabled({
             "PFS_ENABLE_CLOUD_LOGIN": "1",
             "RAILWAY_PROJECT_ID": "project",
         }))
 
-    def test_retained_optional_features_are_opt_in(self):
-        self.assertFalse(optional_feature_enabled("HOOKS", {}))
-        self.assertFalse(optional_feature_enabled("FEISHU_BOT", {}))
+    def test_retained_optional_features_are_enabled_without_external_targets(self):
+        self.assertTrue(optional_feature_enabled("HOOKS", {}))
+        self.assertTrue(optional_feature_enabled("FEISHU_BOT", {}))
+        self.assertFalse(optional_feature_enabled("HOOKS", {"PFS_ENABLE_HOOKS": "0"}))
+        self.assertFalse(optional_feature_enabled("FEISHU_BOT", {"PFS_ENABLE_FEISHU_BOT": "off"}))
         self.assertTrue(optional_feature_enabled("HOOKS", {"PFS_ENABLE_HOOKS": "1"}))
+
+    def test_teams_is_enabled_for_new_browser_state(self):
+        state = (ROOT / "frontend" / "legacy" / "state.js").read_text(encoding="utf-8")
+        settings = (ROOT / "frontend" / "legacy" / "app_settings.js").read_text(encoding="utf-8")
+        self.assertIn('storage.get("teams_enabled", "1")', state)
+        self.assertIn('pfsStorage.get("teams_enabled", "1")', settings)
 
     def test_embedding_configuration_exposes_pfs_primary_names(self):
         source = (ROOT / "Function" / "Knowledge" / "neural_embedder.py").read_text(encoding="utf-8")

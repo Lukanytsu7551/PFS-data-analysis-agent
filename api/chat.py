@@ -1852,25 +1852,38 @@ def chat_stream(sid: str):
                 from agent.hooks.models import HookContext
                 from data.hooks_store import load_engine
 
-                hook_engine = load_engine()
-                hook_context = HookContext(
-                    event_name="turn_start",
-                    session_id=sid,
-                    turn_id=conversation_job_id,
-                    workspace_id=fixed_workspace_id,
-                    workspace_name=(
-                        fixed_workspace_runtime.to_dict().get("name", "")
-                        if fixed_workspace_runtime is not None
-                        else ""
-                    ),
-                    workspace_path=(
-                        fixed_workspace_runtime.to_dict().get("path", "")
-                        if fixed_workspace_runtime is not None
-                        else ""
-                    ),
-                    message=message,
-                    model_provider=sess.model_provider or config_manager.get_default_provider() or "",
-                )
+                candidate_hook_engine = load_engine()
+                # The Hooks surface is available by default, but an empty or
+                # globally disabled configuration has no side effects. Keep
+                # the engine absent in that case so safe chat recovery can
+                # still resume a persisted model prefix exactly once.
+                if (
+                    candidate_hook_engine.enabled
+                    and any(
+                        bool(getattr(hook, "enabled", True))
+                        for hook in candidate_hook_engine.hooks
+                    )
+                ):
+                    hook_engine = candidate_hook_engine
+                if hook_engine is not None:
+                    hook_context = HookContext(
+                        event_name="turn_start",
+                        session_id=sid,
+                        turn_id=conversation_job_id,
+                        workspace_id=fixed_workspace_id,
+                        workspace_name=(
+                            fixed_workspace_runtime.to_dict().get("name", "")
+                            if fixed_workspace_runtime is not None
+                            else ""
+                        ),
+                        workspace_path=(
+                            fixed_workspace_runtime.to_dict().get("path", "")
+                            if fixed_workspace_runtime is not None
+                            else ""
+                        ),
+                        message=message,
+                        model_provider=sess.model_provider or config_manager.get_default_provider() or "",
+                    )
             except Exception as exc:
                 log.warning("[hooks] disabled for turn sid=%s error=%s", sid, exc)
 
@@ -1898,10 +1911,11 @@ def chat_stream(sid: str):
             yield _sse({"type": "done"})
             return
 
-        # A HookEngine may execute arbitrary side effects around this turn.
-        # Do not seed the final answer with a prefix from a previously safe
-        # run if Hooks became active before the retry; that would duplicate the
-        # already-visible prefix while the Agent correctly fails closed.
+        # A configured HookEngine may execute arbitrary side effects around
+        # this turn. Do not seed the final answer with a prefix from a
+        # previously safe run if Hooks became active before the retry; that
+        # would duplicate the already-visible prefix while the Agent correctly
+        # fails closed.
         effective_recovery_prefix = recovery_prefix if hook_engine is None else ""
         collected: list[str] = [effective_recovery_prefix] if effective_recovery_prefix else []
         collected_reasoning: list[str] = []

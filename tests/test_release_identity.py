@@ -15,6 +15,14 @@ DOCKERFILE_PATH = PROJECT_ROOT / "Dockerfile"
 CHAT_TEMPLATE_PATH = PROJECT_ROOT / "templates" / "agent_chat.html"
 CHAT_BUNDLE_PATH = PROJECT_ROOT / "static" / "dist" / "chat-app.js"
 I18N_PATH = PROJECT_ROOT / "frontend" / "legacy" / "i18n.js"
+RUNTIME_REQUIREMENTS_PATH = PROJECT_ROOT / "requirements.txt"
+BUILD_REQUIREMENTS_PATH = PROJECT_ROOT / "requirements-build.txt"
+OPTIONAL_REQUIREMENTS_PATHS = (
+    PROJECT_ROOT / "requirements-dl.txt",
+    PROJECT_ROOT / "requirements-ml.txt",
+    PROJECT_ROOT / "requirements-remote.txt",
+)
+WINDOWS_ICON_PATH = PROJECT_ROOT / "packaging" / "pfs-mark.ico"
 LEGACY_PRODUCT_NAMES = ("BusinessAnalyticsAgent", "Business Analytics Agent")
 RETIRED_MODEL_LABELS = ("OpenAI / ChatGPT", "AtlasCloud")
 LEGACY_COMMUNITY_MARKERS = (
@@ -89,17 +97,23 @@ class ReleaseIdentityTests(unittest.TestCase):
         self.assertIn("notarized", self.workflow)
         self.assertIn("SHA256SUMS.txt", self.workflow)
 
-    def test_release_defaults_are_pfs_scoped_and_no_public_license_keeps_release_closed(self):
+    def test_release_defaults_are_pfs_scoped_and_require_explicit_release_confirmation(self):
         self.assertIn('default: "0.1.0"', self.workflow)
         self.assertNotIn('default: "1.2.0"', self.workflow)
-        self.assertIn("No public software license is present", self.workflow)
+        self.assertIn('release_confirmed:', self.workflow)
+        self.assertIn('default: false', self.workflow)
+        self.assertIn('if [ -s LICENSE ]; then', self.workflow)
+        self.assertIn("GitHub Release is held until the final feature", self.workflow)
         self.assertIn("public_license_present", self.workflow)
         self.assertIn("release-disabled", self.workflow)
         self.assertIn(
             "needs.release-preflight.outputs.public_license_present == 'true'",
             self.workflow,
         )
-        self.assertFalse(PUBLIC_LICENSE_PATH.exists())
+        self.assertIn("github.event_name == 'workflow_dispatch'", self.workflow)
+        self.assertIn("inputs.release_confirmed == true", self.workflow)
+        self.assertTrue(PUBLIC_LICENSE_PATH.is_file())
+        self.assertTrue(read_text(PUBLIC_LICENSE_PATH).strip())
 
     def test_release_matrix_targets_windows_and_apple_silicon_only(self):
         self.assertIn("name: Windows x64", self.workflow)
@@ -107,6 +121,20 @@ class ReleaseIdentityTests(unittest.TestCase):
         self.assertNotIn("macos-15-intel", self.workflow)
         self.assertNotIn("macOS Intel x64", self.workflow)
         self.assertNotIn("macos-x64-package", self.workflow)
+
+    def test_install_and_packaging_inputs_are_present(self):
+        for path in (
+            RUNTIME_REQUIREMENTS_PATH,
+            BUILD_REQUIREMENTS_PATH,
+            *OPTIONAL_REQUIREMENTS_PATHS,
+            WINDOWS_ICON_PATH,
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(path.is_file(), f"missing release input: {path}")
+                self.assertGreater(path.stat().st_size, 0)
+        self.assertIn("requirements.txt", self.workflow)
+        self.assertIn("requirements-build.txt", self.workflow)
+        self.assertIn('WINDOWS_ICON = STAGING / "packaging" / "pfs-mark.ico"', self.spec)
 
     def test_workflow_passes_version_and_refs_through_step_environment(self):
         expected_steps = (

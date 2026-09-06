@@ -9,14 +9,15 @@
 - Added natural-language chat, read-only queries, charts, Dashboard, JSON, CSV, Excel, Word, and PPT deliverables.
 - Added conversations, jobs, workspaces, Skills, knowledge, workflows, and lightweight source trace.
 - Added DeepSeek, Kimi, GLM, MiniMax, their Coding Plan variants, and custom OpenAI-compatible providers.
-- Added optional MCP, Teams, Hooks, Feishu, GPU/remote execution, and cloud-login surfaces; all remain off by default.
+- Added MCP, Teams, Hooks, Feishu, and cloud-login surfaces; they are available by default. GPU/remote execution remains off by default.
 
-### Local checks
+### Validation status
 
 - macOS startup, core chat, CSV/XLSX analysis, charts, deliverables, jobs, and workspace basics have local evidence.
 - Code, frontend formatting, static checks, and offline regression tests follow the development gates.
+- The latest successful CI run, `34029259331`, validated commit `b2a6393` for Windows x64, macOS Apple Silicon, a clean Windows source install, and both desktop packages. The current `main` commit is `1cc49c9` and has not yet run CI at the same SHA.
 
 ### Current boundary
 
-- Clean Windows installation, CI/Release downloads, real external services, deployment, and live access require separate checks in their target environments.
+- Physical Windows/macOS installation, a formal Release, real external services, deployment, and live access require separate checks in their target environments.
 - Local samples and offline tests do not promise production data quality, external-service availability, or live service operation.

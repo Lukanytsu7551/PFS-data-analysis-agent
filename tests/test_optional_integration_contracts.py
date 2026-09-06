@@ -165,13 +165,13 @@ class OptionalIntegrationContractTests(unittest.TestCase):
         self.assertTrue(accepted.get_json()["accepted"])
         dispatch.assert_called_once()
 
-    def test_cloud_login_requires_both_explicit_flag_and_host_marker(self):
-        self.assertFalse(
-            cloud_login_enabled({"PFS_ENABLE_CLOUD_LOGIN": "1"})
-        )
-        self.assertFalse(
-            cloud_login_enabled({"RAILWAY_PROJECT_ID": "pfs-prod"})
-        )
+    def test_cloud_login_requires_cloud_host_and_honors_override(self):
+        self.assertFalse(cloud_login_enabled({"PFS_ENABLE_CLOUD_LOGIN": "1"}))
+        self.assertTrue(cloud_login_enabled({"RAILWAY_PROJECT_ID": "pfs-prod"}))
+        self.assertFalse(cloud_login_enabled({
+            "PFS_ENABLE_CLOUD_LOGIN": "0",
+            "RAILWAY_PROJECT_ID": "pfs-prod",
+        }))
         self.assertTrue(
             cloud_login_enabled({
                 "PFS_ENABLE_CLOUD_LOGIN": "true",

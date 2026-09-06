@@ -6,7 +6,7 @@ PFS 当前处于开发阶段，尚未声明任何生产级 SLA。每个版本都
 
 ## 报告安全问题
 
-如果这是私有仓库，请通过 GitHub 的 Private vulnerability reporting 或仓库维护者指定的私密渠道报告；不要在公开 Issue 中粘贴 API Key、用户数据、凭据、数据库连接串或可利用漏洞细节。
+请优先使用 GitHub Private vulnerability reporting（如仓库已启用）或仓库维护者指定的私密渠道报告；不要在公开 Issue 中粘贴 API Key、用户数据、凭据、数据库连接串或可利用漏洞细节。
 
 报告应尽量包含：
 

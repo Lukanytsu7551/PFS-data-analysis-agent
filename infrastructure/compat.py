@@ -7,6 +7,13 @@ from collections.abc import Mapping
 from pathlib import Path
 
 
+DEFAULT_ENABLED_OPTIONAL_FEATURES = frozenset({
+    "HOOKS",
+    "FEISHU_BOT",
+    "CLOUD_LOGIN",
+})
+
+
 def env(primary: str, default: str = "") -> str:
     """Read a PFS setting, returning *default* when it is unset."""
     value = str(os.environ.get(primary) or "").strip()
@@ -23,14 +30,23 @@ def optional_feature_enabled(
     name: str,
     environ: Mapping[str, str] | None = None,
 ) -> bool:
-    """Return whether a retained optional feature is explicitly enabled."""
+    """Return whether a retained feature is enabled by default or override.
+
+    Default-on features only expose local capability and lifecycle entry
+    points. External calls still require an explicit target, credentials, and
+    the integration's own configuration.
+    """
     values = environ if environ is not None else os.environ
-    key = f"PFS_ENABLE_{str(name or '').strip().upper()}"
-    return env_from(values, key, "").lower() in {"1", "true", "yes", "on"}
+    normalized_name = str(name or "").strip().upper()
+    key = f"PFS_ENABLE_{normalized_name}"
+    raw = env_from(values, key, "")
+    if raw:
+        return raw.lower() in {"1", "true", "yes", "on"}
+    return normalized_name in DEFAULT_ENABLED_OPTIONAL_FEATURES
 
 
 def cloud_login_enabled(environ: Mapping[str, str] | None = None) -> bool:
-    """Return whether the retained cloud-login mode is explicitly enabled."""
+    """Return whether cloud-login is available on a supported cloud host."""
     values = environ if environ is not None else os.environ
     enabled = optional_feature_enabled("CLOUD_LOGIN", values)
     return enabled and (

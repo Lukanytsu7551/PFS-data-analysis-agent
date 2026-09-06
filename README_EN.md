@@ -39,7 +39,7 @@
 | Analysis | Read-only SQL, grouped metrics, safe aggregations, anomaly detection, clustering, decision trees, and forecast-evaluation entry points |
 | Visualization | Chart recommendations, interactive charts, and a Dashboard delivery entry point |
 | Agent | SSE chat, tool calls, Skills, knowledge base, workflows, jobs, and context management |
-| Extensions | MCP, Teams, Hooks, Feishu, GPU/remote execution, and cloud-login interfaces; off by default and environment-dependent |
+| Extensions | MCP, Teams, Hooks, Feishu, and cloud-login interfaces are enabled by default; remote GPU is off by default; real external services require configuration and are not accepted in this pass |
 
 ## Quick demo
 
@@ -120,7 +120,7 @@ Keep API keys out of Dockerfiles, images, and Git. See `docker-compose.yml` for 
 | `/compact` | Compact the current context |
 | `/help` | Show command help |
 
-`/teams` and `/robot` remain optional extension surfaces. Real external-service availability depends on the target environment.
+`/teams` and `/robot` are enabled extension surfaces. Local team and configuration flows are available; real external-service availability depends on the target environment and is not accepted in this pass.
 
 ## Examples
 
@@ -162,11 +162,11 @@ Keep model keys in local configuration or environment variables. Other legacy pr
 
 ## Current boundary
 
-The current delivery focus is a downloadable source repository, desktop local startup, and a core data-analysis loop. macOS startup, core chat, CSV/XLSX, charts, deliverables, jobs, and workspace basics have local evidence; GitHub Actions has passed the Windows x64/macOS Apple Silicon builds and the clean Windows source-install job, and the resulting artifacts are available from Actions. The root [`LICENSE`](LICENSE) now provides a custom non-commercial license; a formal GitHub Release remains deferred until final feature and business acceptance, and will not be created merely because a license file exists.
+The current delivery focus is a downloadable source repository, desktop local startup, and a core data-analysis loop. macOS startup, core chat, CSV/XLSX, charts, deliverables, jobs, and workspace basics have local evidence. The latest successful GitHub Actions run, `34029259331`, validated commit `b2a6393` for Windows x64/macOS Apple Silicon builds and a clean Windows source install; the current `main` commit is `1cc49c9` and has not yet run CI at the same SHA. The root [`LICENSE`](LICENSE) provides a custom non-commercial license; a formal GitHub Release remains deferred until final feature and business acceptance.
 
-Installation on a physical Windows computer, macOS/Windows install-upgrade-uninstall flows, complex Office rendering in native applications, real business-data acceptance, real models and external services, deployment, and live verification still require their target environments. Real models and external services remain off by default as agreed and do not block the local first release.
+Installation on a physical Windows computer, macOS/Windows install-upgrade-uninstall flows, complex Office rendering in native applications, real business-data acceptance, real models and external services, deployment, and live verification still require their target environments. Real external services are not accepted in this pass and do not block the local first release.
 
-Local tests, fixed fixtures, or configuration files prove only their respective layer. Optional integrations stay off and do not start without explicit configuration.
+Local tests, fixed fixtures, or configuration files prove only their respective layer. Enabled integrations do not start an external call without a target and credentials; remote GPU remains off by default.
 
 ## Development checks
 
