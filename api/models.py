@@ -3,6 +3,7 @@ import logging
 
 from flask import Blueprint, request, jsonify
 from .state import config_manager, session_manager, require_session_ownership
+from LLM.llm_config_manager import SUPPORTED_BUILTIN_PROVIDERS
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +24,8 @@ def model_defaults():
             "context_window": v.get("context_window"),
             "max_output_tokens": v.get("max_output_tokens"),
         }
-        for k, v in config_manager.DEFAULT_CONFIGS.items()
+        for k in SUPPORTED_BUILTIN_PROVIDERS
+        for v in [config_manager.DEFAULT_CONFIGS[k]]
     })
 
 
@@ -157,6 +159,13 @@ def delete_model():
 def test_model():
     d = request.json or {}
     provider  = d.get("provider", "").strip()
+    if provider not in SUPPORTED_BUILTIN_PROVIDERS and not provider.startswith("custom_"):
+        return jsonify({
+            "success": False,
+            "code": "provider_retired",
+            "message": f"不支持或已退役的内置提供商: {provider}",
+            "provider": provider,
+        })
     # 前端可传入输入框中尚未保存的临时值，优先用于测试
     tmp_key   = (d.get("api_key")  or "").strip() or None
     tmp_url   = (d.get("base_url") or "").strip() or None
@@ -172,7 +181,7 @@ def test_model():
 def set_session_model(sid: str):
     d = request.json or {}
     provider = d.get("provider", "").strip()
-    if not config_manager.get_config(provider):
+    if not config_manager.is_selectable_provider(provider):
         return jsonify({"error": f"未知的模型: {provider}"}), 400
     sess = session_manager.get_or_create(sid)
     sess.model_provider = provider

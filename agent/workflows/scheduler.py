@@ -715,12 +715,24 @@ class WorkflowScheduler:
             }:
                 continue
             if not node_run["job_id"]:
-                self.run_store.transition_node(
-                    node_run["id"],
-                    NodeRunStatus.FAILED,
-                    error="claimed node has no bound Job",
-                )
-                continue
+                operation_key = str(node_run.get("operation_key") or "")
+                find_job = getattr(self.job_runner, "get_by_operation_key", None)
+                orphan = find_job(operation_key) if callable(find_job) else None
+                if orphan is not None:
+                    if self.run_store.bind_job(node_run["id"], orphan["id"]):
+                        node_run = {**node_run, "job_id": orphan["id"]}
+                    else:
+                        # Another scheduler may have repaired the binding
+                        # between the read and this transaction. Reconcile on
+                        # the next tick instead of failing a healthy node.
+                        continue
+                else:
+                    self.run_store.transition_node(
+                        node_run["id"],
+                        NodeRunStatus.FAILED,
+                        error="claimed node has no bound Job",
+                    )
+                    continue
             job = self.job_runner.get_status(node_run["job_id"])
             if job is None:
                 self.run_store.transition_node(
@@ -1276,21 +1288,56 @@ class WorkflowScheduler:
                     "node_id": str(node_run["node_id"]),
                     "iteration": int(node_run["iteration"]),
                 }
-                job_id = self.job_runner.create(
-                    lambda ctx, item=execution_node, material=inputs: self.executor(
-                        item,
-                        material,
-                        ctx,
-                    ),
-                    job_type="workflow_node",
-                    label=node_run["node_id"],
+                worker = lambda ctx, item=execution_node, material=inputs: self.executor(
+                    item,
+                    material,
+                    ctx,
                 )
+                create_durable = getattr(self.job_runner, "create_durable", None)
+                create_with_key = getattr(
+                    self.job_runner, "create_with_operation_key", None
+                )
+                if (
+                    callable(create_durable)
+                    and getattr(self.job_runner, "durable_queue_enabled", False)
+                ):
+                    job_id = create_durable(
+                        "workflow_node",
+                        {
+                            "run_id": run_id,
+                            "node_run_id": str(node_run["id"]),
+                            "node": execution_node,
+                            "inputs": inputs,
+                        },
+                        job_type="workflow_node",
+                        label=node_run["node_id"],
+                        operation_key=operation_key,
+                    )
+                elif callable(create_with_key):
+                    job_id = create_with_key(
+                        worker,
+                        job_type="workflow_node",
+                        label=node_run["node_id"],
+                        operation_key=operation_key,
+                    )
+                else:
+                    job_id = self.job_runner.create(
+                        worker,
+                        job_type="workflow_node",
+                        label=node_run["node_id"],
+                    )
                 if not self.run_store.bind_job(node_run["id"], job_id):
                     self.job_runner.cancel(job_id)
                     raise RuntimeError("failed to bind workflow Job")
                 active_count += 1
                 listener = getattr(self.job_runner, "add_terminal_listener", None)
-                if callable(listener):
+                if (
+                    callable(listener)
+                    and not (
+                        callable(create_durable)
+                        and getattr(self.job_runner, "durable_queue_enabled", False)
+                    )
+                ):
                     listener(
                         job_id,
                         lambda _job, rid=run_id, pid=profile_id: self._job_terminal(

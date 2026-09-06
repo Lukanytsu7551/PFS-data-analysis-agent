@@ -1,13 +1,18 @@
 """Shared singletons — import from here, never instantiate elsewhere."""
+
+import atexit
 import logging
 from pathlib import Path
+from threading import Lock
 
 log = logging.getLogger(__name__)
 
 import sys
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from data.session import SessionManager
+from data.chat_state_store import close_chat_state_store
+from data.session import SessionManager, close_global_jobs_store
 from LLM.llm_config_manager import get_config_manager
 from LLM.mcp_config_manager import get_mcp_config_manager
 from data.datasource_config_manager import get_datasource_config_manager
@@ -76,6 +81,33 @@ chart_store: _ChartStore = _ChartStore(_CHARTS_DIR)
 
 # workspace_manager 已从 data.workspace 导入（模块级单例），直接可用
 
+_state_cleanup_lock = Lock()
+
+
+def close_state_resources() -> None:
+    """Release sessions before closing the process-wide SQLite stores.
+
+    SessionManager.close() waits for its maintenance thread and session-owned
+    JobRunners before the stores below are closed.  Each close operation is
+    idempotent because this function is also registered with ``atexit``.
+    """
+    with _state_cleanup_lock:
+        try:
+            session_manager.close()
+        except Exception:
+            log.exception("[state] session manager cleanup failed")
+        try:
+            close_chat_state_store()
+        except Exception:
+            log.exception("[state] ChatStateStore cleanup failed")
+        try:
+            close_global_jobs_store()
+        except Exception:
+            log.exception("[state] JobsStore cleanup failed")
+
+
+atexit.register(close_state_resources)
+
 
 def check_session_ownership(sid: str) -> tuple[bool, str]:
     """Verify the authenticated user owns *sid*.  Returns (allowed, user_id).
@@ -91,6 +123,7 @@ def check_session_ownership(sid: str) -> tuple[bool, str]:
         return True, ""
 
     from .auth import current_user
+
     auth_user = current_user()
     if not auth_user:
         return False, ""
@@ -132,4 +165,5 @@ def require_session_ownership(f):
         if not allowed:
             return jsonify({"error": "无权访问此会话", "code": "forbidden"}), 403
         return f(sid, *args, **kwargs)
+
     return wrapper

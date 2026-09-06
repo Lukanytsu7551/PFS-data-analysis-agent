@@ -1,8 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller onedir specification; consumes only the audited staging tree."""
 
-from pathlib import Path
 import os
+import json
+from pathlib import Path
 import sys
 
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
@@ -23,6 +24,16 @@ CHART_ROOT = STAGING / "Function" / "Charts_generation"
 OUTPUT_ROOT = STAGING / "Function" / "Output"
 for import_root in (STAGING, CHART_ROOT, OUTPUT_ROOT):
     sys.path.insert(0, str(import_root))
+
+
+raw_product_version = os.environ.get("PFS_PRODUCT_VERSION", "").strip()
+frozen_metadata_path = None
+if raw_product_version:
+    frozen_metadata_path = STAGING.parent / "pfs-product-metadata.json"
+    frozen_metadata_path.write_text(
+        json.dumps({"product_version": raw_product_version}, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 def staged_tree(relative: str, *, suffixes: set[str] | None = None):
@@ -50,6 +61,8 @@ def staged_file(relative: str, destination: str):
 
 
 datas = []
+if frozen_metadata_path is not None:
+    datas.append((str(frozen_metadata_path), "."))
 for resource_tree in ("templates", "static", "commands", "skills", "Information"):
     datas.extend(staged_tree(resource_tree))
 datas.extend(staged_tree("data/fixtures"))
@@ -173,7 +186,7 @@ coll = COLLECT(
 )
 
 if sys.platform == "darwin":
-    bundle_version = os.environ.get("PFS_PRODUCT_VERSION", "0.1.0").split("-", 1)[0]
+    bundle_version = (raw_product_version or "0.1.0").split("-", 1)[0].split("+", 1)[0]
     app = BUNDLE(
         coll,
         name="PFS Data Analysis Agent.app",
@@ -181,6 +194,7 @@ if sys.platform == "darwin":
         bundle_identifier="com.pfs.dataanalysisagent",
         version=bundle_version,
         info_plist={
+            "PFSProductVersion": raw_product_version or bundle_version,
             "NSHighResolutionCapable": True,
             "LSMinimumSystemVersion": "12.0",
         },

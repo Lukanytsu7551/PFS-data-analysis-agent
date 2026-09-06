@@ -29,7 +29,10 @@ from pfs_agent.reporting import (
     analyze_file,
     list_xlsx_worksheets,
     load_tabular_snapshot,
+    parse_metric_formula,
+    SUPPORTED_METRIC_AGGREGATIONS,
 )
+from pfs_agent.metric_catalog import DEFAULT_METRIC_CATALOG, MetricCatalogError
 from pfs_agent.query import QueryInterpretationError, parse_report_question
 from pfs_agent.business_acceptance import (
     BusinessAcceptanceError,
@@ -58,16 +61,7 @@ from pfs_agent.runs import (
 bp = Blueprint("pfs", __name__)
 log = logging.getLogger(__name__)
 
-_FIXTURE_METRIC = MetricContract(
-    metric_id="sales_amount",
-    label="销售额",
-    formula="SUM(sales_amount)",
-    value_column="sales_amount",
-    date_column="month",
-    dimension="region",
-    grain="month",
-    version="v1",
-)
+_FIXTURE_METRIC = DEFAULT_METRIC_CATALOG.resolve("sales_amount", "v1")
 
 
 def _bounded(value: object, field: str, *, limit: int = 160, required: bool = False) -> str:
@@ -92,6 +86,30 @@ def _body() -> dict:
 
 
 def _metric_from_payload(payload: Mapping[str, object], columns: tuple[str, ...]) -> MetricContract:
+    catalog_metric_id = _bounded(
+        payload.get("catalog_metric_id"),
+        "catalog_metric_id",
+        limit=120,
+    )
+    if catalog_metric_id:
+        catalog_version = _bounded(
+            payload.get("catalog_version") or payload.get("version") or "v1",
+            "catalog_version",
+            limit=40,
+            required=True,
+        )
+        metric = DEFAULT_METRIC_CATALOG.resolve(catalog_metric_id, catalog_version)
+        missing = {
+            metric.value_column,
+            metric.date_column,
+            metric.dimension,
+        } - set(columns)
+        if missing:
+            raise ReportingContractError(
+                "catalog metric columns missing from CSV source: " + ", ".join(sorted(missing)),
+                code="metric_catalog_columns_missing",
+            )
+        return metric
     value_column = _bounded(
         payload.get("value_column") or "sales_amount",
         "value_column",
@@ -120,12 +138,20 @@ def _metric_from_payload(payload: Mapping[str, object], columns: tuple[str, ...]
     label = _bounded(payload.get("label") or value_column, "label", limit=120, required=True)
     grain = _bounded(payload.get("grain") or "month", "grain", limit=40, required=True)
     version = _bounded(payload.get("version") or "v1", "version", limit=40, required=True)
-    # Formula is metadata only in this deterministic slice; calculation is
-    # always Decimal SUM over the selected value column.
+    aggregation = _bounded(
+        payload.get("aggregation") or "SUM", "aggregation", limit=32, required=True
+    ).upper()
+    if aggregation not in SUPPORTED_METRIC_AGGREGATIONS:
+        raise ReportingContractError(
+            "aggregation must be one of SUM, AVG, COUNT, COUNT_DISTINCT",
+            code="metric_formula_unsupported",
+        )
+    # Formula is generated from a bounded aggregate over the selected value
+    # column; arbitrary expressions never enter the deterministic path.
     return MetricContract(
         metric_id=metric_id,
         label=label,
-        formula=f"SUM({value_column})",
+        formula=f"{aggregation}({value_column})",
         value_column=value_column,
         date_column=date_column,
         dimension=dimension,
@@ -427,6 +453,7 @@ def _delivery_table(result: object, data_source: object) -> str:
 
 def _dashboard_widgets(result: object, table_name: str) -> list[dict]:
     payload = result.to_dict()
+    aggregation, _ = parse_metric_formula(result.metric)
     metric = payload["metric"]
     request_data = payload["request"]
     table = _sql_identifier(table_name)
@@ -444,7 +471,7 @@ def _dashboard_widgets(result: object, table_name: str) -> list[dict]:
             "id": "pfs-total",
             "title": f"{metric['label']}合计",
             "chart_type": "KPI_Card",
-            "sql": f"SELECT SUM({value}) AS total_value FROM {table}{where}",
+            "sql": f"SELECT {aggregation}({value}) AS total_value FROM {table}{where}",
             "field_mapping": {},
             "grid": {"x": 0, "y": 0, "w": 4, "h": 2},
         },
@@ -453,7 +480,7 @@ def _dashboard_widgets(result: object, table_name: str) -> list[dict]:
             "title": f"按 {metric['dimension']} 分组的{metric['label']}",
             "chart_type": "Bar_Chart",
             "sql": (
-                f"SELECT {dimension} AS group_name, SUM({value}) AS total_value "
+                f"SELECT {dimension} AS group_name, {aggregation}({value}) AS total_value "
                 f"FROM {table}{where} GROUP BY 1 ORDER BY total_value DESC"
             ),
             "field_mapping": {"x": "group_name", "y": "total_value"},
@@ -689,6 +716,7 @@ def capabilities():
                 "business_forecast_guardrails": (
                     "implemented_optional_total_delta_target_mean_shift_and_ks_thresholds"
                 ),
+                "metric_catalog": "implemented_versioned_local_contract",
             },
             "models": {
                 "deepseek_chat": "verified_local_http",
@@ -711,6 +739,29 @@ def capabilities():
             },
         }
     )
+
+
+@bp.get("/api/pfs/metrics")
+def metric_catalog():
+    """List the small versioned metric catalog without reading user data."""
+    try:
+        metric_id = _bounded(request.args.get("metric_id"), "metric_id", limit=120)
+        version = _bounded(request.args.get("version"), "version", limit=40)
+        if version and not metric_id:
+            raise MetricCatalogError("version filter requires metric_id", code="metric_id_missing")
+        if metric_id and version:
+            entries = (DEFAULT_METRIC_CATALOG.resolve_entry(metric_id, version),)
+        else:
+            entries = DEFAULT_METRIC_CATALOG.entries(metric_id)
+        return jsonify(
+            {
+                "ok": True,
+                "metrics": [entry.to_dict() for entry in entries],
+                "count": len(entries),
+            }
+        )
+    except (MetricCatalogError, TypeError, ValueError, OSError) as exc:
+        return _error(exc)
 
 
 @bp.post("/api/pfs/export")

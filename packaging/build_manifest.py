@@ -17,6 +17,9 @@ class ManifestPolicyError(RuntimeError):
     """Raised before copying when an allowed source tree contains forbidden data."""
 
 
+SOURCE_METADATA_NAMES = frozenset({".ds_store"})
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -53,6 +56,9 @@ def _candidate_files(source: Path) -> tuple[list[tuple[Path, Path]], list[str], 
             for directory in sorted(dirs):
                 item = current_path / directory
                 relative = item.relative_to(source)
+                if directory.casefold() in SOURCE_METADATA_NAMES:
+                    excluded.append(f"{relative.as_posix()}/ (OS metadata)")
+                    continue
                 if item.is_symlink():
                     violations.append(f"{relative.as_posix()}: symbolic links are forbidden")
                     continue
@@ -68,6 +74,9 @@ def _candidate_files(source: Path) -> tuple[list[tuple[Path, Path]], list[str], 
             for filename in sorted(names):
                 item = current_path / filename
                 relative = item.relative_to(source)
+                if filename.casefold() in SOURCE_METADATA_NAMES:
+                    excluded.append(f"{relative.as_posix()} (OS metadata)")
+                    continue
                 if item.is_symlink():
                     violations.append(f"{relative.as_posix()}: symbolic links are forbidden")
                     continue

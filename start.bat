@@ -29,9 +29,9 @@ if not exist "%VENV_PYTHON%" (
     goto :install_help
 )
 
-"%VENV_PYTHON%" --version >nul 2>&1
+"%VENV_PYTHON%" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
 if errorlevel 1 (
-    echo [PFS][ERROR] The project Python executable cannot run: %VENV_PYTHON%
+    echo [PFS][ERROR] Python 3.10+ is required in the project virtual environment: %VENV_PYTHON%
     goto :install_help
 )
 

@@ -1,4 +1,5 @@
 """Long-term memory rendering, extraction, and scoped agent access."""
+
 from __future__ import annotations
 
 import json
@@ -10,7 +11,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from agent.errors import AgentRunTimeout
+from agent.jobs import JobCanceled
 from agent.reasoning import split_reasoning_tags
+from agent.retry import call_with_retry as _call_with_retry
 from data import memory_store
 from infrastructure.paths import data_path
 
@@ -28,6 +32,8 @@ _NOTICES: dict[str, list[str]] = {}
 _NOTICES_LOCK = threading.Lock()
 _NOTICES_MAX_SESSIONS = 100
 _NOTICES_MAX_PER_SESSION = 10
+_MEMORY_REQUEST_TIMEOUT_SECONDS = 30.0
+_MEMORY_MAX_RETRIES = 1
 _EXTRACT_SYSTEM = """You extract durable memory for a local data-analysis assistant. Return JSON only.
 Your first non-whitespace character must be `{`; do not emit reasoning, `<think>` tags, Markdown fences, or prose.
 Remember only explicit user preferences (user), corrections (feedback), confirmed workspace facts (project), or durable resource pointers (reference). Do not store tasks, casual chat, raw query values, credentials, connection strings, secrets, or private data. Existing memory summaries are included for deduplication.
@@ -101,8 +107,12 @@ def _final_response_content(message: Any) -> str:
     # ``split_reasoning_tags`` handles streaming-style <think> tags. Other
     # providers use analysis/reasoning tags, sometimes without a closing tag.
     # An unclosed reasoning block has no trustworthy final-answer segment.
-    text = re.sub(r"<(?:analysis|reasoning)\b[^>]*>.*?(?:</(?:analysis|reasoning)>|$)", "", text,
-                  flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(
+        r"<(?:analysis|reasoning)\b[^>]*>.*?(?:</(?:analysis|reasoning)>|$)",
+        "",
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
     visible, _embedded_reasoning = split_reasoning_tags(text)
     return _strip_think_blocks(visible).strip()
 
@@ -167,7 +177,9 @@ def _truncate_for_context(text: str, max_chars: int) -> str:
 
 
 def _extraction_turn_for_context(
-    user_message: str, assistant_message: str, context_tokens: int,
+    user_message: str,
+    assistant_message: str,
+    context_tokens: int,
 ) -> tuple[str, str]:
     """Bound extraction input to its 80%-of-model context allowance."""
     max_chars = max(2_000, int(context_tokens * 3.5))
@@ -180,7 +192,16 @@ def _extraction_turn_for_context(
     )
 
 
-def schedule_extraction(*, provider: str, session_id: str, user_id: str, workspace_id: str, user_message: str, assistant_message: str, runner: Any = None) -> None:
+def schedule_extraction(
+    *,
+    provider: str,
+    session_id: str,
+    user_id: str,
+    workspace_id: str,
+    user_message: str,
+    assistant_message: str,
+    runner: Any = None,
+) -> None:
     """Submit extraction without coupling it to the SSE lifecycle.
 
     When a JobRunner is supplied the extraction reports its lifecycle as a
@@ -213,12 +234,36 @@ def _job_begin(runner: Any, label: str) -> str:
         return ""
 
 
-def _job_finish(runner: Any, job_id: str, *, result: Any = None, error: str = "", message: str = "") -> None:
+def _job_finish(
+    runner: Any,
+    job_id: str,
+    *,
+    result: Any = None,
+    error: str = "",
+    message: str = "",
+    error_code: str = "",
+    recovery_action: str = "",
+) -> None:
     if runner is None or not job_id:
         return
     try:
         if error:
-            runner.fail_tracked(job_id, error)
+            if error_code == "job_timeout" and hasattr(runner, "timeout_tracked"):
+                runner.timeout_tracked(
+                    job_id,
+                    error,
+                    error_code=error_code,
+                    recovery_action=recovery_action or "retry_after_provider_recovery",
+                )
+            elif error_code or recovery_action:
+                runner.fail_tracked(
+                    job_id,
+                    error,
+                    error_code=error_code,
+                    recovery_action=recovery_action,
+                )
+            else:
+                runner.fail_tracked(job_id, error)
         else:
             if message:
                 # Surface the outcome on the history card: "succeeded" alone
@@ -229,13 +274,109 @@ def _job_finish(runner: Any, job_id: str, *, result: Any = None, error: str = ""
         log.warning("[memory] job tracking finalize failed: %s", exc)
 
 
-def _extract(*, provider: str, session_id: str, user_id: str, workspace_id: str, user_message: str, assistant_message: str, runner: Any = None) -> None:
+def _check_memory_job(runner: Any, job_id: str) -> None:
+    """Raise when a tracked background memory task was canceled."""
+    if runner is None or not job_id:
+        return
+    try:
+        status = runner.get_status(job_id) or {}
+    except Exception:
+        return
+    if str(status.get("status") or "") in {"canceling", "canceled"}:
+        raise JobCanceled(job_id)
+
+
+def _background_extraction_runner(runner: Any, session_id: str) -> tuple[Any, Any]:
+    """Give durable-worker memory tasks an independent JobStore/Runner.
+
+    A durable queue handler owns a short-lived JobRunner whose SQLite handle is
+    closed as soon as the chat request has been drained. Memory extraction is
+    intentionally asynchronous, so it must not retain that ephemeral handle.
+    Reopen the same JobsStore path for the background task and close only this
+    task-owned tracker when extraction finishes. Ordinary in-process sessions
+    continue using their long-lived session runner.
+    """
+    if runner is None:
+        return None, None
+    role = str(os.environ.get("PFS_DURABLE_QUEUE_ROLE") or "").strip().lower()
+    if role != "worker":
+        return runner, None
+    source_store = getattr(runner, "_store", None)
+    store_path = getattr(source_store, "path", None)
+    if store_path is None:
+        log.warning("[memory] durable worker runner has no stable JobStore path")
+        return None, None
+    try:
+        from agent.jobs import JobRunner
+        from data.jobs_store import JobsStore
+
+        store = JobsStore(
+            store_path,
+            lease_seconds=float(getattr(source_store, "lease_seconds", 30.0)),
+        )
+        return JobRunner(session_id, store, max_workers=1), store
+    except Exception as exc:
+        log.warning("[memory] independent extraction tracker unavailable: %s", exc)
+        return None, None
+
+
+def _call_memory_provider(
+    client: Any,
+    *,
+    deadline_ts: float,
+    abort_check: Any = None,
+    **kwargs: Any,
+) -> Any:
+    """Call an auxiliary memory LLM within one shared deadline.
+
+    The timeout is recalculated for every retry, so the second attempt cannot
+    silently receive another full request window.  Clients that do not accept
+    a timeout fail closed instead of falling back to an unbounded call.
+    """
+
+    def check_budget() -> None:
+        if abort_check is not None:
+            abort_check()
+        remaining = deadline_ts - time.monotonic()
+        if remaining <= 0:
+            raise AgentRunTimeout
+
+    def call() -> Any:
+        check_budget()
+        request_kwargs = dict(kwargs)
+        request_kwargs["timeout"] = max(0.001, deadline_ts - time.monotonic())
+        return client.chat.completions.create(**request_kwargs)
+
+    return _call_with_retry(
+        call,
+        max_retries=_MEMORY_MAX_RETRIES,
+        abort_check=check_budget,
+    )
+
+
+def _extract(
+    *,
+    provider: str,
+    session_id: str,
+    user_id: str,
+    workspace_id: str,
+    user_message: str,
+    assistant_message: str,
+    runner: Any = None,
+) -> None:
     # Created here (memory worker thread) so the runner's thread-local
     # conversation scope does not apply: the job stays top-level and thus
     # visible in the task history list.
+    runner, tracking_store = _background_extraction_runner(runner, session_id)
     job_id = _job_begin(runner, f"记忆提取：{user_message[:60]}")
     raw = ""
+    deadline_ts = time.monotonic() + _MEMORY_REQUEST_TIMEOUT_SECONDS
+
+    def abort_check() -> None:
+        _check_memory_job(runner, job_id)
+
     try:
+        abort_check()
         from LLM.llm_config_manager import (
             auxiliary_token_limits,
             get_config_manager,
@@ -245,15 +386,21 @@ def _extract(*, provider: str, session_id: str, user_id: str, workspace_id: str,
         manager = get_config_manager()
         selected = provider or manager.get_default_provider()
         if not selected:
-            _job_finish(runner, job_id, result={"skipped": "未配置模型提供方"}, message="未配置模型提供方，本轮跳过")
+            _job_finish(
+                runner, job_id, result={"skipped": "未配置模型提供方"}, message="未配置模型提供方，本轮跳过"
+            )
             return
         config = manager.get_config(selected)
         if not config:
-            _job_finish(runner, job_id, result={"skipped": "模型配置不可用"}, message="模型配置不可用，本轮跳过")
+            _job_finish(
+                runner, job_id, result={"skipped": "模型配置不可用"}, message="模型配置不可用，本轮跳过"
+            )
             return
         context_budget, output_budget = auxiliary_token_limits(config)
         user_message, assistant_message = _extraction_turn_for_context(
-            user_message, assistant_message, context_budget,
+            user_message,
+            assistant_message,
+            context_budget,
         )
         summaries = [
             {key: record[key] for key in ("name", "type", "title")}
@@ -267,7 +414,10 @@ def _extract(*, provider: str, session_id: str, user_id: str, workspace_id: str,
             "existing_memory": summaries,
             "turn": {"user": user_message, "assistant": assistant_message},
         }
-        response = client.chat.completions.create(
+        response = _call_memory_provider(
+            client,
+            deadline_ts=deadline_ts,
+            abort_check=abort_check,
             model=config.model,
             temperature=0,
             max_tokens=output_budget,
@@ -279,8 +429,10 @@ def _extract(*, provider: str, session_id: str, user_id: str, workspace_id: str,
         raw = _final_response_content(response.choices[0].message)
         if not raw:
             memory_store.record_extraction_activity(
-                user_id=user_id, session_id=session_id,
-                status="skipped", message="模型未返回内容，本轮跳过",
+                user_id=user_id,
+                session_id=session_id,
+                status="skipped",
+                message="模型未返回内容，本轮跳过",
             )
             _job_finish(runner, job_id, result={"skipped": True}, message="模型未返回内容，本轮跳过")
             return
@@ -289,9 +441,13 @@ def _extract(*, provider: str, session_id: str, user_id: str, workspace_id: str,
         except json.JSONDecodeError:
             log.warning(
                 "[memory] invalid JSON on first extraction attempt sid=%s shape=%s; retrying",
-                session_id, _response_diagnostics(raw),
+                session_id,
+                _response_diagnostics(raw),
             )
-            response = client.chat.completions.create(
+            response = _call_memory_provider(
+                client,
+                deadline_ts=deadline_ts,
+                abort_check=abort_check,
                 model=config.model,
                 temperature=0,
                 max_tokens=output_budget,
@@ -308,32 +464,59 @@ def _extract(*, provider: str, session_id: str, user_id: str, workspace_id: str,
             raise ValueError("invalid memory operation list")
         saved_records: list[dict[str, str]] = []
         applied = _apply_operations(
-            operations, session_id=session_id,
-            user_id=user_id, workspace_id=workspace_id,
+            operations,
+            session_id=session_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
             scope_hint=_explicit_scope_hint(user_message),
             saved_records=saved_records,
         )
         _FAILURES.pop(session_id, None)
         summary = (
-            f"已写入 {applied} 条记忆" if applied
-            else "提取到的操作均未通过校验" if operations
+            f"已写入 {applied} 条记忆"
+            if applied
+            else "提取到的操作均未通过校验"
+            if operations
             else "本轮无可长期记忆的内容"
         )
         memory_store.record_extraction_activity(
-            user_id=user_id, session_id=session_id,
+            user_id=user_id,
+            session_id=session_id,
             status="saved" if applied else "rejected" if operations else "skipped",
-            message=summary, records=saved_records,
+            message=summary,
+            records=saved_records,
         )
         _job_finish(runner, job_id, result={"ops": len(operations), "applied": applied}, message=summary)
+    except JobCanceled:
+        raise
+    except AgentRunTimeout:
+        _FAILURES[session_id] = _FAILURES.get(session_id, 0) + 1
+        memory_store.record_extraction_activity(
+            user_id=user_id,
+            session_id=session_id,
+            status="failed",
+            message="记忆提取超过时间上限，未写入记忆",
+        )
+        _job_finish(
+            runner,
+            job_id,
+            error="记忆提取超过时间上限",
+            error_code="job_timeout",
+            recovery_action="retry_after_provider_recovery",
+        )
     except json.JSONDecodeError as exc:
         _FAILURES[session_id] = _FAILURES.get(session_id, 0) + 1
         diagnostics = _response_diagnostics(raw)
         log.warning(
             "[memory] extraction failed after JSON repair sid=%s error=%s shape=%s",
-            session_id, exc, diagnostics,
+            session_id,
+            exc,
+            diagnostics,
         )
         memory_store.record_extraction_activity(
-            user_id=user_id, session_id=session_id, status="failed",
+            user_id=user_id,
+            session_id=session_id,
+            status="failed",
             message="模型两次未返回可用 JSON，未写入记忆",
         )
         _job_finish(runner, job_id, error="记忆提取失败：模型两次未返回可用 JSON")
@@ -341,13 +524,23 @@ def _extract(*, provider: str, session_id: str, user_id: str, workspace_id: str,
         _FAILURES[session_id] = _FAILURES.get(session_id, 0) + 1
         log.warning(
             "[memory] extraction failed sid=%s: %s shape=%s",
-            session_id, exc, _response_diagnostics(raw),
+            session_id,
+            exc,
+            _response_diagnostics(raw),
         )
         memory_store.record_extraction_activity(
-            user_id=user_id, session_id=session_id, status="failed",
+            user_id=user_id,
+            session_id=session_id,
+            status="failed",
             message=f"提取失败：{exc}",
         )
         _job_finish(runner, job_id, error=f"记忆提取失败：{exc}")
+    finally:
+        if tracking_store is not None:
+            try:
+                runner.shutdown(wait=True)
+            finally:
+                tracking_store.close()
 
 
 def pop_notices(session_id: str) -> list[str]:
@@ -385,13 +578,15 @@ def _has_project_specific_content(operation: dict[str, Any]) -> bool:
     # The bare "表" would also match 图表/报表/表格/列表 and the bare "项目"
     # would match "所有项目", silently downgrading harmless preferences to
     # workspace records.  Require project-specific qualifiers instead.
-    return bool(re.search(
-        r"(?:工作区|数据集|数据源|(?<![图报格列])表(?:名)?|字段|列名|schema|数据库|"
-        r"(?:本|当前|此|该)项目|项目(?:名|数据|资料|文件|文档|目录|仓库)|"
-        r"[A-Za-z0-9_.-]+\\.(?:csv|xlsx|xls|parquet|duckdb|json))|`[^`]+`",
-        text,
-        re.IGNORECASE,
-    ))
+    return bool(
+        re.search(
+            r"(?:工作区|数据集|数据源|(?<![图报格列])表(?:名)?|字段|列名|schema|数据库|"
+            r"(?:本|当前|此|该)项目|项目(?:名|数据|资料|文件|文档|目录|仓库)|"
+            r"[A-Za-z0-9_.-]+\\.(?:csv|xlsx|xls|parquet|duckdb|json))|`[^`]+`",
+            text,
+            re.IGNORECASE,
+        )
+    )
 
 
 def _normalize_automatic_operation(operation: dict[str, Any], *, scope_hint: str = "") -> dict[str, Any]:
@@ -427,7 +622,15 @@ def _normalize_automatic_operation(operation: dict[str, Any], *, scope_hint: str
     return normalized
 
 
-def _apply_operations(operations: list[Any], *, session_id: str, user_id: str, workspace_id: str, scope_hint: str = "", saved_records: list[dict[str, str]] | None = None) -> int:
+def _apply_operations(
+    operations: list[Any],
+    *,
+    session_id: str,
+    user_id: str,
+    workspace_id: str,
+    scope_hint: str = "",
+    saved_records: list[dict[str, str]] | None = None,
+) -> int:
     """Apply validated ops one by one; a rejected op never fails the batch.
 
     Returns the number of records actually written.
@@ -441,7 +644,9 @@ def _apply_operations(operations: list[Any], *, session_id: str, user_id: str, w
         name = str(operation.get("name") or "")
         try:
             if op == "create" and memory_store.get_record(
-                name, user_id=user_id, workspace_id=workspace_id,
+                name,
+                user_id=user_id,
+                workspace_id=workspace_id,
             ):
                 # Duplicate name: converge onto the existing record instead of
                 # raising, which would trip the extraction circuit breaker.
@@ -449,20 +654,32 @@ def _apply_operations(operations: list[Any], *, session_id: str, user_id: str, w
             saved: dict[str, Any] | None = None
             if op == "create":
                 saved = memory_store.create_record(
-                    operation, user_id=user_id, workspace_id=workspace_id,
-                    actor="extraction", automatic=True, source_session=session_id,
+                    operation,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    actor="extraction",
+                    automatic=True,
+                    source_session=session_id,
                 )
             elif op == "update":
                 saved = memory_store.update_record(
-                    name, operation, user_id=user_id, workspace_id=workspace_id,
-                    actor="extraction", automatic=True,
+                    name,
+                    operation,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    actor="extraction",
+                    automatic=True,
                 )
             if saved:
                 applied += 1
                 if saved_records is not None:
-                    saved_records.append({
-                        "name": saved["name"], "title": saved["title"], "scope": saved["scope"],
-                    })
+                    saved_records.append(
+                        {
+                            "name": saved["name"],
+                            "title": saved["title"],
+                            "scope": saved["scope"],
+                        }
+                    )
                 label = "工作区级" if saved["scope"] == "workspace" else "用户级"
                 _push_notice(session_id, f"已记住（{label}）：{saved['title']}")
         except ValueError as exc:
@@ -471,6 +688,7 @@ def _apply_operations(operations: list[Any], *, session_id: str, user_id: str, w
 
 
 # ── consolidation (P2 governance) ──────────────────────────────────────────
+
 
 def _consolidation_lock_path():
     return data_path("memory", ".consolidate-lock")
@@ -531,7 +749,9 @@ def maybe_schedule_consolidation(*, provider: str, session_id: str, user_id: str
     return True
 
 
-def _consolidate(*, provider: str, session_id: str, user_id: str, workspace_id: str, previous_mtime: float) -> None:
+def _consolidate(
+    *, provider: str, session_id: str, user_id: str, workspace_id: str, previous_mtime: float
+) -> None:
     try:
         records = memory_store.list_records(user_id=user_id, workspace_id=workspace_id)
         if len(records) < 2:
@@ -545,20 +765,30 @@ def _consolidate(*, provider: str, session_id: str, user_id: str, workspace_id: 
             _rollback_consolidation_lock(previous_mtime)
             return
         client = get_llm_client(selected)
-        response = client.chat.completions.create(
+        response = _call_memory_provider(
+            client,
+            deadline_ts=time.monotonic() + _MEMORY_REQUEST_TIMEOUT_SECONDS,
             model=config.model,
             temperature=0,
             max_tokens=4000,
             messages=[
                 {"role": "system", "content": _CONSOLIDATE_SYSTEM},
-                {"role": "user", "content": json.dumps({
-                    "today": time.strftime("%Y-%m-%d"),
-                    "memory": [
-                        {key: record.get(key, "") for key in
-                         ("name", "type", "title", "body", "updated_at", "last_seen_at")}
-                        for record in records
-                    ],
-                }, ensure_ascii=False)},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "today": time.strftime("%Y-%m-%d"),
+                            "memory": [
+                                {
+                                    key: record.get(key, "")
+                                    for key in ("name", "type", "title", "body", "updated_at", "last_seen_at")
+                                }
+                                for record in records
+                            ],
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
             ],
         )
         raw = str(response.choices[0].message.content or "").strip()
@@ -568,7 +798,9 @@ def _consolidate(*, provider: str, session_id: str, user_id: str, workspace_id: 
         if not isinstance(operations, list) or len(operations) > _CONSOLIDATE_MAX_OPS:
             raise ValueError("invalid consolidation operation list")
         updated, archived = _apply_consolidation_ops(
-            operations, user_id=user_id, workspace_id=workspace_id,
+            operations,
+            user_id=user_id,
+            workspace_id=workspace_id,
         )
         log.info("[memory] consolidation done updated=%d archived=%d", updated, archived)
         if updated or archived:
@@ -589,13 +821,19 @@ def _apply_consolidation_ops(operations: list[Any], *, user_id: str, workspace_i
         try:
             if op == "update":
                 if memory_store.update_record(
-                    name, operation, user_id=user_id, workspace_id=workspace_id,
-                    actor="consolidation", automatic=True,
+                    name,
+                    operation,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    actor="consolidation",
+                    automatic=True,
                 ):
                     updated += 1
             elif op == "archive":
                 if memory_store.archive_record(
-                    name, user_id=user_id, workspace_id=workspace_id,
+                    name,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
                     actor="consolidation",
                 ):
                     archived += 1

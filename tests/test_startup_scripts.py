@@ -73,6 +73,18 @@ class StartupScriptTests(unittest.TestCase):
         self.assertIn('"%VENV_PYTHON%" "%APP_FILE%"', windows_launcher)
         self.assertIn('"%VENV_PYTHON%" "%APP_FILE%"', installer_launcher)
 
+    def test_source_launchers_fail_closed_below_python_310(self):
+        for path in SCRIPT_PATHS:
+            with self.subTest(script=path.relative_to(PROJECT_ROOT)):
+                text = path.read_text(encoding="utf-8")
+                version_check = "sys.version_info >= (3, 10)"
+                self.assertIn(version_check, text)
+                self.assertNotIn("--version", text)
+                self.assertLess(
+                    text.index(version_check),
+                    text.index("inspect_startup_dependencies"),
+                )
+
     def test_missing_environment_help_is_explicit_and_nonzero(self):
         mac_launcher = (PROJECT_ROOT / "start.command").read_text(encoding="utf-8")
         self.assertIn("python3 -m venv .venv", mac_launcher)
@@ -91,12 +103,32 @@ class StartupScriptTests(unittest.TestCase):
 
     def test_installer_prefers_packaged_executable(self):
         launcher = (PROJECT_ROOT / "installer" / "launch.bat").read_text(encoding="utf-8")
-        packaged_check = 'if exist "%PACKAGED_EXE%"'
+        packaged_check = 'if not exist "%PACKAGED_EXE%" goto :source_compat'
         source_check = 'if not exist "%APP_FILE%"'
 
         self.assertIn("PFSDataAnalysisAgent.exe", launcher)
-        self.assertIn('start "" "%PACKAGED_EXE%"', launcher)
+        self.assertIn('start "" /wait "%PACKAGED_EXE%"', launcher)
+        self.assertIn(":source_compat", launcher)
         self.assertLess(launcher.index(packaged_check), launcher.index(source_check))
+
+    def test_packaged_installer_waits_and_propagates_exit_code(self):
+        launcher = (PROJECT_ROOT / "installer" / "launch.bat").read_text(encoding="utf-8")
+        branch_start = launcher.index('if not exist "%PACKAGED_EXE%" goto :source_compat')
+        source_branch_start = launcher.index("\n:source_compat", branch_start) + len("\n")
+        packaged_branch = launcher[branch_start:source_branch_start]
+        start_offset = packaged_branch.index('start "" /wait "%PACKAGED_EXE%"')
+        capture_offset = packaged_branch.index('set "PACKAGED_EXIT_CODE=%ERRORLEVEL%"')
+        return_offset = packaged_branch.index("exit /b %PACKAGED_EXIT_CODE%")
+
+        self.assertNotIn("exit /b 0", launcher)
+        self.assertIn(
+            "[PFS][ERROR] Packaged PFS Data Analysis Agent exited with code",
+            packaged_branch,
+        )
+        self.assertNotIn("(", packaged_branch)
+        self.assertNotIn(")", packaged_branch)
+        self.assertLess(start_offset, capture_offset)
+        self.assertLess(capture_offset, return_offset)
 
 
 if __name__ == "__main__":

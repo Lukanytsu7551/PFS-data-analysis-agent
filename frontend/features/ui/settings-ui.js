@@ -155,7 +155,7 @@ export function mountSettingsUi() {
               autocomplete: "off",
               "data-lpignore": "true",  /* 阻止 LastPass 等密码管理器自动填充 */
               placeholder: isLocal
-                ? (t('settings.api_key_local_ph') || "本地模型（如 Ollama）无需 API Key，可留空")
+                ? (t('settings.api_key_local_ph') || "本地兼容模型无需 API Key，可留空")
                 : t('settings.api_key_ph'),
               value: p.fields.apiKey,
               onInput: e => { p.fields.apiKey = e.target.value; },
@@ -263,9 +263,9 @@ export function mountSettingsUi() {
     return h("div", { class: "pf-row" }, kids);
   }
 
-  // 本地模型 API Key 提示语（label 为 t('settings.local_no_key') 或 fallback）
+  // 本地兼容模型 API Key 提示语（label 为 t('settings.local_no_key') 或 fallback）
   function _localKeyHint() {
-    return t('settings.local_no_key') || "本地模型无需 API Key，可留空";
+    return t('settings.local_no_key') || "本地兼容模型无需 API Key，可留空";
   }
 
   // ── custom 列表项 ─────────────────────────────────────────────

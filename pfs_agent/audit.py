@@ -8,6 +8,7 @@ projects it into a bounded, path-free contract for the desktop audit console.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any, Iterable, Mapping
 
 
@@ -207,6 +208,42 @@ def _event_kind(event_type: str) -> str:
     return "job"
 
 
+def _safe_identifier(value: Any, limit: int = 160) -> str:
+    """Keep an audit identifier bounded and free of path-shaped values."""
+    raw = _text(value, limit)
+    if raw.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:[/\\]", raw):
+        return "<path-redacted>"
+    return raw
+
+
+def _analysis_delete_projection(raw: Mapping[str, Any]) -> dict[str, Any]:
+    skipped = []
+    for item in raw.get("skipped") or []:
+        if not isinstance(item, Mapping):
+            continue
+        skipped.append({
+            "table_name": _safe_identifier(item.get("table_name")),
+            "reason_code": _text(item.get("reason_code") or "unknown", 80),
+        })
+    return {
+        "operation_key": _text(raw.get("operation_key"), 240),
+        "request_sha256": _text(raw.get("request_sha256"), 64),
+        "source_name": _safe_identifier(raw.get("source_name")),
+        "table_names": [
+            _safe_identifier(item) for item in (raw.get("table_names") or [])[:32]
+        ],
+        "status": _text(raw.get("status") or "running", 40),
+        "deleted": [
+            _safe_identifier(item) for item in (raw.get("deleted") or [])[:32]
+        ],
+        "skipped": skipped[:32],
+        "created_at": _iso(raw.get("created_at")),
+        "finished_at": _iso(raw.get("finished_at")),
+        "error": _text(raw.get("error"), 120),
+        "idempotent_replay": bool(raw.get("idempotent_replay", False)),
+    }
+
+
 def _event_title(raw: Mapping[str, Any], kind: str) -> str:
     if kind == "tool":
         return _text(raw.get("display") or raw.get("tool") or "工具调用", 200)
@@ -352,6 +389,7 @@ def build_session_audit(
     lifecycle_events: Iterable[Mapping[str, Any]] = (),
     usage_breakdowns: Iterable[Mapping[str, Any]] = (),
     command_metrics: Iterable[Mapping[str, Any]] = (),
+    analysis_delete_operations: Iterable[Mapping[str, Any]] = (),
     filters: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the stable unified audit response for one already-isolated session."""
@@ -369,6 +407,11 @@ def build_session_audit(
     artifact_items = [_artifact_projection(item) for item in artifacts]
     claim_items = [_claim_projection(item) for item in claims]
     evidence_items = [_evidence_projection(item) for item in evidence]
+    analysis_delete_items = [
+        _analysis_delete_projection(item)
+        for item in analysis_delete_operations
+        if isinstance(item, Mapping)
+    ]
 
     evidence_by_id = {item["evidence_id"]: item for item in evidence_items}
     for claim in claim_items:
@@ -411,6 +454,27 @@ def build_session_audit(
             "run_id": item["task_id"].removeprefix(f"{session_id}:"),
             "artifact_id": "", "claim_id": "", "evidence_id": item["evidence_id"],
             "duration_ms": None, "error": "", "metadata": {"source_type": item["source_type"]},
+        })
+    for item in analysis_delete_items:
+        created_at = item["finished_at"] or item["created_at"]
+        timeline.append({
+            "id": f"analysis-delete:{item['operation_key']}:{item['created_at']}",
+            "kind": "tool", "type": "analysis_table_delete",
+            "title": "删除分析表",
+            "status": item["status"], "created_at": created_at, "sequence": 0,
+            "job_id": "", "run_id": "", "artifact_id": "", "claim_id": "",
+            "evidence_id": "",
+            "duration_ms": _duration_ms(item["created_at"], item["finished_at"]),
+            "error": item["error"],
+            "metadata": {
+                "operation_key": item["operation_key"],
+                "request_sha256": item["request_sha256"],
+                "source_name": item["source_name"],
+                "table_names": item["table_names"],
+                "deleted": item["deleted"],
+                "skipped": item["skipped"],
+                "idempotent_replay": item["idempotent_replay"],
+            },
         })
 
     approvals = []
@@ -525,6 +589,7 @@ def build_session_audit(
         "artifacts": len(artifact_items), "claims": len(claim_items),
         "evidence": len(evidence_items), "uncovered_claims": len(uncovered),
         "conflicts": len(conflicts), "approvals": len(approvals),
+        "analysis_delete_operations": len(analysis_delete_items),
         "model_calls": model_calls,
         "input_tokens": sum(item["input_tokens"] for item in usage_items),
         "output_tokens": sum(item["output_tokens"] for item in usage_items),
@@ -555,6 +620,9 @@ def build_session_audit(
         "approvals": _filter_items(approvals, query=query, status=status, start=start, end=end),
         "model_calls": _filter_items(usage_items, query=query, status=status, start=start, end=end),
         "commands": _filter_items(commands, query=query, status=status, start=start, end=end),
+        "analysis_delete_operations": _filter_items(
+            analysis_delete_items, query=query, status=status, start=start, end=end,
+        ),
         "uncovered_claims": _filter_items(uncovered, query=query, status=status, start=start, end=end),
         "conflicts": _filter_items(conflicts, query=query, status=status, start=start, end=end),
         "cost": cost,

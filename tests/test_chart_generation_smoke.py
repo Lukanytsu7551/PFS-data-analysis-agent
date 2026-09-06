@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import unittest
 import warnings
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -106,6 +107,60 @@ class ChartGenerationSmokeTests(unittest.TestCase):
         self.assertEqual(len(outcomes), len(_CHARTS))
         failures = {key: value for key, value in outcomes.items() if value != "pass"}
         self.assertFalse(failures, failures)
+
+    def test_pfs_sales_fixture_renders_real_business_chart_paths(self):
+        sales = pd.read_csv(
+            Path(__file__).resolve().parents[1] / "data" / "fixtures" / "pfs_sales.csv"
+        )
+        cases = [
+            (
+                "Bar_Chart",
+                sales.groupby("region", as_index=False)["sales_amount"].sum(),
+                {"x": "region", "y": "sales_amount"},
+            ),
+            (
+                "Line_Chart",
+                sales.groupby("month", as_index=False)["sales_amount"].sum(),
+                {"x": "month", "y": "sales_amount"},
+            ),
+            (
+                "Grouped_Bar_Chart",
+                sales.groupby(["region", "product"], as_index=False)["sales_amount"].sum(),
+                {"x": "region", "y": "sales_amount", "series": "product"},
+            ),
+        ]
+        for chart_type, frame, mapping in cases:
+            with self.subTest(chart=chart_type):
+                result = generate_chart(
+                    df=frame,
+                    chart_type=chart_type,
+                    mapping=mapping,
+                    options={"title": "PFS 销售业务图表"},
+                )
+                self.assertTrue(result.get("success"), result)
+                self.assertIn("/static/vendor/plotly.min.js", result["html"])
+                self.assertGreater(len(result["html"]), 500)
+
+    def test_empty_and_large_chart_inputs_have_explicit_boundaries(self):
+        empty = generate_chart(
+            df=pd.DataFrame(columns=["month", "sales_amount"]),
+            chart_type="Line_Chart",
+            mapping={"x": "month", "y": "sales_amount"},
+        )
+        self.assertEqual("No data", empty.get("error"))
+
+        large = pd.DataFrame({
+            "month": pd.date_range("2010-01-01", periods=50_000, freq="D"),
+            "sales_amount": np.arange(50_000, dtype=float) + 1,
+        })
+        result = generate_chart(
+            df=large,
+            chart_type="Line_Chart",
+            mapping={"x": "month", "y": "sales_amount"},
+            options={"title": "PFS 大数据量趋势"},
+        )
+        self.assertTrue(result.get("success"), result)
+        self.assertGreater(len(result.get("html", "")), 500)
 
     def test_missing_column_is_rejected_without_rendering(self):
         result = generate_chart(

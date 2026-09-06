@@ -99,6 +99,12 @@ class QuietHarnessUiContractTests(unittest.TestCase):
         self.assertIn('svgMarkup("check"', SKILLS)
         self.assertNotIn("<svg", SKILLS)
 
+    def test_skill_editor_stays_above_close_backdrop_and_has_edit_target(self):
+        """The nested editor must not lose clicks to the side-surface backdrop."""
+        self.assertIn("document.body.appendChild(overlay)", SKILLS)
+        self.assertIn("panel.getBoundingClientRect().right", SKILLS)
+        self.assertIn('data-skill-view="true"', SKILLS)
+
     def test_welcome_skill_shortcuts_use_skill_activation(self):
         """Skill shortcuts must not be sent as unknown slash commands."""
         self.assertIn('data-i18n="hint.ppt"', TEMPLATE)

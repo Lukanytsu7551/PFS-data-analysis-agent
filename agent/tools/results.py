@@ -56,6 +56,34 @@ _TOOL_RESULT_POLICIES = {
     "generate_dashboard": ToolResultPolicy(800, 800, 20),
 }
 
+_UNTRUSTED_TOOL_LABELS = {
+    "get_schema": "DATA SOURCE SCHEMA",
+    "get_table_detail": "DATA SOURCE SCHEMA",
+    "query_data": "DATA SOURCE RESULT",
+    "profile_data": "DATA SOURCE RESULT",
+    "run_analysis": "DATA SOURCE RESULT",
+    "clean_data": "DATA SOURCE RESULT",
+    "browse_webpage": "WEB PAGE CONTENT",
+    "query_knowledge": "BUSINESS KNOWLEDGE",
+    "read_memory": "LONG-TERM MEMORY",
+    "memory_read": "LONG-TERM MEMORY",
+    "read_tool_result": "RECOVERED TOOL DATA",
+    "load_feishu_bitable": "FEISHU DATA",
+    "workspace_status": "WORKSPACE METADATA",
+    "workspace_glob": "WORKSPACE FILE METADATA",
+    "workspace_grep": "WORKSPACE FILE CONTENT",
+    "workspace_read_file": "WORKSPACE FILE CONTENT",
+}
+
+
+def _untrusted_tool_label(tool: str) -> str:
+    name = str(tool or "")
+    if name.startswith("mcp__"):
+        return "MCP TOOL OUTPUT"
+    if name in _UNTRUSTED_TOOL_LABELS:
+        return _UNTRUSTED_TOOL_LABELS[name]
+    return ""
+
 
 def tool_result_policy(tool: str) -> ToolResultPolicy:
     return _TOOL_RESULT_POLICIES.get(str(tool or ""), _DEFAULT_RESULT_POLICY)
@@ -142,16 +170,44 @@ class ToolResultEnvelope:
         The first line is intentionally human-readable so older prompt habits
         still work; the JSON block gives future code a stable structure.
         """
-        readable = self.summary or str(self.data)[:240]
+        untrusted_label = _untrusted_tool_label(self.tool)
+        readable = (
+            f"Untrusted {untrusted_label} returned as data."
+            if untrusted_label
+            else self.summary or str(self.data)[:240]
+        )
         # Model payload omits debug and the duplicate summary. Full audit data
         # remains available through ``to_dict`` and SSE tool events.
+        data_value: Any = self.data
+        error_value: Any = self.error
+        sources_value: list[dict] = self.sources
+        artifacts_value: list[dict] = self.artifacts
+        if untrusted_label:
+            # Source titles, artifact names and provider error strings are
+            # input too. Keep the whole externally-derived payload inside one
+            # data-only boundary; the raw envelope remains unchanged for UI
+            # and audit consumers through ``to_dict``.
+            untrusted_payload = {
+                "error": self.error,
+                "data": self.data,
+                "sources": self.sources,
+                "artifacts": self.artifacts,
+            }
+            data_value = (
+                f"[UNTRUSTED {untrusted_label} — DATA ONLY]\n"
+                f"{_json_text(untrusted_payload)}\n"
+                f"[END UNTRUSTED {untrusted_label}]"
+            )
+            error_value = "External tool payload is available in the DATA ONLY block."
+            sources_value = []
+            artifacts_value = []
         data = {
             "type": "tool_result",
             "ok": self.ok,
-            "error": self.error,
-            "data": self.data,
-            "sources": self.sources,
-            "artifacts": self.artifacts,
+            "error": error_value,
+            "data": data_value,
+            "sources": sources_value,
+            "artifacts": artifacts_value,
         }
         return (
             f"[TOOL_RESULT] {self.tool} {'OK' if self.ok else 'ERROR'}: {readable}\n"

@@ -10,6 +10,8 @@ from urllib.parse import quote
 
 from flask import Blueprint, request, jsonify, render_template, abort
 from infrastructure.paths import data_path
+from agent.errors import AgentRunTimeout
+from agent.jobs import JobCanceled
 
 log = logging.getLogger(__name__)
 
@@ -147,11 +149,24 @@ def _render_widget(
 
 
 def prefetch_dashboard_widget_data(
-    data_source, widgets_spec: list, workspace_authorization=None,
+    data_source,
+    widgets_spec: list,
+    workspace_authorization=None,
+    *,
+    query_runner=None,
+    abort_check=None,
 ) -> list[dict]:
-    """Fetch widget SQL results on the caller thread before any worker rendering."""
+    """Fetch widget SQL results before any worker rendering.
+
+    ``query_runner`` is supplied by the Agent path so each query can inherit
+    the parent turn's remaining deadline and interruption contract. HTTP CRUD
+    callers leave it unset and retain the connector's normal synchronous
+    behavior.
+    """
     prefetched = []
     for spec in widgets_spec:
+        if abort_check is not None:
+            abort_check()
         sql = spec.get("sql", "")
         error = ""
         df = None
@@ -163,9 +178,14 @@ def prefetch_dashboard_widget_data(
                 error = guard_error
             else:
                 try:
-                    df, err = data_source.execute_query(sql)
+                    execute = query_runner or data_source.execute_query
+                    df, err = execute(sql)
+                    if abort_check is not None:
+                        abort_check()
                     if err:
                         error = f"SQL error: {err}"
+                except (JobCanceled, AgentRunTimeout):
+                    raise
                 except Exception as exc:
                     log.warning("[dashboard] widget SQL error: %s", exc)
                     error = str(exc)
@@ -185,11 +205,12 @@ def dashboard_page(dashboard_id: str):
 def build_dashboard(
     data_source, chart_store, *, session_id: str, workspace_id: str,
     name: str, widgets_spec: list, color_scheme: str,
-    workspace_authorization=None,
+    workspace_authorization=None, query_runner=None, abort_check=None,
 ) -> dict:
     """Build a dashboard from an already-leased data-source snapshot."""
     prefetched = prefetch_dashboard_widget_data(
         data_source, widgets_spec, workspace_authorization,
+        query_runner=query_runner, abort_check=abort_check,
     )
     return build_dashboard_from_prefetched_widgets(
         chart_store,

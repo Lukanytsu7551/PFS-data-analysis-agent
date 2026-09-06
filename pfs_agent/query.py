@@ -70,6 +70,16 @@ def _date_bounds(question: str) -> tuple[str, str]:
     return "", ""
 
 
+def _aggregation_for_question(question: str) -> str:
+    """Recognize only explicit average wording; default to the legacy SUM path."""
+    lowered = question.lower()
+    if any(token in question for token in ("平均", "均值")) or any(
+        token in lowered for token in ("average", "avg")
+    ):
+        return "AVG"
+    return "SUM"
+
+
 def parse_report_question(
     question: str, columns: Iterable[str], *, run_id: str = "pfs-query"
 ) -> ParsedReportQuestion:
@@ -98,19 +108,21 @@ def parse_report_question(
     date_column = _find_column(available, ("month", "月份", "日期", "date", "时间"), "日期")
     dimension = _find_column(available, ("region", "地区", "区域", "省份", "城市", "channel", "渠道"), "分组")
     mentions_metric = any(
-        token in lowered for token in ("销售", "收入", "金额", "利润", "毛利", "净利", "revenue", "sales", "profit")
+        token in lowered
+        for token in ("销售", "收入", "金额", "利润", "毛利", "净利", "revenue", "sales", "profit")
     )
     mentions_dimension = any(
         token in lowered for token in ("地区", "区域", "省份", "城市", "渠道", "region", "channel")
     )
     if not mentions_metric or not mentions_dimension:
-        raise QueryInterpretationError("目前只支持“按地区/渠道统计销售额、收入或利润”的明确问题")
+        raise QueryInterpretationError("目前只支持“按地区/渠道统计销售额、收入或利润汇总”的明确问题")
     date_from, date_to = _date_bounds(text)
     metric_id = value_column
+    aggregation = _aggregation_for_question(text)
     metric = MetricContract(
         metric_id=metric_id,
         label=metric_label,
-        formula=f"SUM({value_column})",
+        formula=f"{aggregation}({value_column})",
         value_column=value_column,
         date_column=date_column,
         dimension=dimension,
@@ -121,5 +133,8 @@ def parse_report_question(
     return ParsedReportQuestion(
         request=request,
         metric=metric,
-        interpretation=f"按 {dimension} 分组，对 {value_column} 做 SUM；时间范围 {date_from or '全部'} 至 {date_to or '全部'}。",
+        interpretation=(
+            f"按 {dimension} 分组，对 {value_column} 做 {aggregation}；"
+            f"时间范围 {date_from or '全部'} 至 {date_to or '全部'}。"
+        ),
     )

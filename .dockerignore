@@ -21,6 +21,11 @@ memory/
 .pytest_cache
 .ruff_cache
 .deps_installed
+build/
+installer/
+packaging/
+tests/
+business_canvas/
 
 # Local secrets, identities, and mutable runtime configuration
 secret_key

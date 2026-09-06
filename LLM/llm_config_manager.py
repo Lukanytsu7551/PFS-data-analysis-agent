@@ -2,8 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 LLM API Key 配置管理
-支持 DeepSeek、OpenAI、Claude 等多个 LLM 提供商
-支持用户自定义 OpenAI SDK 兼容的模型
+支持当前 PFS 内置模型提供商，以及用户自定义 OpenAI SDK 兼容模型
 """
 import os
 import json
@@ -20,6 +19,24 @@ LLM_CONFIG_FILE = runtime_config_path("llm_config.json", "LLM/llm_config.json")
 CONFIG_DIR = LLM_CONFIG_FILE.parent
 DEFAULT_CONTEXT_WINDOW = 1_000_000
 DEFAULT_MAX_OUTPUT_TOKENS = 384_000
+
+# These are the only built-in providers that belong to the current PFS
+# product surface. Retired identifiers exist only so old local configuration
+# can be explicitly cleaned up; they are not model defaults.
+SUPPORTED_BUILTIN_PROVIDERS = (
+    "deepseek",
+    "kimi",
+    "kimi_coding",
+    "glm",
+    "glm_coding",
+    "minimax",
+    "minimax_coding",
+)
+RETIRED_BUILTIN_PROVIDERS = frozenset({"openai", "atlascloud", "ollama"})
+RETIRED_BUILTIN_ENV_VARS = {
+    "openai": "OPENAI_API_KEY",
+    "atlascloud": "ATLASCLOUD_API_KEY",
+}
 
 
 def model_token_limits(config: Any | None) -> tuple[int, int]:
@@ -56,7 +73,7 @@ def auxiliary_token_limits(config: Any | None, ratio: float = 0.8) -> tuple[int,
         max(1, int(max_output_tokens * safe_ratio)),
     )
 
-# 本地模型占位 API Key（Ollama 等本地推理服务无需鉴权，但 OpenAI SDK 要求非空）
+# 本地兼容模型占位 API Key（OpenAI SDK 要求 api_key 非空）
 LOCAL_KEY_PLACEHOLDER = "no-key"
 
 
@@ -70,25 +87,6 @@ def _is_local_base_url(url: Optional[str]) -> bool:
         "0:0:0:0:0:0:0:1",
     )
     return any(m in u for m in local_markers)
-
-
-def _normalise_ollama_base_url(url: Optional[str]) -> str:
-    """Return Ollama's OpenAI-compatible base URL.
-
-    The application uses the OpenAI SDK, which speaks to Ollama through
-    ``/v1``. ``/api/chat`` is Ollama's native API and is a common but
-    incompatible value to put in this field, so convert it safely on save.
-    """
-    value = (url or "").strip().rstrip("/")
-    if not value:
-        return "http://localhost:11434/v1"
-    if value.endswith("/api/chat"):
-        return f"{value[:-len('/api/chat')]}/v1"
-    if value.endswith("/api"):
-        return f"{value[:-len('/api')]}/v1"
-    if value.endswith("/v1"):
-        return value
-    return f"{value}/v1"
 
 
 @dataclass
@@ -174,28 +172,6 @@ class LLMConfigManager:
             "prompt_cache_mode": "none",
             "prompt_cache_retention": "in_memory",
         },
-        "openai": {
-            "base_url": "https://api.openai.com/v1",
-            "model": "gpt-4o-mini",
-            "env_var": "OPENAI_API_KEY",
-            "is_custom": False,
-            "context_window": DEFAULT_CONTEXT_WINDOW,
-            "max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
-            "supports_prompt_cache": True,
-            "prompt_cache_mode": "openai",
-            "prompt_cache_retention": "in_memory",
-        },
-        "atlascloud": {
-            "base_url": "https://api.atlascloud.ai/v1",
-            "model": "moonshotai/kimi-k2.6",
-            "env_var": "ATLASCLOUD_API_KEY",
-            "is_custom": False,
-            "context_window": DEFAULT_CONTEXT_WINDOW,
-            "max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
-            "supports_prompt_cache": False,
-            "prompt_cache_mode": "none",
-            "prompt_cache_retention": "in_memory",
-        },
         "minimax": {
             "base_url": "https://api.minimaxi.com/v1",
             "model": "MiniMax-M3",
@@ -220,19 +196,6 @@ class LLMConfigManager:
             "max_output_tokens": 384_000,
             "enable_thinking": True,
             "thinking_budget": 8000,
-            "supports_prompt_cache": False,
-            "prompt_cache_mode": "none",
-            "prompt_cache_retention": "in_memory",
-        },
-        "ollama": {
-            # Ollama 提供 OpenAI 兼容端点：http://localhost:11434/v1
-            # 本地推理无需 API Key，调用时使用 LOCAL_KEY_PLACEHOLDER 占位
-            "base_url": "http://localhost:11434/v1",
-            "model": "",
-            "env_var": None,  # 本地服务，无环境变量
-            "is_custom": False,
-            "context_window": 0,
-            "max_output_tokens": 0,
             "supports_prompt_cache": False,
             "prompt_cache_mode": "none",
             "prompt_cache_retention": "in_memory",
@@ -272,9 +235,13 @@ class LLMConfigManager:
         例如 MINIMAX_BASE_URL / MINIMAX_MODEL 可自定义 MiniMax 的端点和模型。
         """
         for provider, defaults in self.DEFAULT_CONFIGS.items():
+            if provider not in SUPPORTED_BUILTIN_PROVIDERS:
+                # Do not let retired built-ins reappear through environment
+                # variables after they were removed from the product UI.
+                continue
             env_var = defaults.get("env_var")
             if not env_var:
-                # ollama 等本地 provider 无 env_var，跳过
+                # Built-in providers without an env var are not env-loaded.
                 continue
             api_key = os.environ.get(env_var)
 
@@ -340,7 +307,7 @@ class LLMConfigManager:
             return False, "API 调用链接不能为空"
         if not model_name or not model_name.strip():
             return False, "模型名称不能为空"
-        # 本地模型（如 Ollama）无需 API Key，自动填占位符
+        # 本地兼容端点无需 API Key，自动填占位符
         if not api_key or not api_key.strip():
             if _is_local_base_url(base_url) or allow_anonymous:
                 api_key = LOCAL_KEY_PLACEHOLDER
@@ -387,7 +354,7 @@ class LLMConfigManager:
         output_price_per_million: Optional[float] = None,
     ) -> bool:
         """设置内置提供商配置"""
-        if provider not in self.DEFAULT_CONFIGS:
+        if provider not in SUPPORTED_BUILTIN_PROVIDERS:
             log.warning("不支持的提供商: %s", provider)
             return False
 
@@ -396,12 +363,9 @@ class LLMConfigManager:
             base_url.strip() if base_url and base_url.strip()
             else defaults.get("base_url")
         )
-        if provider == "ollama":
-            effective_base_url = _normalise_ollama_base_url(effective_base_url)
-
-        # 本地 provider（ollama）无需 API Key，自动填占位符
+        # 本地兼容端点无需 API Key，自动填占位符
         if not api_key or not api_key.strip():
-            if provider == "ollama" or _is_local_base_url(effective_base_url):
+            if _is_local_base_url(effective_base_url):
                 api_key = LOCAL_KEY_PLACEHOLDER
             else:
                 log.warning("API Key 不能为空")
@@ -441,14 +405,19 @@ class LLMConfigManager:
         return self.save_configs()
 
     def clear_builtin_config(self, provider: str) -> tuple[bool, str]:
-        """清空内置 provider 配置（删除文件中的配置，并清理进程环境变量）"""
-        if provider not in self.DEFAULT_CONFIGS:
+        """清空内置 provider 配置，包括已退役项的本地遗留配置。"""
+        if (
+            provider not in self.DEFAULT_CONFIGS
+            and provider not in RETIRED_BUILTIN_PROVIDERS
+        ):
             return False, f"不支持的内置提供商: {provider}"
 
         self.configs.pop(provider, None)
 
         # 清理当前进程环境变量（即使你现在不写 env，也防历史残留）
-        env_var = self.DEFAULT_CONFIGS[provider].get("env_var")
+        env_var = RETIRED_BUILTIN_ENV_VARS.get(provider)
+        if env_var is None:
+            env_var = self.DEFAULT_CONFIGS.get(provider, {}).get("env_var")
         if env_var:
             os.environ.pop(env_var, None)
 
@@ -528,7 +497,26 @@ class LLMConfigManager:
             return False, "删除失败"
 
     def get_enabled_providers(self) -> List[str]:
-        return [p for p, c in self.configs.items() if c.enabled]
+        return [
+            p for p, c in self.configs.items()
+            if c.enabled and self.is_selectable_provider(p)
+        ]
+
+    def is_selectable_provider(self, provider: str) -> bool:
+        """Whether *provider* can be selected by the current product.
+
+        Custom OpenAI-compatible models remain valid regardless of their
+        endpoint.  Retired built-in identifiers are retained only for
+        migration/cleanup and are never selectable.
+        """
+        config = self.configs.get(provider)
+        return bool(
+            config
+            and (
+                config.is_custom
+                or provider in SUPPORTED_BUILTIN_PROVIDERS
+            )
+        )
 
     def get_custom_models(self) -> List[Dict[str, Any]]:
         return [
@@ -543,12 +531,7 @@ class LLMConfigManager:
         ]
 
     def get_default_provider(self) -> Optional[str]:
-        priority = [
-            "deepseek", "kimi", "glm", "minimax",
-            "kimi_coding", "glm_coding", "minimax_coding",
-            "openai", "atlascloud", "ollama", "claude",
-        ]
-        for provider in priority:
+        for provider in SUPPORTED_BUILTIN_PROVIDERS:
             if provider in self.configs and self.configs[provider].enabled:
                 return provider
 
@@ -562,6 +545,8 @@ class LLMConfigManager:
         """注意：不返回 api_key 明文"""
         result = {}
         for provider, config in self.configs.items():
+            if not self.is_selectable_provider(provider):
+                continue
             result[provider] = {
                 "provider": config.provider,
                 "base_url": config.base_url,
@@ -617,13 +602,19 @@ class LLMConfigManager:
         优先使用传入的临时参数（对应前端输入框中尚未保存的值），
         未传入时退回到已保存配置。这样用户可以「先测后存」。
         """
+        if provider in RETIRED_BUILTIN_PROVIDERS:
+            return {
+                "success": False,
+                "code": "provider_retired",
+                "message": f"内置提供商已退役: {provider}",
+                "provider": provider,
+            }
         config = self.get_config(provider)
 
         # 若没有已保存配置，但传入了临时值，则用默认值补全其余字段。
-        # Ollama 可以没有 key，因此不能把空 key 视作「没有临时配置」。
         if not config:
             defaults = self.DEFAULT_CONFIGS.get(provider, {})
-            if api_key or base_url or model or provider == "ollama":
+            if api_key or base_url or model:
                 # 用传入参数 + 默认值组成临时配置
                 effective_key   = api_key
                 effective_url   = base_url or defaults.get("base_url")
@@ -636,11 +627,8 @@ class LLMConfigManager:
             effective_url   = base_url  or config.base_url
             effective_model = model     or config.model
 
-        if provider == "ollama":
-            effective_url = _normalise_ollama_base_url(effective_url)
-
         if not effective_key:
-            # 本地模型（如 Ollama）无需 API Key，使用占位符继续测试
+            # 本地兼容端点无需 API Key，使用占位符继续测试
             if _is_local_base_url(effective_url):
                 effective_key = LOCAL_KEY_PLACEHOLDER
             else:
@@ -686,6 +674,9 @@ def get_llm_client(provider: Optional[str] = None):
     if provider is None:
         raise ValueError("未配置任何 LLM 提供商")
 
+    if provider in RETIRED_BUILTIN_PROVIDERS:
+        raise ValueError(f"内置提供商已退役: {provider}")
+
     config = manager.get_config(provider)
     if not config:
         raise ValueError(f"未找到 {provider} 的配置")
@@ -719,22 +710,14 @@ def get_llm_client_with_fallback(
 
     # Build candidate list: preferred first, then priority order
     candidates: List[str] = []
-    if preferred_provider and preferred_provider not in excluded:
+    if (
+        preferred_provider
+        and preferred_provider not in RETIRED_BUILTIN_PROVIDERS
+        and preferred_provider not in excluded
+    ):
         candidates.append(preferred_provider)
 
-    priority = [
-        "deepseek",
-        "kimi",
-        "glm",
-        "minimax",
-        "kimi_coding",
-        "glm_coding",
-        "minimax_coding",
-        "openai",
-        "atlascloud",
-        "ollama",
-        "claude",
-    ]
+    priority = SUPPORTED_BUILTIN_PROVIDERS
     for p in priority:
         if (
             p not in candidates

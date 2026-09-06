@@ -18,7 +18,13 @@ PFS 数据分析 Agent — 可追踪、可核验的报表数据分析工作台
 
 ## Delivery status
 
-本文件描述目标产品，不等于全部能力已经完成。当前 CSV/XLSX 确定性分析、PFS 第一段策略门、Evidence Ledger、JSON/CSV 下载和固定报表的 Excel/Word/PPT/Dashboard 统一交付已有本地证据；外部生产数据源、完整事件流水线、跨进程恢复、安装包、部署和线上功能仍待验证。现役边界见 [docs/HANDOFF.md](docs/HANDOFF.md)。
+本文件描述目标产品，不等于全部能力已经完成。当前四天交付先以可下载源码、macOS/Windows 本地启动和核心数据分析演示为 P0；CSV/XLSX 确定性分析、PFS 第一段策略门、轻量 Claim/Evidence/来源快照、JSON/CSV 下载和固定报表的 Excel/Word/PPT/Dashboard 统一交付已有本地证据。真实外部服务、干净 Windows 安装、签名公证、部署和线上功能仍需单独验收；现役边界见 [docs/HANDOFF.md](docs/HANDOFF.md)。
+
+## Confirmed four-day release plan
+
+本轮按用户确认的四天顺序执行：Day 1 冻结范围、授权/许可证、文档规则和工作区发布切片；Day 2 完成核心演示闭环，并为每个继承目标功能做一次成功 smoke 和关键入口交互检查；Day 3 完成 Windows、CI 和发布候选验证；Day 4 对齐 README/Release，完成提交、推送和下载回读。核心演示完整验证一次即可；默认休眠能力只确认不会误启动；不做生产压测、多主机恢复、完整安全认证和签名公证。没有真实证据的能力只能标为保留、实验性或待配置。
+
+本轮范围例外固定为：商业画布和 Google Sheets 退役；Teams、Hooks、GPU/远程执行、飞书和云端登录保留扩展接口但默认关闭，不阻塞首版发布。后续任务默认不使用 Sol-Luna task lane。
 
 ## Users
 
@@ -26,7 +32,7 @@ PFS 数据分析 Agent — 可追踪、可核验的报表数据分析工作台
 
 ## Product Purpose
 
-提供一个可调用数据工具、Skills、知识库和多 Agent Workflow 的分析工作台。成功意味着用户能从对话或场景启动真实分析任务，清楚看到执行状态和待办，并将最终结论追溯到数据、SQL、节点、审批和 Artifact。
+提供一个可调用数据工具、Skills、知识库和多 Agent Workflow 的分析工作台。成功意味着用户能从对话或场景启动真实分析任务，清楚看到执行状态和待办，并将最终结论追溯到数据、SQL、节点和 Artifact。
 
 ## Key Features
 
@@ -37,7 +43,7 @@ PFS 数据分析 Agent — 可追踪、可核验的报表数据分析工作台
 - **SSE 流式输出**：分析过程实时可见，分阶段展示进度
 
 ### Advanced Capabilities
-- **多模型兼容**：DeepSeek / OpenAI / AtlasCloud / 任意 OpenAI SDK Compatible API
+- **多模型兼容**：DeepSeek、Kimi、GLM、MiniMax（含 Coding Plan）以及用户自定义 OpenAI-compatible 模型
 - **深度分析**：异常值处理、十分位分组、K-Means 聚类、决策树建模
 - **报告生成**：Excel 表格、Word 文档、PPT 演示文稿和 Dashboard 统一即时交付；会话 Artifact 历史已接入，跨进程关联与复杂 Office 视觉尚未完成
 - **MCP 拓展**：连接本地或远程 MCP 服务器，扩展 Agent 工具能力
@@ -45,7 +51,6 @@ PFS 数据分析 Agent — 可追踪、可核验的报表数据分析工作台
 
 ### Workflow & Collaboration
 - **AI 团队协作**：复杂任务拆分给多个专长 Agent 协同完成
-- **业务画布**：梳理业务关系，复用分析方法
 - **Skills 系统**：可复用的分析技能模块
 - **工作流引擎**：WF0 规范的确定性工作流执行，支持审批、暂停、恢复
 - **Hook 系统**：事件驱动的自动化钩子，支持条件触发和一次性执行
@@ -113,7 +118,7 @@ app.py                          — 应用入口，Flask factory
 | Frontend | Vanilla JS (ES modules), Vite, CSS Custom Properties |
 | Data | Pandas, NumPy, DuckDB, SQLAlchemy, SciPy |
 | Visualization | Plotly, Matplotlib, PyEcharts |
-| LLM | OpenAI SDK (DeepSeek / OpenAI / AtlasCloud / compatible) |
+| LLM | OpenAI SDK (DeepSeek / Kimi / GLM / MiniMax / custom compatible) |
 | RAG | Jieba 分词, ONNX Runtime (BGE-small-zh 嵌入) |
 | Export | python-docx, python-pptx, openpyxl |
 | Database Drivers | PyMySQL, psycopg2, pyodbc |
@@ -129,7 +134,6 @@ app.py                          — 应用入口，Flask factory
 | 数据预览模态框 | modal | 多 Sheet 数据预览，含侧边栏和主内容区 |
 | 设置面板 | overlay | LLM 配置、API Key、Base URL、Model 选择 |
 | 仪表盘 | `/dashboard` | 可视化看板（独立页面，遗留实现） |
-| 业务画布 | overlay | 业务关系梳理与 Skills 管理 |
 | 工作流详情 | overlay | 工作流 DAG 可视化、节点状态、审批操作 |
 | 任务历史 | drawer | 后台任务运行记录与状态 |
 | MCP 配置 | overlay | MCP 服务器连接管理 |

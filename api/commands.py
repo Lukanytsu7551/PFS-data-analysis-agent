@@ -42,7 +42,11 @@ def _availability_context(sid: str) -> CommandAvailabilityContext | None:
     try:
         if not provider:
             provider = config_manager.get_default_provider() or ""
-        model_config = config_manager.get_config(provider) if provider else None
+        model_config = (
+            config_manager.get_config(provider)
+            if provider and config_manager.is_selectable_provider(provider)
+            else None
+        )
         model_available = bool(
             model_config
             and getattr(model_config, "enabled", True)

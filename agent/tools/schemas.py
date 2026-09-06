@@ -162,6 +162,13 @@ AGENT_TOOLS = [
                         "type": "boolean",
                         "description": "Must be true after confirming the exact table names.",
                     },
+                    "operation_key": {
+                        "type": "string",
+                        "description": (
+                            "Optional idempotency key for a retried delete request. "
+                            "The server supplies one for normal chat turns."
+                        ),
+                    },
                 },
                 "required": ["table_names", "confirm"],
             },

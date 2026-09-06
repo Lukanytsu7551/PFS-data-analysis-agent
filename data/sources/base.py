@@ -22,6 +22,26 @@ class DataSource:
         """Returns (dataframe, error_string). error_string is empty on success."""
         raise NotImplementedError
 
+    def interrupt_query(self) -> bool:
+        """Best-effort interrupt for a query running in another thread.
+
+        Agent-level cancellation is cooperative, but a DuckDB query can hold
+        the worker inside ``execute`` and never reach the next callback.  The
+        built-in DuckDB-backed sources inherit this small capability; sources
+        with no interruptible connection return ``False`` and retain the
+        normal before/after cancellation checks.
+        """
+        for attr in ("_conn", "_duck"):
+            connection = getattr(self, attr, None)
+            interrupt = getattr(connection, "interrupt", None)
+            if callable(interrupt):
+                try:
+                    interrupt()
+                    return True
+                except Exception:
+                    return False
+        return False
+
     def get_preview(self) -> List[dict]:
         """Return table metadata list (name / columns / total_rows). No row data."""
         return []

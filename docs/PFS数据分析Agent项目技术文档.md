@@ -12,6 +12,8 @@
 
 > 当前实现边界（2026-09-04）：本文保留 Claim、Evidence、来源快照、Artifact 和任务记录等轻量结果留痕的术语，用于描述 PFS 的可回看数据分析结果。新增 Evidence Ledger 治理、质量门、语义复算、人工审批/修订、SQLite Ledger 后端/迁移及治理 UI/API 已撤回；文中涉及这些内容的设计说明按历史方案或后续候选能力理解，不代表当前运行时已启用。PFS 的 UI、品牌、确定性数据分析、业务验收、模型评估、交付物和任务/Artifact 历史继续保留。
 
+> 2026-09-05 交付口径：本文是技术说明，不是四天发布待办。P0 先收口可下载源码、macOS/Windows 本地启动和核心数据分析演示；真实外部 MCP、Hooks、飞书、云登录和线上部署按时间盒尝试，最终状态只以 `docs/HANDOFF.md` 的目标环境证据为准。
+
 ## 1. 文档范围与术语约定
 
 ### 1.1 文档目的
@@ -2152,7 +2154,7 @@ done         Run 进入最终状态
 | `pfs_agent/query.py` | 查询和业务范围约束 |
 | `pfs_agent/reporting.py` | Metric Contract、Snapshot、AnalysisResult 和复算 |
 | `pfs_agent/runs.py` | Analysis Run 生命周期 |
-| `pfs_agent/ledger.py` | Evidence Ledger |
+| `pfs_agent/ledger.py` | 历史 Evidence Ledger 模块（当前运行时未注册） |
 | `pfs_agent/audit.py` | 审计记录 |
 | `pfs_agent/runtime.py` | 内置工具注册和运行映射 |
 | `infrastructure/artifact_lifecycle.py` | Artifact 生命周期 |

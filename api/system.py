@@ -1,17 +1,19 @@
 """Blueprint: system utilities — GitHub Releases version check & update."""
+import ipaddress
 import json
 import logging
 import os
 import re
 import shutil
+import socket
 import stat
 import subprocess
 import sys
 import tempfile
 import threading
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Any, Tuple, List
@@ -559,6 +561,87 @@ def zip_update():
     })
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Fail closed instead of letting the image proxy follow redirects."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            req.full_url,
+            code,
+            "image proxy redirects are disabled",
+            headers,
+            fp,
+        )
+
+
+_PROXY_IMAGE_OPENER = urllib.request.build_opener(_NoRedirectHandler)
+_PROXY_IMAGE_ALLOWED_PORTS = frozenset({80, 443})
+_PROXY_IMAGE_BLOCKED_HOST_SUFFIXES = (
+    ".localhost",
+    ".local",
+    ".internal",
+    ".lan",
+    ".home.arpa",
+)
+
+
+def _validate_proxy_image_url(raw_url: str) -> tuple[bool, str]:
+    """Allow only public HTTP(S) image targets.
+
+    The proxy is a server-side fetcher, so checking the URL scheme alone is
+    insufficient: localhost, private ranges, link-local metadata endpoints,
+    and DNS names resolving to those ranges must all be rejected.  All DNS
+    answers are checked and redirects are disabled by the opener above.
+    """
+    if not isinstance(raw_url, str) or not raw_url or len(raw_url) > 2048:
+        return False, "Invalid image URL."
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in raw_url):
+        return False, "Invalid image URL."
+
+    try:
+        parsed = urlsplit(raw_url)
+        scheme = parsed.scheme.lower()
+        host = (parsed.hostname or "").rstrip(".").lower()
+        port = parsed.port
+        has_credentials = parsed.username is not None or parsed.password is not None
+    except ValueError:
+        return False, "Invalid image URL."
+
+    if scheme not in {"http", "https"} or not host:
+        return False, "Only HTTP(S) image URLs are supported."
+    if has_credentials or "@" in parsed.netloc or parsed.fragment:
+        return False, "Image URL credentials and fragments are not allowed."
+    if port is not None and port not in _PROXY_IMAGE_ALLOWED_PORTS:
+        return False, "Image URL must use the default HTTP(S) port."
+    if host == "localhost" or host in {"localhost.localdomain", "ip6-localhost"}:
+        return False, "Image URL must target a public address."
+    if host.endswith(_PROXY_IMAGE_BLOCKED_HOST_SUFFIXES):
+        return False, "Image URL must target a public address."
+
+    try:
+        resolved = [ipaddress.ip_address(host)]
+    except ValueError:
+        try:
+            records = socket.getaddrinfo(
+                host,
+                port or (80 if scheme == "http" else 443),
+                type=socket.SOCK_STREAM,
+            )
+        except (OSError, socket.gaierror):
+            return False, "Image host could not be resolved."
+
+        resolved = []
+        for record in records:
+            try:
+                resolved.append(ipaddress.ip_address(record[4][0]))
+            except (IndexError, ValueError):
+                continue
+
+    if not resolved or not all(address.is_global for address in resolved):
+        return False, "Image URL must target a public address."
+    return True, ""
+
+
 @bp.get("/api/proxy-image")
 def proxy_image():
     """Proxy an external image URL through the backend.
@@ -571,14 +654,19 @@ def proxy_image():
         url  — the full image URL to fetch (must be http/https)
 
     Security:
-        - Only http/https URLs are accepted
+        - Only public http/https URLs on ports 80/443 are accepted
+        - DNS answers are checked against public-address policy
+        - Redirects, credentials, fragments and control characters are rejected
         - 10 MB size cap to prevent abuse
         - Timeout of 30 s
     """
     from flask import request as _req, Response as _Resp
+
     url = (_req.args.get("url") or "").strip()
-    if not url.startswith(("http://", "https://")):
-        return jsonify({"error": "Invalid URL"}), 400
+    valid, validation_error = _validate_proxy_image_url(url)
+    if not valid:
+        log.warning("[proxy-image] rejected target: %s", validation_error)
+        return jsonify({"error": validation_error}), 400
 
     _SIZE_CAP = 10 * 1024 * 1024  # 10 MB
 
@@ -591,56 +679,49 @@ def proxy_image():
         if u_lower.endswith(".svg"):  return "image/svg+xml"
         return "image/jpeg"  # default
 
-    # Try a list of Referer values — some OSS buckets allow no-referer
-    # or require the platform's own domain.
-    _referers = [
-        "https://www.atlascloud.ai/",
-        "https://atlascloud.ai/",
-        "",   # no Referer — some policies allow empty referer
-    ]
+    try:
+        headers = {
+            "User-Agent": f"Mozilla/5.0 (compatible; {SERVICE_ID}/{CURRENT_VERSION})",
+        }
+        req_obj = urllib.request.Request(url, headers=headers)
+        with _PROXY_IMAGE_OPENER.open(req_obj, timeout=30) as resp:
+            content_length = resp.headers.get("Content-Length", "") or ""
+            if content_length.strip():
+                try:
+                    declared_length = int(content_length)
+                except ValueError as exc:
+                    raise ValueError("invalid image response length") from exc
+                if declared_length > _SIZE_CAP:
+                    raise ValueError("image response exceeds the size cap")
 
-    last_exc: Exception | None = None
-    for referer in _referers:
-        try:
-            headers = {"User-Agent": f"Mozilla/5.0 (compatible; {SERVICE_ID}/{CURRENT_VERSION})"}
-            if referer:
-                headers["Referer"] = referer
-            req_obj = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req_obj, timeout=30) as resp:
-                ct = resp.headers.get("Content-Type", "") or ""
-                # If OSS returns octet-stream, guess from URL
-                if "octet-stream" in ct or not ct.startswith("image/"):
-                    mimetype = _guess_mime(url)
-                else:
-                    mimetype = ct.split(";")[0].strip()
-                data = resp.read(_SIZE_CAP)
-            log.info("[proxy-image] fetched %d bytes (referer=%r) from %s",
-                     len(data), referer or "(none)", url[:80])
-            return _Resp(
-                data,
-                status=200,
-                mimetype=mimetype,
-                headers={
-                    "Cache-Control": "public, max-age=3600",
-                    # Force browser to display inline, not download
-                    "Content-Disposition": "inline",
-                    "X-Content-Type-Options": "nosniff",
-                },
-            )
-        except urllib.error.HTTPError as exc:
-            log.warning("[proxy-image] HTTP %d (referer=%r) for %s",
-                        exc.code, referer or "(none)", url[:80])
-            last_exc = exc
-            if exc.code != 403:
-                break   # only retry 403 (referer policy); other errors are final
-        except Exception as exc:
-            log.warning("[proxy-image] failed (referer=%r) for %s: %s",
-                        referer or "(none)", url[:80], exc)
-            last_exc = exc
-            break
+            ct = resp.headers.get("Content-Type", "") or ""
+            # If OSS returns octet-stream, guess from URL.
+            if "octet-stream" in ct or not ct.startswith("image/"):
+                mimetype = _guess_mime(url)
+            else:
+                mimetype = ct.split(";", 1)[0].strip()
+            data = resp.read(_SIZE_CAP + 1)
+            if len(data) > _SIZE_CAP:
+                raise ValueError("image response exceeds the size cap")
 
-    code = getattr(last_exc, "code", 502)
-    return jsonify({"error": f"Remote server error: {last_exc}"}), 502
+        log.info("[proxy-image] fetched %d bytes from %s", len(data), url[:80])
+        return _Resp(
+            data,
+            status=200,
+            mimetype=mimetype,
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                # Force browser to display inline, not download.
+                "Content-Disposition": "inline",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+    except urllib.error.HTTPError as exc:
+        log.warning("[proxy-image] HTTP %d for %s", exc.code, url[:80])
+    except Exception as exc:
+        log.warning("[proxy-image] failed for %s: %s", url[:80], exc)
+
+    return jsonify({"error": "Unable to fetch the external image."}), 502
 
 
 

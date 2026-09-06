@@ -733,6 +733,123 @@ def set_sql_analysis_tables(sid: str, source_id: str):
     return jsonify({"ok": True, "source_id": source_id, "tables": selected})
 
 
+@bp.post("/api/session/<sid>/analysis-tables/delete")
+@require_session_ownership
+def delete_analysis_tables(sid: str):
+    """Delete derived tables with an explicit, session-scoped idempotency key."""
+    sess = session_manager.get(sid)
+    if not sess:
+        return jsonify({"error": "session not found"}), 404
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "请求体必须是 JSON 对象"}), 400
+
+    operation_key = str(payload.get("operation_key") or "").strip()
+    if not operation_key or len(operation_key) > 240:
+        return jsonify({
+            "ok": False,
+            "error": "删除分析表必须提供长度不超过 240 的 operation_key",
+            "code": "operation_key_required",
+        }), 400
+    if any(ord(char) < 32 for char in operation_key):
+        return jsonify({"ok": False, "error": "operation_key 包含非法控制字符"}), 400
+
+    table_names = payload.get("table_names")
+    if not isinstance(table_names, list) or not table_names or len(table_names) > 32:
+        return jsonify({
+            "ok": False,
+            "error": "table_names 必须是 1 到 32 个表名的数组",
+            "code": "table_names_invalid",
+        }), 400
+    normalized_names = []
+    seen = set()
+    for value in table_names:
+        name = str(value or "").strip()
+        if not name or len(name) > 160:
+            return jsonify({"ok": False, "error": "表名不能为空且长度不能超过 160"}), 400
+        if name not in seen:
+            normalized_names.append(name)
+            seen.add(name)
+    if not normalized_names:
+        return jsonify({"ok": False, "error": "至少需要一个有效表名"}), 400
+    if payload.get("confirm") is not True:
+        return jsonify({
+            "ok": False,
+            "error": "删除分析表必须显式 confirm=true",
+            "code": "confirmation_required",
+        }), 400
+
+    entries = list(sess._active_entries())
+    source_id = str(payload.get("source_id") or "").strip()
+    if source_id:
+        entry = next((item for item in entries if item.get("id") == source_id), None)
+        if entry is None:
+            return jsonify({
+                "ok": False,
+                "error": "指定数据源不存在或未处于启用状态",
+                "code": "active_source_required",
+            }), 400
+    elif len(entries) == 1:
+        entry = entries[0]
+        source_id = str(entry.get("id") or "")
+    elif not entries:
+        return jsonify({
+            "ok": False,
+            "error": "请先连接并启用一个数据源",
+            "code": "data_source_required",
+        }), 400
+    else:
+        return jsonify({
+            "ok": False,
+            "error": "当前有多个启用数据源，请显式指定 source_id",
+            "code": "source_id_required",
+        }), 400
+
+    from agent.agent import BusinessAgent
+
+    source = entry["source"]
+    agent = BusinessAgent(
+        client=None,
+        model="pfs-delete-api",
+        data_source=source,
+        all_sources=[source],
+        session_id=sid,
+        workspace_id=getattr(sess, "workspace_id", ""),
+        analysis_delete_operation_store=sess,
+    )
+    result = agent._tool_delete_analysis_tables(
+        normalized_names,
+        confirm=True,
+        operation_key=operation_key,
+    )
+    audit = dict(getattr(agent, "_last_analysis_delete_audit", None) or {})
+    status = str(audit.get("status") or "failed")
+    if status in {"conflict", "in_progress"}:
+        return jsonify({
+            "ok": False,
+            "source_id": source_id,
+            "operation_key": operation_key,
+            "result": result,
+            "audit": audit,
+            "idempotent_replay": False,
+        }), 409
+
+    persisted = session_manager.persist(sid)
+    response_status = 200 if status in {"succeeded", "partial"} else 400
+    if not persisted:
+        response_status = 503
+        audit["persistence_warning"] = "operation_audit_not_persisted"
+    return jsonify({
+        "ok": status in {"succeeded", "partial"},
+        "source_id": source_id,
+        "operation_key": operation_key,
+        "result": result,
+        "audit": audit,
+        "idempotent_replay": bool(audit.get("idempotent_replay")),
+        "persisted": persisted,
+    }), response_status
+
+
 @bp.post("/api/session/<sid>/sources/<source_id>/toggle")
 @require_session_ownership
 def toggle_source(sid: str, source_id: str):

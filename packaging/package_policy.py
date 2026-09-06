@@ -97,6 +97,14 @@ def classify_path(value: str) -> tuple[str, str]:
     path = PurePosixPath(relative)
     parts = tuple(part.lower() for part in path.parts)
     public_frontend_dist = _is_public_frontend_dist(parts)
+    runtime_layout = bool(parts and parts[0] in {"_internal", "contents"}) or (
+        len(parts) > 1 and parts[0].endswith(".app") and parts[1] == "contents"
+    )
+    public_report_fixture = parts in PUBLIC_REPORT_FIXTURES or (
+        runtime_layout
+        and len(parts) >= 3
+        and parts[-3:] in PUBLIC_REPORT_FIXTURES
+    )
     if relative in KNOWN_LOCAL_ONLY:
         return "exclude", "local configuration"
     if any(part in IGNORED_CACHE_PARTS for part in parts):
@@ -113,7 +121,7 @@ def classify_path(value: str) -> tuple[str, str]:
     runtime_layout = bool(parts and parts[0] in {"_internal", "contents"}) or (
         len(parts) > 1 and parts[0].endswith(".app") and parts[1] == "contents"
     )
-    if parts in PUBLIC_REPORT_FIXTURES:
+    if public_report_fixture:
         return "allow", "reviewed offline report fixture"
     public_runtime_asset = runtime_layout and any(
         len(parts) >= len(suffix) and parts[-len(suffix):] == suffix

@@ -14,10 +14,11 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import zipfile
 from xml.etree import ElementTree
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from data.workspace import workspace_manager
 from data.system_workspace import MAX_INDEXED_FILES, MAX_LIST_CHARS, MAX_LIST_LIMIT, MAX_SEARCH_LIMIT
@@ -48,6 +49,76 @@ SPREADSHEET_SUFFIXES = {".xlsx", ".xls", ".xlsm", ".xlsb", ".ods"}
 
 class WorkspaceToolError(ValueError):
     pass
+
+
+def _terminate_process(process: subprocess.Popen) -> None:
+    """Best-effort termination used when a bounded workspace command stops."""
+    try:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=0.5)
+    except Exception:
+        try:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=0.5)
+        except Exception:
+            log.debug("[files] failed to terminate workspace subprocess", exc_info=True)
+    try:
+        process.communicate(timeout=0.5)
+    except Exception:
+        log.debug("[files] failed to drain workspace subprocess", exc_info=True)
+
+
+def _run_bounded_subprocess(
+    argv: list[str],
+    *,
+    cwd: str,
+    env: dict[str, str],
+    timeout: float,
+    abort_check: Callable[[], None] | None = None,
+) -> tuple[int, str, str]:
+    """Run a shell-free child while observing both deadline and cancellation.
+
+    ``subprocess.run(timeout=...)`` only notices its own deadline. The Agent
+    also needs to react to a user Stop while a workspace command is running,
+    so poll the child in short intervals and terminate it on either signal.
+    """
+    bounded_timeout = max(0.001, float(timeout))
+    deadline = time.monotonic() + bounded_timeout
+    process: subprocess.Popen | None = None
+    try:
+        process = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            shell=False,
+            env=env,
+        )
+        while process.poll() is None:
+            if abort_check is not None:
+                abort_check()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(argv, bounded_timeout)
+            try:
+                process.wait(timeout=min(0.1, remaining))
+            except subprocess.TimeoutExpired:
+                continue
+        stdout, stderr = process.communicate()
+        return process.returncode, stdout or "", stderr or ""
+    except subprocess.TimeoutExpired as exc:
+        if process is not None:
+            _terminate_process(process)
+        raise WorkspaceToolError(
+            f"operation timed out after {bounded_timeout:g}s"
+        ) from exc
+    except BaseException:
+        if process is not None:
+            _terminate_process(process)
+        raise
 
 
 def _decode_text_bytes(data: bytes, *, context: str) -> str:
@@ -802,19 +873,32 @@ class WorkspaceToolService:
             "overwritten": destination_existed,
         }
 
-    def command(self, operation: str, path: str = ".", pattern: str = "", timeout: int = 30) -> dict:
+    def command(
+        self,
+        operation: str,
+        path: str = ".",
+        pattern: str = "",
+        timeout: float = 30,
+        abort_check: Callable[[], None] | None = None,
+    ) -> dict:
         """Run a fixed, shell-free operation. No user-provided executable exists."""
+        if abort_check is not None:
+            abort_check()
         target = self._path(path)
-        timeout = max(1, min(int(timeout), 120))
+        timeout = max(0.001, min(float(timeout), 120.0))
         if operation == "checksum":
             if not target.is_file():
                 raise WorkspaceToolError("checksum target must be a file")
             digest = hashlib.sha256(target.read_bytes()).hexdigest()
+            if abort_check is not None:
+                abort_check()
             return {"operation": operation, "sha256": digest, "path": self._display_path(target)}
         if operation == "json_validate":
             if not target.is_file():
                 raise WorkspaceToolError("JSON target must be a file")
             json.loads(target.read_text(encoding="utf-8"))
+            if abort_check is not None:
+                abort_check()
             return {"operation": operation, "valid": True, "path": self._display_path(target)}
 
         runtime = self._runtime()
@@ -837,17 +921,22 @@ class WorkspaceToolService:
         command_env["GIT_CONFIG_GLOBAL"] = "NUL" if os.name == "nt" else "/dev/null"
         command_env["PYTHONPYCACHEPREFIX"] = str(runtime.cache_dir / "pycache")
         try:
-            completed = subprocess.run(
-                argv, cwd=str(runtime.workdir), capture_output=True, text=True,
-                timeout=timeout, shell=False, check=False, env=command_env,
+            returncode, stdout, stderr = _run_bounded_subprocess(
+                argv,
+                cwd=str(runtime.workdir),
+                env=command_env,
+                timeout=timeout,
+                abort_check=abort_check,
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except WorkspaceToolError:
+            raise
+        except OSError as exc:
             log.debug("[files] command execution failed: %s", exc)
             raise WorkspaceToolError(f"operation failed: {exc}") from exc
-        output = (completed.stdout or "") + (completed.stderr or "")
+        output = (stdout or "") + (stderr or "")
         return {
             "operation": operation,
-            "exit_code": completed.returncode,
+            "exit_code": returncode,
             "output": output[:MAX_COMMAND_OUTPUT],
             "truncated": len(output) > MAX_COMMAND_OUTPUT,
         }

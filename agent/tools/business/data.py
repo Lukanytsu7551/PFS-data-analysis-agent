@@ -1,11 +1,18 @@
 # -*- coding: utf-8 -*-
 """Mixin: data-oriented tools (schema, query, analysis, chart, clean, profile)."""
 import logging
+import hashlib
+import json
 import re
 import sqlite3
+import threading
+import time
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Mapping
+
+from agent.errors import AgentRunTimeout
+from agent.jobs import JobCanceled
 
 log = logging.getLogger(__name__)
 
@@ -19,6 +26,77 @@ _CLEAN_JOB_ROW_THRESHOLD = 50_000
 _QUERY_JOB_ROW_THRESHOLD = 100_000
 
 
+def _run_interruptible(
+    operation,
+    interrupt,
+    *,
+    timeout: float | None = None,
+    abort_check=None,
+):
+    """Run a blocking data-source operation with cooperative interruption.
+
+    ``abort_check`` cannot be polled while a DuckDB/driver call is blocked, so
+    the operation runs on a short-lived daemon thread and the owner thread
+    watches the Agent budget.  Built-in sources expose an interrupt method;
+    it is invoked before the cancellation/timeout exception is re-raised.
+    The worker is joined briefly to avoid returning while the connection is
+    still unwinding.
+    """
+    if timeout is None and abort_check is None:
+        return operation()
+
+    result: dict[str, Any] = {}
+
+    def _worker() -> None:
+        try:
+            result["value"] = operation()
+        except BaseException as exc:  # preserve cooperative exceptions
+            result["error"] = exc
+
+    worker = threading.Thread(
+        target=_worker,
+        name="pfs-data-query",
+        daemon=True,
+    )
+    worker.start()
+    deadline = None if timeout is None else time.monotonic() + max(0.0, float(timeout))
+
+    def _stop_query() -> None:
+        try:
+            interrupt()
+        except Exception:
+            log.warning("[tools] data-source query interrupt failed", exc_info=True)
+        worker.join(timeout=1.0)
+        if worker.is_alive():
+            log.warning(
+                "[tools] data-source query worker did not stop after interrupt"
+            )
+
+    while worker.is_alive():
+        try:
+            if abort_check is not None:
+                abort_check()
+        except BaseException:
+            _stop_query()
+            raise
+        if deadline is not None and time.monotonic() >= deadline:
+            _stop_query()
+            from agent.errors import AgentRunTimeout
+
+            raise AgentRunTimeout
+        wait = 0.05
+        if deadline is not None:
+            wait = min(wait, max(0.001, deadline - time.monotonic()))
+        worker.join(timeout=wait)
+
+    error = result.get("error")
+    if error is not None:
+        raise error
+    if abort_check is not None:
+        abort_check()
+    return result.get("value")
+
+
 def _quote_ident(name: str) -> str:
     return '"' + str(name).replace('"', '""') + '"'
 
@@ -28,6 +106,57 @@ def _table_name_set(value) -> set[str]:
     if isinstance(value, (set, list, tuple, frozenset)):
         return {str(item) for item in value if str(item).strip()}
     return set()
+
+
+def _safe_delete_source_name(value: Any) -> str:
+    """Keep delete audit metadata free of local absolute paths."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    # Data-source display names normally are file names.  If a connector
+    # accidentally exposes a path, retain only its final component.
+    raw = re.split(r"[/\\]", raw)[-1]
+    return raw[:160]
+
+
+def _safe_delete_table_name(value: Any) -> str:
+    """Bound a table identifier before it enters user-visible audit data."""
+    raw = str(value or "").strip()[:160]
+    # Table names are identifiers, not filesystem locations.  Do not allow an
+    # absolute-path-shaped value to become a path disclosure in /audit.
+    if raw.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:[/\\]", raw):
+        return "<path-redacted>"
+    return raw
+
+
+def _delete_operation_digest(
+    source_name: str, confirm: bool, table_names: list[str],
+) -> str:
+    payload = {
+        "source_name": _safe_delete_source_name(source_name),
+        "confirm": bool(confirm),
+        "table_names": [_safe_delete_table_name(item) for item in table_names],
+    }
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _delete_reason_code(reason: str) -> str:
+    """Map connector-specific delete failures to a stable safe code."""
+    text = str(reason or "").strip().lower()
+    if "empty table" in text:
+        return "empty_table_name"
+    if "not found" in text:
+        return "table_not_found"
+    if "registered source" in text or "raw" in text or "protected" in text:
+        return "source_table_protected"
+    if "registry" in text:
+        return "registry_unavailable"
+    if "connection unavailable" in text:
+        return "connection_unavailable"
+    if "not a known analysis" in text or "derived table" in text:
+        return "unknown_derived_table"
+    return "drop_failed"
 
 
 def _execute_analysis(
@@ -403,6 +532,60 @@ class DataToolsMixin:
     """All methods here rely on self.data_source, self._schema_cache,
     self.ppt_color_scheme — defined in BusinessAgent.__init__."""
 
+    def _execute_source_operation(
+        self,
+        source,
+        operation,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ):
+        """Run a source operation without letting a blocking driver bypass Agent control."""
+        if abort_check is not None:
+            abort_check()
+        if timeout is None and abort_check is None:
+            return operation()
+
+        interrupt = getattr(source, "interrupt_query", None)
+        if not callable(interrupt):
+            # Keep older/custom connectors bounded when they expose the
+            # underlying connection but predate DataSource.interrupt_query.
+            for attr in ("_conn", "_duck", "_cache_conn"):
+                candidate = getattr(getattr(source, attr, None), "interrupt", None)
+                if callable(candidate):
+                    interrupt = candidate
+                    break
+        if not callable(interrupt):
+            result = operation()
+            if abort_check is not None:
+                abort_check()
+            return result
+        result = _run_interruptible(
+            operation,
+            interrupt,
+            timeout=timeout,
+            abort_check=abort_check,
+        )
+        if abort_check is not None:
+            abort_check()
+        return result
+
+    def _execute_source_query(
+        self,
+        source,
+        sql: str,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ):
+        """Execute a source query without letting a blocking driver bypass Agent control."""
+        return self._execute_source_operation(
+            source,
+            lambda: source.execute_query(sql),
+            timeout=timeout,
+            abort_check=abort_check,
+        )
+
     # ── Knowledge base lookup ─────────────────────────────────────────────────
 
     def _validate_data_sql(self, tool_name: str, sql: str) -> str | None:
@@ -426,19 +609,49 @@ class DataToolsMixin:
             workspace_authorization=authorization,
         )
 
-    def _tool_query_knowledge_results(self, question: str) -> dict:
+    def _tool_query_knowledge_results(
+        self,
+        question: str,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ) -> dict:
         if not bool(getattr(self, "_knowledge_allowed_this_turn", False)):
             return {"error": "Knowledge lookup is not allowed for this request."}
         try:
+            from agent.errors import AgentRunTimeout
+            from agent.jobs import JobCanceled
             from Function.Knowledge.knowledge_base import KnowledgeBase
+
+            if abort_check is None:
+                abort_check = getattr(self, "_check_active_run_budget", None)
+                if not callable(abort_check):
+                    abort_check = None
+            if abort_check is not None:
+                abort_check()
+            if timeout is None:
+                timeout_provider = getattr(
+                    self, "_remaining_active_run_timeout", None,
+                )
+                timeout = timeout_provider() if callable(timeout_provider) else None
             kb = KnowledgeBase(
-                workspace_id="",
+                workspace_id=str(getattr(self, "_workspace_id", "") or ""),
                 user_id=getattr(self, "_user_id", ""),
             )
             try:
-                return kb.search(question, limit=5)
+                results = kb.search(
+                    question,
+                    limit=5,
+                    timeout=timeout,
+                    abort_check=abort_check,
+                )
+                if abort_check is not None:
+                    abort_check()
+                return results
             finally:
                 kb.close()
+        except (JobCanceled, AgentRunTimeout):
+            raise
         except Exception as e:
             return {"error": f"Knowledge base unavailable: {e}"}
 
@@ -534,44 +747,112 @@ class DataToolsMixin:
             })
         return clean_refs
 
-    def _tool_query_knowledge_with_refs(self, question: str) -> tuple[str, list[dict]]:
-        results = self._tool_query_knowledge_results(question)
+    def _tool_query_knowledge_with_refs(
+        self,
+        question: str,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ) -> tuple[str, list[dict]]:
+        results = self._tool_query_knowledge_results(
+            question,
+            timeout=timeout,
+            abort_check=abort_check,
+        )
         return self._format_knowledge_results(results), self._knowledge_refs_from_results(results)
 
-    def _tool_query_knowledge(self, question: str) -> str:
-        results = self._tool_query_knowledge_results(question)
+    def _tool_query_knowledge(
+        self,
+        question: str,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ) -> str:
+        results = self._tool_query_knowledge_results(
+            question,
+            timeout=timeout,
+            abort_check=abort_check,
+        )
         return self._format_knowledge_results(results)
 
     # ── Basic data access ─────────────────────────────────────────────────────
 
-    def _tool_get_schema(self) -> str:
+    def _tool_get_schema(self, *, timeout: float | None = None, abort_check=None) -> str:
+        if abort_check is not None:
+            abort_check()
         if not self.data_source and not getattr(self, "_combined_schema", None):
             return "No data source connected."
         if not self._schema_cache:
             combined = getattr(self, "_combined_schema", None)
-            self._schema_cache = combined if combined else self.data_source.get_schema()
+            self._schema_cache = combined if combined else self._execute_source_operation(
+                self.data_source,
+                lambda: self.data_source.get_schema(),
+                timeout=timeout,
+                abort_check=abort_check,
+            )
+        if abort_check is not None:
+            abort_check()
         return self._schema_cache
 
-    def _tool_get_table_detail(self, table_name: str) -> str:
+    def _tool_get_table_detail(
+        self,
+        table_name: str,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+        timeout_provider=None,
+    ) -> str:
         """Return full column list + row count for a single table (SQL databases)."""
+        def _remaining_timeout():
+            return timeout_provider() if callable(timeout_provider) else timeout
+
         # Try each active source until one knows the table
         for src in getattr(self, "_all_sources", [self.data_source]):
+            if abort_check is not None:
+                abort_check()
             if src is None:
                 continue
             fn = getattr(src, "get_table_detail", None)
             if fn is None:
                 continue
             try:
-                tables = src.list_tables()
+                tables = self._execute_source_operation(
+                    src,
+                    lambda: src.list_tables(),
+                    timeout=_remaining_timeout(),
+                    abort_check=abort_check,
+                )
+            except (JobCanceled, AgentRunTimeout):
+                raise
             except Exception:
                 tables = []
+            if abort_check is not None:
+                abort_check()
             if table_name in tables:
-                return fn(table_name)
+                result = self._execute_source_operation(
+                    src,
+                    lambda: fn(table_name),
+                    timeout=_remaining_timeout(),
+                    abort_check=abort_check,
+                )
+                if abort_check is not None:
+                    abort_check()
+                return result
         # Fallback: try primary source regardless
+        if abort_check is not None:
+            abort_check()
         if self.data_source:
             fn = getattr(self.data_source, "get_table_detail", None)
             if fn:
-                return fn(table_name)
+                result = self._execute_source_operation(
+                    self.data_source,
+                    lambda: fn(table_name),
+                    timeout=_remaining_timeout(),
+                    abort_check=abort_check,
+                )
+                if abort_check is not None:
+                    abort_check()
+                return result
         return f"Table '{table_name}' not found in any connected data source."
 
     @staticmethod
@@ -653,8 +934,10 @@ class DataToolsMixin:
         # Fallback: primary source, unchanged SQL
         return self.data_source, sql
 
-    def _tool_query_data(self, sql: str) -> str:
-        result, _refs = self._tool_query_data_with_refs(sql)
+    def _tool_query_data(self, sql: str, *, abort_check=None, timeout=None) -> str:
+        result, _refs = self._tool_query_data_with_refs(
+            sql, abort_check=abort_check, timeout=timeout,
+        )
         return result
 
     def _data_refs_for_sql(self, sql: str, src, row_count: int | None = None) -> list[dict]:
@@ -684,7 +967,15 @@ class DataToolsMixin:
             "rows": row_count,
         }]
 
-    def _tool_query_data_with_refs(self, sql: str) -> tuple[str, list[dict]]:
+    def _tool_query_data_with_refs(
+        self,
+        sql: str,
+        *,
+        abort_check=None,
+        timeout: float | None = None,
+    ) -> tuple[str, list[dict]]:
+        if abort_check is not None:
+            abort_check()
         sql_preview = sql.replace("\n", " ")[:120]
         validation_error = self._validate_data_sql("query_data", sql)
         if validation_error:
@@ -693,7 +984,16 @@ class DataToolsMixin:
         if not src:
             log.warning("[tools] query_data  no data source  sql=%.80r", sql_preview)
             return "No data source. Please connect a database or upload an Excel file first.", []
-        df, error = src.execute_query(rewritten_sql)
+        if abort_check is not None:
+            abort_check()
+        df, error = self._execute_source_query(
+            src,
+            rewritten_sql,
+            timeout=timeout,
+            abort_check=abort_check,
+        )
+        if abort_check is not None:
+            abort_check()
         if error:
             log.warning("[tools] query_data  ERROR  source=%s  sql=%.80r  error=%s",
                         getattr(src, "name", "?"), sql_preview, error[:200])
@@ -703,9 +1003,18 @@ class DataToolsMixin:
             if not _re.search(r'src\d+__', sql, _re.IGNORECASE):
                 sources = getattr(self, "_all_sources", None) or []
                 for alt in sources:
+                    if abort_check is not None:
+                        abort_check()
                     if alt is src:
                         continue
-                    df2, err2 = alt.execute_query(rewritten_sql)
+                    df2, err2 = self._execute_source_query(
+                        alt,
+                        rewritten_sql,
+                        timeout=timeout,
+                        abort_check=abort_check,
+                    )
+                    if abort_check is not None:
+                        abort_check()
                     if not err2:
                         log.info("[tools] query_data  fallback OK  source=%s  rows=%d",
                                  getattr(alt, "name", "?"), len(df2))
@@ -728,7 +1037,15 @@ class DataToolsMixin:
             return None, None
         return db_path, getattr(src, "_db_lock", None)
 
-    def _estimate_query_rows_for_job(self, db_path: Path, sql: str, lock=None) -> int | None:
+    def _estimate_query_rows_for_job(
+        self,
+        db_path: Path,
+        sql: str,
+        lock=None,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ) -> int | None:
         """Estimate result size using a fresh DuckDB connection."""
         import duckdb
 
@@ -740,17 +1057,37 @@ class DataToolsMixin:
             with guard:
                 conn = duckdb.connect(str(db_path))
                 try:
-                    row = conn.execute(
-                        f"SELECT COUNT(*) FROM ({query}) AS _pfs_query_count"
-                    ).fetchone()
+                    row = _run_interruptible(
+                        lambda: conn.execute(
+                            f"SELECT COUNT(*) FROM ({query}) AS _pfs_query_count"
+                        ).fetchone(),
+                        conn.interrupt,
+                        timeout=timeout,
+                        abort_check=abort_check,
+                    )
                     return int(row[0]) if row else None
                 finally:
                     conn.close()
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except Exception as exc:
+            from agent.errors import AgentRunTimeout
+            from agent.jobs import JobCanceled
+
+            if isinstance(exc, (JobCanceled, AgentRunTimeout)):
+                raise
             log.info("[tools] query_data row estimate skipped: %s", exc)
             return None
 
-    def _execute_query_in_fresh_db(self, db_path: Path, sql: str, lock=None):
+    def _execute_query_in_fresh_db(
+        self,
+        db_path: Path,
+        sql: str,
+        lock=None,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ):
         import duckdb
         import pandas as pd
 
@@ -759,17 +1096,42 @@ class DataToolsMixin:
             guard = lock or nullcontext()
             with guard:
                 conn = duckdb.connect(str(db_path))
-                return conn.execute(sql).df(), ""
-        except Exception as exc:
-            return pd.DataFrame(), str(exc)
-        finally:
-            if conn is not None:
                 try:
+                    frame = _run_interruptible(
+                        lambda: conn.execute(sql).df(),
+                        conn.interrupt,
+                        timeout=timeout,
+                        abort_check=abort_check,
+                    )
+                    return frame, ""
+                finally:
                     conn.close()
-                except Exception:
-                    pass
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as exc:
+            from agent.errors import AgentRunTimeout
+            from agent.jobs import JobCanceled
 
-    def _tool_query_data_with_jobs(self, sql: str):
+            if isinstance(exc, (JobCanceled, AgentRunTimeout)):
+                raise
+            return pd.DataFrame(), str(exc)
+
+    def _tool_query_data_with_jobs(
+        self,
+        sql: str,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+        timeout_provider=None,
+    ):
+        if abort_check is not None:
+            abort_check()
+
+        def _query_timeout() -> float | None:
+            if callable(timeout_provider):
+                return timeout_provider()
+            return timeout
+
         sql_preview = sql.replace("\n", " ")[:120]
         validation_error = self._validate_data_sql("query_data", sql)
         if validation_error:
@@ -785,11 +1147,21 @@ class DataToolsMixin:
         db_path, db_lock = self._query_data_job_connection_info(src)
         can_job = self._job_runner is not None and db_path is not None
         estimated_rows = (
-            self._estimate_query_rows_for_job(db_path, rewritten_sql, db_lock)
+            self._estimate_query_rows_for_job(
+                db_path,
+                rewritten_sql,
+                db_lock,
+                timeout=_query_timeout(),
+                abort_check=abort_check,
+            )
             if can_job else None
         )
         if not can_job or estimated_rows is None or estimated_rows < _QUERY_JOB_ROW_THRESHOLD:
-            return self._tool_query_data_with_refs(sql)
+            return self._tool_query_data_with_refs(
+                sql,
+                timeout=_query_timeout(),
+                abort_check=abort_check,
+            )
 
         result_holder = {}
         sql_snapshot = str(rewritten_sql or "")
@@ -800,7 +1172,11 @@ class DataToolsMixin:
             ctx.check_canceled()
             ctx.set_progress(45, "正在执行 SQL 查询")
             df, error = self._execute_query_in_fresh_db(
-                db_path_snapshot, sql_snapshot, db_lock
+                db_path_snapshot,
+                sql_snapshot,
+                db_lock,
+                timeout=_query_timeout(),
+                abort_check=ctx.check_canceled,
             )
             ctx.check_canceled()
             if error:
@@ -833,11 +1209,30 @@ class DataToolsMixin:
                  getattr(src, "name", "?"), len(df), sql_preview)
         return src.format_result(df), self._data_refs_for_sql(sql, src, len(df))
 
-    def _tool_create_analysis_table(self, sql: str, table_name: str = "analysis_data") -> str:
-        result, _refs = self._tool_create_analysis_table_with_refs(sql, table_name)
+    def _tool_create_analysis_table(
+        self,
+        sql: str,
+        table_name: str = "analysis_data",
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ) -> str:
+        result, _refs = self._tool_create_analysis_table_with_refs(
+            sql,
+            table_name,
+            timeout=timeout,
+            abort_check=abort_check,
+        )
         return result
 
-    def _known_analysis_tables(self, src) -> set[str]:
+    def _known_analysis_tables(
+        self,
+        src,
+        *,
+        existing_tables: set[str] | None = None,
+        timeout: float | None = None,
+        abort_check=None,
+    ) -> set[str]:
         """Return connector-owned derived tables that may be replaced/deleted.
 
         Connectors intentionally keep raw source tables and transient analysis
@@ -867,7 +1262,16 @@ class DataToolsMixin:
 
                 raw = json.loads(registry_path.read_text(encoding="utf-8"))
                 registered = set(raw.keys()) if isinstance(raw, dict) else set()
-                existing = set(src.list_tables() or [])
+                existing = (
+                    set(existing_tables)
+                    if existing_tables is not None
+                    else set(self._execute_source_operation(
+                        src,
+                        lambda: src.list_tables(),
+                        timeout=timeout,
+                        abort_check=abort_check,
+                    ) or [])
+                )
                 known.update(existing - {str(item) for item in registered})
             except Exception:
                 # _analysis_table_connection also fails closed when this
@@ -875,7 +1279,14 @@ class DataToolsMixin:
                 pass
         return known
 
-    def _validate_analysis_table_name(self, src, table_name: str) -> str | None:
+    def _validate_analysis_table_name(
+        self,
+        src,
+        table_name: str,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ) -> str | None:
         """Reject unsafe names and prevent replacing a raw source table."""
         name = str(table_name or "").strip()
         if not name:
@@ -887,30 +1298,61 @@ class DataToolsMixin:
         if not callable(list_tables):
             return "无法确认数据源表目录，已拒绝创建分析表。"
         try:
-            existing = set(list_tables() or [])
+            existing = set(self._execute_source_operation(
+                src,
+                lambda: list_tables(),
+                timeout=timeout,
+                abort_check=abort_check,
+            ) or [])
+        except (JobCanceled, AgentRunTimeout):
+            raise
         except Exception as exc:
             return f"无法确认数据源表目录，已拒绝创建分析表：{exc}"
 
-        if name in existing and name not in self._known_analysis_tables(src):
+        if name in existing and name not in self._known_analysis_tables(
+            src,
+            existing_tables=existing,
+            timeout=timeout,
+            abort_check=abort_check,
+        ):
             return f"不能覆盖原始数据表 `{name}`；请使用新的分析表名。"
         return None
 
     def _tool_create_analysis_table_with_refs(
-        self, sql: str, table_name: str = "analysis_data"
+        self,
+        sql: str,
+        table_name: str = "analysis_data",
+        *,
+        timeout: float | None = None,
+        abort_check=None,
     ) -> tuple[str, list[dict]]:
+        if abort_check is not None:
+            abort_check()
         validation_error = self._validate_data_sql("create_analysis_table", sql)
         if validation_error:
             return f"Error building analysis table: {validation_error}", self._data_refs_for_sql(sql, self.data_source, None)
         src, rewritten_sql = self._route_query(sql)
         if not src:
             return "No data source connected.", []
-        table_error = self._validate_analysis_table_name(src, table_name)
+        table_error = self._validate_analysis_table_name(
+            src,
+            table_name,
+            timeout=timeout,
+            abort_check=abort_check,
+        )
         if table_error:
             refs = self._data_refs_for_sql(sql, src, None)
             refs[0]["type"] = "分析表"
             refs[0]["title"] = str(table_name or "analysis_data")
             return f"Error building analysis table: {table_error}", refs
-        result = src.create_analysis_table(rewritten_sql, table_name)
+        result = self._execute_source_operation(
+            src,
+            lambda: src.create_analysis_table(rewritten_sql, table_name),
+            timeout=timeout,
+            abort_check=abort_check,
+        )
+        if abort_check is not None:
+            abort_check()
         self._schema_cache = None
         log.info("[tools] create_analysis_table  table=%s  source=%s",
                  table_name, getattr(src, "name", "?"))
@@ -920,8 +1362,20 @@ class DataToolsMixin:
         return result, refs
 
     def _tool_create_analysis_table_with_jobs(
-        self, sql: str, table_name: str = "analysis_data"
+        self,
+        sql: str,
+        table_name: str = "analysis_data",
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+        timeout_provider=None,
     ):
+        if abort_check is not None:
+            abort_check()
+
+        def _remaining_timeout():
+            return timeout_provider() if callable(timeout_provider) else timeout
+
         validation_error = self._validate_data_sql("create_analysis_table", sql)
         if validation_error:
             return (
@@ -932,7 +1386,12 @@ class DataToolsMixin:
         if not src:
             return "No data source connected.", []
 
-        table_error = self._validate_analysis_table_name(src, table_name)
+        table_error = self._validate_analysis_table_name(
+            src,
+            table_name,
+            timeout=_remaining_timeout(),
+            abort_check=abort_check,
+        )
         if table_error:
             refs = self._data_refs_for_sql(sql, src, None)
             refs[0]["type"] = "分析表"
@@ -945,7 +1404,14 @@ class DataToolsMixin:
 
         can_job = self._job_runner is not None and hasattr(src, "_db_lock")
         if not can_job:
-            result = src.create_analysis_table(rewritten_sql, table_name)
+            result = self._execute_source_operation(
+                src,
+                lambda: src.create_analysis_table(rewritten_sql, table_name),
+                timeout=_remaining_timeout(),
+                abort_check=abort_check,
+            )
+            if abort_check is not None:
+                abort_check()
             self._schema_cache = None
             log.info("[tools] create_analysis_table  table=%s  source=%s",
                      table_name, getattr(src, "name", "?"))
@@ -959,7 +1425,12 @@ class DataToolsMixin:
             ctx.set_progress(10, "正在准备分析表")
             ctx.check_canceled()
             ctx.set_progress(40, "正在执行建表 SQL")
-            result = src.create_analysis_table(sql_snapshot, table_snapshot)
+            result = self._execute_source_operation(
+                src,
+                lambda: src.create_analysis_table(sql_snapshot, table_snapshot),
+                timeout=_remaining_timeout(),
+                abort_check=ctx.check_canceled,
+            )
             ctx.check_canceled()
             result_holder["text"] = result
             ctx.set_progress(100, "分析表创建完成")
@@ -981,7 +1452,14 @@ class DataToolsMixin:
             "text", "Error building analysis table: background result unavailable"
         ), refs
 
-    def _analysis_table_connection(self, src, table_name: str):
+    def _analysis_table_connection(
+        self,
+        src,
+        table_name: str,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ):
         """Return (conn, lock, cleanup_callback) when table is safe to DROP."""
         table_name = str(table_name or "").strip()
         if not table_name:
@@ -989,7 +1467,17 @@ class DataToolsMixin:
 
         list_tables = getattr(src, "list_tables", None)
         try:
-            existing = set(list_tables() or []) if callable(list_tables) else set()
+            existing = (
+                set(self._execute_source_operation(
+                    src,
+                    lambda: list_tables(),
+                    timeout=timeout,
+                    abort_check=abort_check,
+                ) or [])
+                if callable(list_tables) else set()
+            )
+        except (JobCanceled, AgentRunTimeout):
+            raise
         except Exception:
             existing = set()
         if existing and table_name not in existing:
@@ -1045,33 +1533,58 @@ class DataToolsMixin:
 
         return None, None, None, "not a known analysis/derived table"
 
-    def _drop_analysis_table(self, src, table_name: str) -> tuple[bool, str]:
-        conn, lock, cleanup, reason = self._analysis_table_connection(src, table_name)
+    def _drop_analysis_table(
+        self,
+        src,
+        table_name: str,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ) -> tuple[bool, str]:
+        conn, lock, cleanup, reason = self._analysis_table_connection(
+            src,
+            table_name,
+            timeout=timeout,
+            abort_check=abort_check,
+        )
         if conn is None:
             return False, reason
 
         def run_drop():
-            conn.execute(f"DROP TABLE IF EXISTS {_quote_ident(table_name)}")
-            if cleanup:
-                cleanup()
+            guard = lock or nullcontext()
+            with guard:
+                conn.execute(f"DROP TABLE IF EXISTS {_quote_ident(table_name)}")
+                if cleanup:
+                    cleanup()
 
         try:
-            if lock is not None:
-                with lock:
-                    run_drop()
-            else:
-                run_drop()
+            self._execute_source_operation(
+                src,
+                run_drop,
+                timeout=timeout,
+                abort_check=abort_check,
+            )
+            if abort_check is not None:
+                abort_check()
             return True, "deleted"
+        except (JobCanceled, AgentRunTimeout):
+            raise
         except Exception as exc:
             return False, str(exc)
 
     def _tool_delete_analysis_tables(
-        self, table_names: list, confirm: bool = False,
+        self,
+        table_names: list,
+        confirm: bool = False,
+        *,
+        operation_key: str = "",
+        timeout: float | None = None,
+        abort_check=None,
+        timeout_provider=None,
     ) -> str:
-        if not confirm:
-            return "❌ 删除分析表需要 confirm=true。"
-        if not self.data_source:
-            return "❌ 请先连接数据源。"
+        self._last_analysis_delete_audit = None
+        if abort_check is not None:
+            abort_check()
         clean_names = []
         seen = set()
         for name in table_names or []:
@@ -1079,17 +1592,182 @@ class DataToolsMixin:
             if value and value not in seen:
                 clean_names.append(value)
                 seen.add(value)
+
+        source_name = _safe_delete_source_name(
+            getattr(self.data_source, "name", "") if self.data_source else ""
+        )
+        operation_key = str(operation_key or "").strip()[:240]
+        operation_store = getattr(self, "_analysis_delete_operation_store", None)
+        request_sha256 = _delete_operation_digest(
+            source_name, confirm, clean_names,
+        )
+
+        def _local_audit(
+            status: str,
+            *,
+            result: str = "",
+            deleted: list[str] | None = None,
+            skipped: list[tuple[str, str]] | None = None,
+            error: str = "",
+            replay: bool = False,
+        ) -> dict:
+            safe_deleted = [
+                _safe_delete_table_name(item) for item in (deleted or [])[:32]
+            ]
+            safe_skipped = [
+                {
+                    "table_name": _safe_delete_table_name(name),
+                    "reason_code": _delete_reason_code(reason),
+                }
+                for name, reason in (skipped or [])[:32]
+            ]
+            summary_parts = []
+            if safe_deleted:
+                summary_parts.append(
+                    "已删除分析表：" + "、".join(safe_deleted)
+                )
+            if safe_skipped:
+                summary_parts.append(
+                    "未删除：" + "、".join(
+                        f"{item['table_name']}（{item['reason_code']}）"
+                        for item in safe_skipped
+                    )
+                )
+            if not summary_parts:
+                summary_parts.append(
+                    "操作未执行" if status in {"rejected", "conflict"}
+                    else "操作未产生删除结果"
+                )
+            return {
+                "operation_key": operation_key,
+                "request_sha256": request_sha256,
+                "source_name": source_name,
+                "table_names": [
+                    _safe_delete_table_name(item) for item in clean_names[:32]
+                ],
+                "status": status,
+                "deleted": safe_deleted,
+                "skipped": safe_skipped,
+                # The raw connector message is returned to the current caller
+                # for compatibility, but never enters persisted audit data.
+                "result": "；".join(summary_parts)[:8_000],
+                "error": str(error or "")[:500],
+                "idempotent_replay": bool(replay),
+            }
+
+        def _finish(
+            status: str,
+            *,
+            result: str = "",
+            deleted: list[str] | None = None,
+            skipped: list[tuple[str, str]] | None = None,
+            error: str = "",
+        ) -> dict:
+            audit = _local_audit(
+                status,
+                result=result,
+                deleted=deleted,
+                skipped=skipped,
+                error=error,
+            )
+            if operation_store is not None and operation_key:
+                stored = operation_store.finish_analysis_delete_operation(
+                    operation_key,
+                    status=status,
+                    result=audit["result"],
+                    deleted=audit["deleted"],
+                    skipped=audit["skipped"],
+                    error=audit["error"],
+                )
+                if stored:
+                    audit = stored
+                    audit["idempotent_replay"] = False
+            self._last_analysis_delete_audit = audit
+            return audit
+
+        if operation_store is not None and operation_key:
+            decision, existing = operation_store.begin_analysis_delete_operation(
+                operation_key=operation_key,
+                request_sha256=request_sha256,
+                table_names=[_safe_delete_table_name(item) for item in clean_names],
+                source_name=source_name,
+            )
+            if decision == "replay":
+                replay = dict(existing or {})
+                replay["idempotent_replay"] = True
+                self._last_analysis_delete_audit = replay
+                return str(replay.get("result") or "删除分析表操作已完成（重复请求已复用结果）。")
+            if decision == "conflict":
+                conflict = _local_audit(
+                    "conflict",
+                    error="operation_key_reused_with_different_request",
+                )
+                conflict["conflict_with"] = str(
+                    (existing or {}).get("request_sha256") or ""
+                )[:64]
+                self._last_analysis_delete_audit = conflict
+                return "❌ 相同 operation_key 已对应另一组删除请求，已拒绝执行。"
+            if decision == "in_progress":
+                in_progress = dict(existing or {})
+                in_progress["status"] = "in_progress"
+                in_progress["idempotent_replay"] = False
+                self._last_analysis_delete_audit = in_progress
+                return "⏳ 相同 operation_key 的删除操作仍在处理中，已拒绝重复执行。"
+
+        if not confirm:
+            result = "❌ 删除分析表需要 confirm=true。"
+            _finish(
+                "rejected", result=result,
+                skipped=[(name, "confirmation required") for name in clean_names],
+                error="confirmation_required",
+            )
+            return result
+        if not self.data_source:
+            result = "❌ 请先连接数据源。"
+            _finish("rejected", result=result, error="data_source_required")
+            return result
         if not clean_names:
-            return "❌ 请提供至少一个要删除的分析表名。"
+            result = "❌ 请提供至少一个要删除的分析表名。"
+            _finish("rejected", result=result, error="table_names_required")
+            return result
 
         deleted = []
         skipped = []
-        for name in clean_names:
-            ok, message = self._drop_analysis_table(self.data_source, name)
-            if ok:
-                deleted.append(name)
-            else:
-                skipped.append((name, message))
+        try:
+            for name in clean_names:
+                if abort_check is not None:
+                    abort_check()
+                operation_timeout = (
+                    timeout_provider() if callable(timeout_provider) else timeout
+                )
+                ok, message = self._drop_analysis_table(
+                    self.data_source,
+                    name,
+                    timeout=operation_timeout,
+                    abort_check=abort_check,
+                )
+                if ok:
+                    deleted.append(name)
+                else:
+                    skipped.append((name, message))
+        except JobCanceled:
+            _finish(
+                "interrupted",
+                result="删除分析表操作已中断，未自动重试。",
+                deleted=deleted,
+                skipped=skipped,
+                error="job_canceled",
+            )
+            raise
+        except AgentRunTimeout:
+            _finish(
+                "interrupted",
+                result="删除分析表操作已超时，未自动重试。",
+                deleted=deleted,
+                skipped=skipped,
+                error="agent_run_timeout",
+            )
+            raise
         if deleted:
             self._schema_cache = None
 
@@ -1106,20 +1784,41 @@ class DataToolsMixin:
         else:
             lines.append("")
             lines.append("说明：只允许删除可证明为分析/派生表的对象；原始源表和无法判定的表会被保护。")
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        status = "succeeded" if not skipped else ("partial" if deleted else "rejected")
+        _finish(status, result=result, deleted=deleted, skipped=skipped)
+        return result
 
     # ── DataFrame → DataSource writer (backward-compatible) ──────────────────
 
-    def _write_analysis_df(self, df, table_name: str) -> None:
+    def _write_analysis_df(
+        self,
+        df,
+        table_name: str,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ) -> None:
         """Write df into the connected data source as a queryable table.
 
         Tries the new connector API first; falls back to direct SQLite write
         for older connector.py versions that lack the _df parameter.
         """
         ds = self.data_source
+        if abort_check is not None:
+            abort_check()
 
         try:
-            created = ds.create_analysis_table(sql=None, table_name=table_name, _df=df)
+            created = self._execute_source_operation(
+                ds,
+                lambda: ds.create_analysis_table(
+                    sql=None,
+                    table_name=table_name,
+                    _df=df,
+                ),
+                timeout=timeout,
+                abort_check=abort_check,
+            )
             # Some connectors report failures as text instead of raising.  Do
             # not let a caller subsequently claim a derived table was written.
             if isinstance(created, str) and (
@@ -1139,8 +1838,34 @@ class DataToolsMixin:
             conn = ds._cache_conn
             ds._cache_tables.add(table_name)
 
-        df.to_sql(table_name, conn, if_exists="replace", index=False)
+        self._execute_source_operation(
+            ds,
+            lambda: df.to_sql(table_name, conn, if_exists="replace", index=False),
+            timeout=timeout,
+            abort_check=abort_check,
+        )
+        if abort_check is not None:
+            abort_check()
         self._schema_cache = None
+
+    def _write_analysis_df_with_budget(
+        self,
+        df,
+        table_name: str,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ) -> None:
+        """Call the writer while retaining compatibility with old test/connectors."""
+        if timeout is None and abort_check is None:
+            # A few integrations override this legacy two-argument hook.
+            return self._write_analysis_df(df, table_name)
+        return self._write_analysis_df(
+            df,
+            table_name,
+            timeout=timeout,
+            abort_check=abort_check,
+        )
 
     # ── Analysis tool ─────────────────────────────────────────────────────────
 
@@ -1152,7 +1877,12 @@ class DataToolsMixin:
         groupby_column: str = "",
         n_deciles: int = 10,
         analysis_options: dict | None = None,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
     ) -> str:
+        if abort_check is not None:
+            abort_check()
         if not self.data_source:
             return "No data source connected."
 
@@ -1160,7 +1890,12 @@ class DataToolsMixin:
         if validation_error:
             return f"SQL Error while fetching data: {validation_error}"
 
-        df, error = self.data_source.execute_query(sql)
+        df, error = self._execute_source_query(
+            self.data_source,
+            sql,
+            timeout=timeout,
+            abort_check=abort_check,
+        )
         if error:
             return f"SQL Error while fetching data: {error}"
         if df.empty:
@@ -1178,10 +1913,22 @@ class DataToolsMixin:
         except KeyError as exc:
             return str(exc)
         except Exception as exc:
+            from agent.errors import AgentRunTimeout
+            from agent.jobs import JobCanceled
+
+            if isinstance(exc, (JobCanceled, AgentRunTimeout)):
+                raise
             return f"Analysis error: {exc}"
 
         return self._finalize_analysis_result(
-            entry, ret, analysis_name, sql, target_column, n_deciles
+            entry,
+            ret,
+            analysis_name,
+            sql,
+            target_column,
+            n_deciles,
+            timeout=timeout,
+            abort_check=abort_check,
         )
 
     def _tool_run_analysis_with_jobs(
@@ -1192,8 +1939,14 @@ class DataToolsMixin:
         groupby_column: str = "",
         n_deciles: int = 10,
         analysis_options: dict | None = None,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+        timeout_provider=None,
     ):
         """Run large time-series analyses as cancellable JobRunner work."""
+        if abort_check is not None:
+            abort_check()
         if not self.data_source:
             return "No data source connected."
 
@@ -1201,7 +1954,15 @@ class DataToolsMixin:
         if validation_error:
             return f"SQL Error while fetching data: {validation_error}"
 
-        df, error = self.data_source.execute_query(sql)
+        query_timeout = (
+            timeout_provider() if callable(timeout_provider) else timeout
+        )
+        df, error = self._execute_source_query(
+            self.data_source,
+            sql,
+            timeout=query_timeout,
+            abort_check=abort_check,
+        )
         if error:
             return f"SQL Error while fetching data: {error}"
         if df.empty:
@@ -1212,6 +1973,8 @@ class DataToolsMixin:
             or (analysis_name.startswith(_TIME_SERIES_PREFIX) and len(df) >= _ANALYSIS_JOB_ROW_THRESHOLD)
         )
         if not should_job:
+            if abort_check is not None:
+                abort_check()
             try:
                 entry, ret = _execute_analysis(
                     analysis_name, df, target_column, groupby_column, n_deciles, analysis_options
@@ -1219,9 +1982,21 @@ class DataToolsMixin:
             except KeyError as exc:
                 return str(exc)
             except Exception as exc:
+                from agent.errors import AgentRunTimeout
+                from agent.jobs import JobCanceled
+
+                if isinstance(exc, (JobCanceled, AgentRunTimeout)):
+                    raise
                 return f"Analysis error: {exc}"
             return self._finalize_analysis_result(
-                entry, ret, analysis_name, sql, target_column, n_deciles
+                entry,
+                ret,
+                analysis_name,
+                sql,
+                target_column,
+                n_deciles,
+                timeout=(timeout_provider() if callable(timeout_provider) else timeout),
+                abort_check=abort_check,
             )
 
         result_holder = {}
@@ -1269,6 +2044,8 @@ class DataToolsMixin:
             sql,
             target_column,
             n_deciles,
+            timeout=(timeout_provider() if callable(timeout_provider) else timeout),
+            abort_check=abort_check,
         )
 
     def _finalize_analysis_result(
@@ -1279,6 +2056,9 @@ class DataToolsMixin:
         sql: str,
         target_column: str,
         n_deciles: int,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
     ) -> str:
         """Persist computed tables on the request thread and format the result."""
 
@@ -1290,14 +2070,31 @@ class DataToolsMixin:
 
         try:
             _out_tbls = entry.get("output_tables", [])
-            self._write_analysis_df(result_df, "analysis_result")
+            self._write_analysis_df_with_budget(
+                result_df,
+                "analysis_result",
+                timeout=timeout,
+                abort_check=abort_check,
+            )
             if not breakdown_df.empty:
-                self._write_analysis_df(breakdown_df, "analysis_breakdown")
+                self._write_analysis_df_with_budget(
+                    breakdown_df,
+                    "analysis_breakdown",
+                    timeout=timeout,
+                    abort_check=abort_check,
+                )
             # Always write the third table so LLM SQL queries don't fail on missing table.
             # Write an empty-but-structured DataFrame when the result is empty.
             if extra_df is not None:
                 extra_table_name = _out_tbls[2] if len(_out_tbls) > 2 else "analysis_extra"
-                self._write_analysis_df(extra_df, extra_table_name)
+                self._write_analysis_df_with_budget(
+                    extra_df,
+                    extra_table_name,
+                    timeout=timeout,
+                    abort_check=abort_check,
+                )
+        except (JobCanceled, AgentRunTimeout):
+            raise
         except Exception as exc:
             return (
                 markdown
@@ -1338,21 +2135,39 @@ class DataToolsMixin:
                     import pandas as pd
 
                     evaluation_table = pd.concat(tables, ignore_index=True)
-                self._write_analysis_df(evaluation_table, "analysis_evaluation")
+                self._write_analysis_df_with_budget(
+                    evaluation_table,
+                    "analysis_evaluation",
+                    timeout=timeout,
+                    abort_check=abort_check,
+                )
+            except (JobCanceled, AgentRunTimeout):
+                raise
             except Exception as exc:
                 markdown += f"\n\n⚠️ **模型质量评估表写入失败**：{exc}"
             for evaluation in evaluations:
                 markdown += _model_evaluation_markdown(analysis_name, evaluation)
 
         if analysis_name == "K_Means" and "cluster" in breakdown_df.columns:
-            markdown += self._kmeans_build_labeled(sql, breakdown_df)
+            markdown += self._kmeans_build_labeled(
+                sql,
+                breakdown_df,
+                timeout=timeout,
+                abort_check=abort_check,
+            )
 
         if analysis_name == "Data_Decile_Analysis" and "decile" in result_df.columns:
-            markdown += self._decile_build_labeled(sql, target_column, n_deciles)
+            markdown += self._decile_build_labeled(
+                sql,
+                target_column,
+                n_deciles,
+                timeout=timeout,
+                abort_check=abort_check,
+            )
 
         return markdown
 
-    def _kmeans_build_labeled(self, sql: str, breakdown_df) -> str:
+    def _kmeans_build_labeled(self, sql: str, breakdown_df, *, timeout=None, abort_check=None) -> str:
         try:
             labeled_sql = re.sub(
                 r"(?is)\bSELECT\b.+?\bFROM\b",
@@ -1360,7 +2175,12 @@ class DataToolsMixin:
                 sql,
                 count=1,
             )
-            full_df, err = self.data_source.execute_query(labeled_sql)
+            full_df, err = self._execute_source_query(
+                self.data_source,
+                labeled_sql,
+                timeout=timeout,
+                abort_check=abort_check,
+            )
             if err or full_df.empty:
                 return ""
             if len(full_df) != len(breakdown_df):
@@ -1368,7 +2188,12 @@ class DataToolsMixin:
 
             labeled_df = full_df.copy().reset_index(drop=True)
             labeled_df["cluster"] = breakdown_df["cluster"].values
-            self._write_analysis_df(labeled_df, "cluster_labels")
+            self._write_analysis_df_with_budget(
+                labeled_df,
+                "cluster_labels",
+                timeout=timeout,
+                abort_check=abort_check,
+            )
             self._schema_cache = None
 
             cols_preview = ", ".join(str(c) for c in labeled_df.columns[:8])
@@ -1388,10 +2213,20 @@ class DataToolsMixin:
                 "SELECT cluster, AVG(target_col) AS avg_val FROM cluster_labels GROUP BY cluster\n"
                 "```"
             )
+        except (JobCanceled, AgentRunTimeout):
+            raise
         except Exception:
             return ""
 
-    def _decile_build_labeled(self, sql: str, target_column: str, n_deciles: int) -> str:
+    def _decile_build_labeled(
+        self,
+        sql: str,
+        target_column: str,
+        n_deciles: int,
+        *,
+        timeout=None,
+        abort_check=None,
+    ) -> str:
         """回写十分位标签到原始数据，生成 decile_labels 表。"""
         try:
             labeled_sql = re.sub(
@@ -1400,7 +2235,12 @@ class DataToolsMixin:
                 sql,
                 count=1,
             )
-            full_df, err = self.data_source.execute_query(labeled_sql)
+            full_df, err = self._execute_source_query(
+                self.data_source,
+                labeled_sql,
+                timeout=timeout,
+                abort_check=abort_check,
+            )
             if err or full_df.empty:
                 return ""
 
@@ -1434,7 +2274,12 @@ class DataToolsMixin:
                 return f"D{str(d).zfill(width)}{suffix}"
             labeled_df["decile_label"] = labeled_df["decile"].map(_label)
 
-            self._write_analysis_df(labeled_df, "decile_labels")
+            self._write_analysis_df_with_budget(
+                labeled_df,
+                "decile_labels",
+                timeout=timeout,
+                abort_check=abort_check,
+            )
             self._schema_cache = None
 
             cols_preview = ", ".join(str(c) for c in labeled_df.columns[:8])
@@ -1455,22 +2300,40 @@ class DataToolsMixin:
                 "FROM decile_labels GROUP BY decile, decile_label ORDER BY decile\n"
                 "```"
             )
+        except (JobCanceled, AgentRunTimeout):
+            raise
         except Exception:
             return ""
 
     # ── Chart selector ────────────────────────────────────────────────────────
 
-    def _tool_select_chart(self, user_intent: str, available_columns: list = None) -> str:
+    def _tool_select_chart(
+        self,
+        user_intent: str,
+        available_columns: list = None,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ) -> str:
         """Query the embedded chart registry and return ranked candidates with exact field_mapping specs."""
         try:
+            if abort_check is not None:
+                abort_check()
             from LLM.chart_selector import select_charts, format_selection_result
             cols = list(available_columns or [])
             # Auto-enrich with schema column names when the caller didn't supply them
             if not cols and self.data_source:
-                schema = self._tool_get_schema()
+                schema = self._tool_get_schema(
+                    timeout=timeout,
+                    abort_check=abort_check,
+                )
                 cols = re.findall(r"^\s{2,4}(\w+)\b", schema, re.MULTILINE)
             candidates = select_charts(user_intent, cols, top_n=3)
+            if abort_check is not None:
+                abort_check()
             return format_selection_result(candidates)
+        except (JobCanceled, AgentRunTimeout):
+            raise
         except Exception as exc:
             return f"Chart selection error: {exc}"
 
@@ -1494,14 +2357,28 @@ class DataToolsMixin:
         return {"html": result.get("html", ""), "chart_type": chart_type}
 
     def _tool_generate_chart(
-        self, chart_type: str, sql: str, field_mapping: dict, title: str = ""
+        self,
+        chart_type: str,
+        sql: str,
+        field_mapping: dict,
+        title: str = "",
+        *,
+        timeout: float | None = None,
+        abort_check=None,
     ) -> dict:
+        if abort_check is not None:
+            abort_check()
         if not self.data_source:
             return {"error": "No data source connected."}
         validation_error = self._validate_data_sql("generate_chart", sql)
         if validation_error:
             return {"error": f"Data query failed: {validation_error}"}
-        df, error = self.data_source.execute_query(sql)
+        df, error = self._execute_source_query(
+            self.data_source,
+            sql,
+            timeout=timeout,
+            abort_check=abort_check,
+        )
         if error:
             return {"error": f"Data query failed: {error}"}
         if df.empty:
@@ -1509,14 +2386,30 @@ class DataToolsMixin:
         return self._render_chart_from_df(df, chart_type, field_mapping, title)
 
     def _tool_generate_chart_with_jobs(
-        self, chart_type: str, sql: str, field_mapping: dict, title: str = ""
+        self,
+        chart_type: str,
+        sql: str,
+        field_mapping: dict,
+        title: str = "",
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+        timeout_provider=None,
     ):
+        if abort_check is not None:
+            abort_check()
         if not self.data_source:
             return {"error": "No data source connected."}
         validation_error = self._validate_data_sql("generate_chart", sql)
         if validation_error:
             return {"error": f"Data query failed: {validation_error}"}
-        df, error = self.data_source.execute_query(sql)
+        query_timeout = timeout_provider() if callable(timeout_provider) else timeout
+        df, error = self._execute_source_query(
+            self.data_source,
+            sql,
+            timeout=query_timeout,
+            abort_check=abort_check,
+        )
         if error:
             return {"error": f"Data query failed: {error}"}
         if df.empty:
@@ -1524,6 +2417,8 @@ class DataToolsMixin:
 
         should_job = self._job_runner is not None and len(df) >= _CHART_JOB_ROW_THRESHOLD
         if not should_job:
+            if abort_check is not None:
+                abort_check()
             return self._render_chart_from_df(df, chart_type, field_mapping, title)
 
         df_snapshot = df.copy(deep=True)
@@ -1561,7 +2456,14 @@ class DataToolsMixin:
 
     # ── Table discovery helpers ───────────────────────────────────────────────
 
-    def _discover_all_tables(self) -> list:
+    def _discover_all_tables(
+        self,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ) -> list:
+        if abort_check is not None:
+            abort_check()
         if not self.data_source:
             return []
         # Preferred: connector.list_tables() — returns ALL tables incl. runtime
@@ -1569,17 +2471,29 @@ class DataToolsMixin:
         list_fn = getattr(self.data_source, "list_tables", None)
         if callable(list_fn):
             try:
-                tables = list_fn()
+                tables = self._execute_source_operation(
+                    self.data_source,
+                    list_fn,
+                    timeout=timeout,
+                    abort_check=abort_check,
+                )
                 if tables:
                     return list(tables)
+            except (JobCanceled, AgentRunTimeout):
+                raise
             except Exception:
                 pass
         # Fallback: parse the schema text (works for any connector).
-        schema = self._tool_get_schema()
+        schema = self._tool_get_schema(timeout=timeout, abort_check=abort_check)
         return re.findall(r"^Table:\s+(\S+)", schema, re.MULTILINE)
 
-    def _get_first_raw_table(self) -> str:
-        tables = self._discover_all_tables()
+    def _get_first_raw_table(
+        self,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ) -> str:
+        tables = self._discover_all_tables(timeout=timeout, abort_check=abort_check)
         raw = [t for t in tables if not t.startswith("analysis_") and t != "cleaned_data"]
         return raw[0] if raw else (tables[0] if tables else "")
 
@@ -1590,32 +2504,77 @@ class DataToolsMixin:
         text, charts = profile(df, columns or None)
         return {"text": f"### 数据概况 · `{table_name}`\n\n" + text, "charts": charts}
 
-    def _tool_profile_data(self, table_name: str = "", columns: list = None) -> dict:
+    def _tool_profile_data(
+        self,
+        table_name: str = "",
+        columns: list = None,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+    ) -> dict:
+        if abort_check is not None:
+            abort_check()
         if not self.data_source:
             return {"text": "❌ 请先连接数据源。", "charts": []}
 
-        tname = table_name or self._get_first_raw_table()
+        tname = table_name or self._get_first_raw_table(
+            timeout=timeout,
+            abort_check=abort_check,
+        )
+        if abort_check is not None:
+            abort_check()
         if not tname:
             return {"text": "❌ 数据源中没有可用的表格。", "charts": []}
 
-        df, err = self.data_source.execute_query(f'SELECT * FROM "{tname}"')
+        df, err = self._execute_source_query(
+            self.data_source,
+            f'SELECT * FROM "{tname}"',
+            timeout=timeout,
+            abort_check=abort_check,
+        )
+        if abort_check is not None:
+            abort_check()
         if err or df is None or df.empty:
             return {"text": f"❌ 读取表 '{tname}' 失败：{err}", "charts": []}
 
         try:
-            return self._profile_dataframe(df, tname, columns)
+            result = self._profile_dataframe(df, tname, columns)
+            if abort_check is not None:
+                abort_check()
+            return result
+        except (JobCanceled, AgentRunTimeout):
+            raise
         except Exception as exc:
             return {"text": f"❌ 数据概况生成失败：{exc}", "charts": []}
 
-    def _tool_profile_data_with_jobs(self, table_name: str = "", columns: list = None):
+    def _tool_profile_data_with_jobs(
+        self,
+        table_name: str = "",
+        columns: list = None,
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+        timeout_provider=None,
+    ):
+        if abort_check is not None:
+            abort_check()
         if not self.data_source:
             return {"text": "❌ 请先连接数据源。", "charts": []}
 
-        tname = table_name or self._get_first_raw_table()
+        query_timeout = timeout_provider() if callable(timeout_provider) else timeout
+        tname = table_name or self._get_first_raw_table(
+            timeout=query_timeout,
+            abort_check=abort_check,
+        )
         if not tname:
             return {"text": "❌ 数据源中没有可用的表格。", "charts": []}
 
-        df, err = self.data_source.execute_query(f'SELECT * FROM "{tname}"')
+        df, err = self._execute_source_query(
+            self.data_source,
+            f'SELECT * FROM "{tname}"',
+            timeout=query_timeout,
+            abort_check=abort_check,
+        )
         if err or df is None or df.empty:
             return {"text": f"❌ 读取表 '{tname}' 失败：{err}", "charts": []}
 
@@ -1627,6 +2586,8 @@ class DataToolsMixin:
             )
         )
         if not should_job:
+            if abort_check is not None:
+                abort_check()
             try:
                 return self._profile_dataframe(df, tname, columns)
             except Exception as exc:
@@ -1702,15 +2663,28 @@ class DataToolsMixin:
         min_val=None,
         max_val=None,
         output_table: str = "cleaned_data",
+        *,
+        timeout: float | None = None,
+        abort_check=None,
     ) -> str:
+        if abort_check is not None:
+            abort_check()
         if not self.data_source:
             return "❌ 请先连接数据源。"
 
-        tname = table_name or self._get_first_raw_table()
+        tname = table_name or self._get_first_raw_table(
+            timeout=timeout,
+            abort_check=abort_check,
+        )
         if not tname:
             return "❌ 数据源中没有可用的表格。"
 
-        df, err = self.data_source.execute_query(f'SELECT * FROM "{tname}"')
+        df, err = self._execute_source_query(
+            self.data_source,
+            f'SELECT * FROM "{tname}"',
+            timeout=timeout,
+            abort_check=abort_check,
+        )
         if err or df is None or df.empty:
             return f"❌ 读取表 '{tname}' 失败：{err}"
 
@@ -1723,8 +2697,15 @@ class DataToolsMixin:
             return f"❌ 清洗失败：{exc}"
 
         try:
-            self._write_analysis_df(cleaned_df, output_table)
+            self._write_analysis_df_with_budget(
+                cleaned_df,
+                output_table,
+                timeout=timeout,
+                abort_check=abort_check,
+            )
             self._schema_cache = None
+        except (JobCanceled, AgentRunTimeout):
+            raise
         except Exception as exc:
             return summary + f"\n\n⚠️ 结果表写入失败：{exc}"
 
@@ -1745,20 +2726,37 @@ class DataToolsMixin:
         min_val=None,
         max_val=None,
         output_table: str = "cleaned_data",
+        *,
+        timeout: float | None = None,
+        abort_check=None,
+        timeout_provider=None,
     ):
+        if abort_check is not None:
+            abort_check()
         if not self.data_source:
             return "❌ 请先连接数据源。"
 
-        tname = table_name or self._get_first_raw_table()
+        query_timeout = timeout_provider() if callable(timeout_provider) else timeout
+        tname = table_name or self._get_first_raw_table(
+            timeout=query_timeout,
+            abort_check=abort_check,
+        )
         if not tname:
             return "❌ 数据源中没有可用的表格。"
 
-        df, err = self.data_source.execute_query(f'SELECT * FROM "{tname}"')
+        df, err = self._execute_source_query(
+            self.data_source,
+            f'SELECT * FROM "{tname}"',
+            timeout=query_timeout,
+            abort_check=abort_check,
+        )
         if err or df is None or df.empty:
             return f"❌ 读取表 '{tname}' 失败：{err}"
 
         should_job = self._job_runner is not None and len(df) >= _CLEAN_JOB_ROW_THRESHOLD
         if not should_job:
+            if abort_check is not None:
+                abort_check()
             try:
                 cleaned_df, summary = self._clean_dataframe(
                     df, operation, columns, fill_method, lower_pct, upper_pct,
@@ -1819,9 +2817,17 @@ class DataToolsMixin:
             if cleaned_df is None:
                 return "❌ 清洗失败：后台结果不可用。"
 
+        write_timeout = timeout_provider() if callable(timeout_provider) else timeout
         try:
-            self._write_analysis_df(cleaned_df, output_table)
+            self._write_analysis_df_with_budget(
+                cleaned_df,
+                output_table,
+                timeout=write_timeout,
+                abort_check=abort_check,
+            )
             self._schema_cache = None
+        except (JobCanceled, AgentRunTimeout):
+            raise
         except Exception as exc:
             return summary + f"\n\n⚠️ 结果表写入失败：{exc}"
 

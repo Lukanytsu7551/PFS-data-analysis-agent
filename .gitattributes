@@ -1,0 +1,76 @@
+# Cross-platform text normalization for source and project text files.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+*.command text eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.iss text eol=lf
+*.spec text eol=lf
+.gitattributes text eol=lf
+*.py text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.jsx text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.sql text eol=lf
+*.txt text eol=lf
+*.svg text eol=lf
+LICENSE text eol=lf
+
+# Reviewed project metadata and offline fixtures have an explicit LF policy.
+/.dockerignore text eol=lf
+/.env.example text eol=lf
+/.gitignore text eol=lf
+/.impeccable.md text eol=lf
+/.prettierignore text eol=lf
+/.prettierrc.json text eol=lf
+/MCP/AtlasCloud/.gitignore text eol=lf
+/MCP/AtlasCloud/.npmignore text eol=lf
+/docs/Readme text eol=lf
+data/fixtures/** text eol=lf
+
+# Reference snapshots and runtime configuration are opaque: never normalize
+# or diff their contents. Clear eol explicitly after broad text rules above.
+Data-Analysis-Agent-main/** binary -eol
+data/datasource_config.json binary -eol
+LLM/llm_config.json binary -eol
+memory/** binary -eol
+uploads/** binary -eol
+outputs/** binary -eol
+*.db binary -eol
+*.sqlite binary -eol
+*.sqlite3 binary -eol
+*.duckdb binary -eol
+*.parquet binary -eol
+
+# Binary assets are kept opaque: no text conversion or textual diff.
+*.png binary -eol
+*.jpg binary -eol
+*.jpeg binary -eol
+*.gif binary -eol
+*.webp binary -eol
+*.ico binary -eol
+*.pdf binary -eol
+*.zip binary -eol
+*.gz binary -eol
+*.tar binary -eol
+*.wasm binary -eol
+*.woff binary -eol
+*.woff2 binary -eol
+*.ttf binary -eol
+*.otf binary -eol
+*.xlsx binary -eol
+*.xls binary -eol
+*.docx binary -eol
+*.pptx binary -eol

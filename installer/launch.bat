@@ -13,13 +13,16 @@ if errorlevel 1 (
 set "PACKAGED_EXE=%CD%\PFSDataAnalysisAgent.exe"
 title PFS Data Analysis Agent
 
-if exist "%PACKAGED_EXE%" (
-    echo [PFS][INFO] Starting the installed PFS Data Analysis Agent.
-    start "" "%PACKAGED_EXE%"
-    exit /b 0
-)
+if not exist "%PACKAGED_EXE%" goto :source_compat
+
+echo [PFS][INFO] Starting the installed PFS Data Analysis Agent.
+start "" /wait "%PACKAGED_EXE%"
+set "PACKAGED_EXIT_CODE=%ERRORLEVEL%"
+if not "%PACKAGED_EXIT_CODE%"=="0" echo [PFS][ERROR] Packaged PFS Data Analysis Agent exited with code %PACKAGED_EXIT_CODE%.
+exit /b %PACKAGED_EXIT_CODE%
 
 rem Source compatibility: support a copied launcher or this repository's installer directory.
+:source_compat
 set "SOURCE_ROOT=%CD%"
 if not exist "%SOURCE_ROOT%\app.py" if exist "%CD%\..\app.py" set "SOURCE_ROOT=%CD%\.."
 set "APP_FILE=%SOURCE_ROOT%\app.py"
@@ -36,9 +39,9 @@ if not exist "%VENV_PYTHON%" (
     goto :install_help
 )
 
-"%VENV_PYTHON%" --version >nul 2>&1
+"%VENV_PYTHON%" -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
 if errorlevel 1 (
-    echo [PFS][ERROR] The source Python executable cannot run: %VENV_PYTHON%
+    echo [PFS][ERROR] Python 3.10+ is required in the source virtual environment: %VENV_PYTHON%
     goto :install_help
 )
 

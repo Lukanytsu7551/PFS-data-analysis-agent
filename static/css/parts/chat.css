@@ -1548,6 +1548,14 @@ details.tool-audit {
 .skill-picker-copy small { color: var(--color-text-mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .skill-picker-source { color: var(--color-text-dim); font-size: var(--fs-2xs); }
 .skill-picker-empty { padding: 22px 10px; color: var(--color-text-mute); text-align: center; }
+.model-picker-empty { display: grid; justify-items: center; gap: 10px; padding: 20px 12px 16px; color: var(--color-text-mute); text-align: center; }
+.model-picker-empty p { margin: 0; }
+.model-picker-empty-action {
+  min-height: 34px; padding: 0 12px; border: 1px solid var(--color-border);
+  border-radius: 9px; background: var(--color-primary-soft); color: var(--color-primary);
+  font: inherit; font-size: var(--fs-xs); cursor: pointer;
+}
+.model-picker-empty-action:hover { border-color: var(--color-primary); }
 .composer-shell #msg-input {
   position: relative;
   z-index: 1;

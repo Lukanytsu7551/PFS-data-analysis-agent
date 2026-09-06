@@ -153,13 +153,34 @@ const pfs = () => globalThis.PFS;
     const list = $("model-picker-list");
     if (!list) return;
     const term = String(filter || "").trim().toLowerCase();
-    MODEL_PICKER.models = _availableModels().filter(item => !term
+    const availableModels = _availableModels();
+    MODEL_PICKER.models = availableModels.filter(item => !term
       || item.label.toLowerCase().includes(term)
       || item.description.toLowerCase().includes(term)
       || item.key.toLowerCase().includes(term));
     list.innerHTML = "";
     if (!MODEL_PICKER.models.length) {
-      list.innerHTML = `<div class="skill-picker-empty">${_esc(t("model_picker.empty") || "没有匹配的模型")}</div>`;
+      const empty = document.createElement("div");
+      empty.className = "model-picker-empty";
+
+      const message = document.createElement("p");
+      message.textContent = availableModels.length && term
+        ? (t("model_picker.empty") || "没有匹配的模型")
+        : (t("model_picker.empty_unconfigured") || "还没有已配置的模型");
+      empty.appendChild(message);
+
+      if (!availableModels.length) {
+        const manage = document.createElement("button");
+        manage.type = "button";
+        manage.className = "model-picker-empty-action";
+        manage.textContent = t("model_picker.configure") || "前往模型设置";
+        manage.addEventListener("click", () => {
+          closeModelPicker();
+          globalThis.openOverlay?.("ov-settings");
+        });
+        empty.appendChild(manage);
+      }
+      list.appendChild(empty);
       return;
     }
     const selected = $("model-sel")?.value || "";
@@ -593,8 +614,8 @@ const pfs = () => globalThis.PFS;
     const inputPriceRaw = f.inputPrice.trim();
     const outputPriceRaw = f.outputPrice.trim();
 
-    // 本地 provider（ollama 等）无需 API Key；其余 provider 必填
-    const isLocalProvider = key === "ollama" || _isLocalBaseUrl(baseUrl);
+    // 本地兼容端点无需 API Key；其余 provider 必填
+    const isLocalProvider = _isLocalBaseUrl(baseUrl);
     if (!apiKey && !isLocalProvider) {
       vs.setProviderStatus(key, "err", t('settings.api_key_empty'));
       return;

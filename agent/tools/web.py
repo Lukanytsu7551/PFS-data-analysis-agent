@@ -4,16 +4,21 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import socket
+import threading
+import time
 import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 from typing import Any
 
+from agent.errors import AgentRunTimeout
 from config.product_identity import PRODUCT_VERSION, SERVICE_ID
 
 
 _MAX_READ_BYTES = 768_000
+log = logging.getLogger(__name__)
 
 
 class _PageTextExtractor(HTMLParser):
@@ -61,8 +66,89 @@ class _PageTextExtractor(HTMLParser):
         return "\n".join(lines)
 
 
-def browse_webpage(url: str, *, max_chars: int = 12000, timeout: int = 20) -> str:
+def _run_bounded_fetch(
+    operation,
+    *,
+    timeout: float | None,
+    abort_check=None,
+):
+    """Run a blocking HTTP read while allowing the owner to close its response."""
+    if timeout is None and abort_check is None:
+        return operation(lambda _response: None)
+
+    state_lock = threading.Lock()
+    active_response = [None]
+    result: dict[str, Any] = {}
+
+    def set_active(response) -> None:
+        with state_lock:
+            active_response[0] = response
+
+    def clear_active() -> None:
+        with state_lock:
+            active_response[0] = None
+
+    def close_active() -> None:
+        with state_lock:
+            response = active_response[0]
+        close = getattr(response, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                log.debug("[web] response close during cancellation failed", exc_info=True)
+
+    def worker() -> None:
+        try:
+            result["value"] = operation(set_active)
+        except BaseException as exc:
+            result["error"] = exc
+        finally:
+            clear_active()
+
+    thread = threading.Thread(target=worker, name="pfs-web-fetch", daemon=True)
+    thread.start()
+    deadline = None if timeout is None else time.monotonic() + max(0.0, float(timeout))
+
+    def stop_fetch() -> None:
+        close_active()
+        thread.join(timeout=1.0)
+        if thread.is_alive():
+            log.warning("[web] fetch worker did not stop after response close")
+
+    while thread.is_alive():
+        try:
+            if abort_check is not None:
+                abort_check()
+        except BaseException:
+            stop_fetch()
+            raise
+        if deadline is not None and time.monotonic() >= deadline:
+            stop_fetch()
+            raise AgentRunTimeout
+        wait = 0.05
+        if deadline is not None:
+            wait = min(wait, max(0.001, deadline - time.monotonic()))
+        thread.join(timeout=wait)
+
+    error = result.get("error")
+    if error is not None:
+        raise error
+    if abort_check is not None:
+        abort_check()
+    return result.get("value")
+
+
+def browse_webpage(
+    url: str,
+    *,
+    max_chars: int = 12000,
+    timeout: float = 20,
+    abort_check=None,
+) -> str:
     """Fetch an HTTP(S) page and return bounded readable text."""
+    if abort_check is not None:
+        abort_check()
     clean_url = _validate_url(url)
     max_chars = max(1000, min(int(max_chars or 12000), 30000))
     request = urllib.request.Request(
@@ -72,14 +158,24 @@ def browse_webpage(url: str, *, max_chars: int = 12000, timeout: int = 20) -> st
             "Accept": "text/html,application/json,text/plain,*/*;q=0.8",
         },
     )
-    with urllib.request.urlopen(request, timeout=max(1, min(int(timeout or 20), 60))) as response:
-        content_type = str(response.headers.get("Content-Type") or "")
-        raw = response.read(_MAX_READ_BYTES + 1)
-        if len(raw) > _MAX_READ_BYTES:
-            raw = raw[:_MAX_READ_BYTES]
-        charset = response.headers.get_content_charset() or "utf-8"
-        text = raw.decode(charset, errors="replace")
-        status = getattr(response, "status", 200)
+    request_timeout = max(0.001, min(float(timeout or 20), 60.0))
+    def fetch_page(set_active):
+        with urllib.request.urlopen(request, timeout=request_timeout) as response:
+            set_active(response)
+            content_type = str(response.headers.get("Content-Type") or "")
+            raw = response.read(_MAX_READ_BYTES + 1)
+            if len(raw) > _MAX_READ_BYTES:
+                raw = raw[:_MAX_READ_BYTES]
+            charset = response.headers.get_content_charset() or "utf-8"
+            text = raw.decode(charset, errors="replace")
+            status = getattr(response, "status", 200)
+        return content_type, text, status
+
+    content_type, text, status = _run_bounded_fetch(
+        fetch_page,
+        timeout=request_timeout,
+        abort_check=abort_check,
+    )
 
     if "json" in content_type.lower():
         body = _format_json_text(text)

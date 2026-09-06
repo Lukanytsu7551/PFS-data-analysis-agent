@@ -2,10 +2,14 @@
 
 > 制定日期：2026-08-28  
 > 目标：保留并重新验证 Data-Analysis-Agent 的全部功能，同时完成 PFS 的独立产品身份、用户界面、内部标识、文档、安装和发布体系。  
-> 当前基线：CSV/XLSX + PFS 口径 + 轻量 Claim/Evidence/来源快照 + JSON/CSV + Excel/Word/PPT/Dashboard 桌面即时交付、会话 Artifact 历史、DeepSeek 单任务和 Docker 单容器已有分层本地证据；业务验收、模型预测质量、Workflow 恢复/幂等、Agent 派生表 raw/derived 生命周期和实现层 SQL 二次校验已有对应本地切片。Evidence Ledger 治理、Evidence 质量门、语义复算、人工审批/修订、SQLite Ledger 后端/迁移及治理 UI/API 已撤回，不属于当前运行基线；生产级事实核查、跨服务恢复、外部副作用幂等协议、安装包、部署和线上验收仍未完成。不要用百分比替代功能矩阵状态。
+> 当前基线：CSV/XLSX + PFS 口径 + 轻量 Claim/Evidence/来源快照 + JSON/CSV + Excel/Word/PPT/Dashboard 桌面即时交付、会话 Artifact 历史、DeepSeek 单任务、Docker 单容器和本机 Apple Silicon 未签名 macOS `.app`/`.dmg` 已有分层本地证据；业务验收、模型预测质量、Workflow 恢复/幂等、Agent 派生表 raw/derived 生命周期和实现层 SQL 二次校验已有对应本地切片。Evidence Ledger 治理、Evidence 质量门、语义复算、人工审批/修订、SQLite Ledger 后端/迁移及治理 UI/API 已撤回，不属于当前运行基线；生产级事实核查、跨服务恢复、外部副作用幂等协议、Windows/跨平台安装、签名公证、部署和线上验收仍未完成。不要用百分比替代功能矩阵状态。
 > 范围更新：当前产品只要求桌面端工作台。手机端适配、移动端完整分析流程和移动端下载不再纳入完成标准；已有 390×844 验收记录作为历史证据保留。
 > 2026-09-02 范围更新：商业画布和 Google Sheets 已决定退役并从代码、依赖和验收矩阵删除；Teams、Hooks、GPU/远程、飞书机器人和云端登录保留但暂不启用。
 > 2026-09-04 范围回滚：只撤销本轮新增的 Evidence 治理层；保留参考 Agent 原有的工具结果轻量持久化、PFS 的轻量 Claim/Evidence/来源快照、UI/品牌、确定性数据分析、业务验收、模型评估、交付物和任务/Artifact 历史。后文出现的 Ledger、质量门、语义复算、审批/修订和 SQLite Ledger 内容均按历史设计或后续候选理解，不代表当前已启用能力。
+
+> 2026-09-05 执行口径：本文是长期独立改造蓝图，不是当前四天发布待办。当前 P0、P1、验收证据和未完成项以 [`docs/HANDOFF.md`](HANDOFF.md) 为准；本轮只要求先收口可下载桌面源码和本地核心闭环，真实 MCP、Hooks、Microsoft Teams、飞书、云登录和线上部署按时间盒尝试，不将长期目标误报为已完成。
+
+> 2026-09-06 当前执行确认：本轮对外目标固定为 PFS 数据分析 Agent——面向报表和经营数据的本地智能分析工作台，支持自然语言分析、受控数据查询、图表生成、多格式报告交付和结果历史回看。保留全部目标数据分析与 Agent 能力，商业画布和 Google Sheets 为明确退役例外；Teams、Hooks、GPU/远程、飞书和云端登录保留扩展接口、默认关闭。四天顺序为：Day 1 范围/授权/文档/发布切片，Day 2 核心闭环与继承功能 smoke，Day 3 Windows/CI/发布候选，Day 4 README/Release/提交推送和下载回读。验收规则与状态分层以 [`docs/HANDOFF.md`](HANDOFF.md) 和功能兼容矩阵为准；未真实验证的能力不写成完成。
 
 ## 1. 完成目标如何判定
 
@@ -24,8 +28,8 @@
 
 - PFS 名称、产品图标、服务标识、启动脚本、部分安装和发布标识已建立。
 - PFS 主工作台与静态设计稿已经形成独立视觉方向。
-- 固定/上传 CSV/XLSX、基础分组统计、Metric Contract、轻量 Claim/Evidence/来源快照、JSON/CSV 与 Office/Dashboard 交付已完成第一段；参考 Agent 的工具结果留痕、Artifact 历史、业务验收、模型评估、幂等交付和本地跨进程取消注册表继续保留。Evidence Ledger、质量门、语义复算、审批/修订、SQLite Ledger 后端/迁移和治理 UI/API 已按当前范围撤回。
-- JSON/CSV 服务端重算下载和 Excel/Word/PPT/Dashboard 统一交付区已接入；固定报表的 Office 结构、HTTP 下载和 Dashboard 桌面打开已验证。
+- 固定/上传 CSV/XLSX、基础分组统计、Metric Contract、版本化指标目录、受限安全聚合、轻量 Claim/Evidence/来源快照、JSON/CSV 与 Office/Dashboard 交付已完成第一段；参考 Agent 的工具结果留痕、Artifact 历史、业务验收、模型评估、幂等交付和本地跨进程取消注册表继续保留。Evidence Ledger、质量门、语义复算、审批/修订、SQLite Ledger 后端/迁移和治理 UI/API 已按当前范围撤回。
+- JSON/CSV 服务端重算下载和 Excel/Word/PPT/Dashboard 统一交付区已接入；固定报表的 Office 结构、HTTP 下载和 Dashboard 桌面打开已验证。2026-09-05 当前固定 XLSX/Word/PPT 又经带系统字体配置的 LibreOffice headless PDF/PNG 渲染，中文标题、表头、结论和来源留痕可读；复杂内容、原生 Office 视觉和跨平台打开仍未完成。
 - DeepSeek 单任务、停止路径、Job 重启收口、Workflow 节点重试、工具/Token/费用硬上限已有对应本地证据；普通 Agent 的轮数、工具调用、Token 和运行时长已增加校验后的环境预算合同，并由 Agent/JobRunner 内部门禁执行；Workflow 图级 Token/费用/NodeRun guard 已有本地合同。
 - 第一段只读工具策略门和单元测试已存在；查询/建表后台路径已在工具实现层重复校验，派生表可追踪、可替换、可删除且原始表保护已有固定 CSV 回归。
 - `pnpm run build:chat`、`pnpm run build:check` 以及当前 PFS 测试基线已通过。
@@ -39,8 +43,9 @@
 - 真实模型驱动的多轮、复杂数据和长任务分析尚未验收。
 - 复杂 Excel、生产 SQL、外部 HTTP、飞书等真实数据连接尚未逐项验收。
 - 14 类分析和 41 个图表目前主要是固定夹具结果证据；P2 已完成 10 城经营组合、城市月度损益、用户—供给效率和月度需求预测四个匿名化业务验收场景，另补了分类/回归固定 holdout 预测质量评估合同，并将 Regression、Decision_Tree、Logistic_Regression、Sklearn_Model、Torch_MLP 和 ARIMA/SARIMA/VAR/Prophet/GRU 的实际输出接入统一 `analysis_evaluation` 表，分别覆盖质量阻断、利润桥接/同期同比、用户供给筛查、Evidence/Claim、人工复核、双低观察、重算下载、显式指标阈值、分类混淆矩阵、forecast 覆盖率边界和五类时间序列真实 temporal holdout；需求预测另有可配置滚动时间起点、窗口误差区间、月度自然月对齐、源表升序校验、训练→holdout 均值漂移、订单/GMV 列边际 KS 漂移、last-value 朴素基线 WAPE 改善和预测总量偏差护栏（可选 `max_total_delta_pct` / `max_holdout_orders_mean_shift_pct` / `max_holdout_orders_ks_distance` / `max_holdout_gmv_ks_distance` / `min_model_wape_lift_pct`，缺失时待确认）；时间切分入口要求显式训练截止点并在训练前缀上重拟合。尚未覆盖真实脱敏生产数据、跨场景联合分布漂移、其余分析模型、校准/公平性、生产预测质量或复杂图表视觉；Office 输出尚未完成复杂内容、原生应用视觉和跨平台核验。
-- 多轮 SSE、流中断重连/续传、跨服务工作流恢复、独立事实核查、团队、Hooks、Memory、Knowledge、MCP 等尚未完成生产级验证；报表分析的本地 SQLite 跨进程取消和崩溃 owner 回收已有切片，Workflow Run 的持久化 pause/resume、启动时未终态 Run 恢复、导出副作用幂等登记和副作用重放保护已补齐本地入口，普通 Agent 校验环境预算、Workflow 图级预算 guard、跨进程原子预算预留、未知价格 fail-closed、SSE 客户端断开收尾、轻量来源/结论展示和固定预测质量评估已完成本地切片，但尚未经过生产并发、真实业务语义/预测质量评测或跨服务恢复验收。Evidence 治理扩展不再作为当前未完成项推进。
+- 多轮 SSE、真实代理断线回读、任意 in-flight 模型/工具 turn 的无损续跑、跨服务工作流恢复、独立事实核查、团队、Hooks、Memory、Knowledge、MCP 等尚未完成生产级验证；聊天任务级事件回放和标准聊天断线后后台执行已有本地入口，按已消费游标回读公开事件，显式 stop 仍可取消 tracked turn。进程重启后的未终态聊天任务会安全 fail-closed 收口并返回稳定中断码；新增的本地恢复检查点只允许模型首轮安全前缀/已持久化 text delta 重建和显式只读工具恢复，写入、导出、外部、Teams/MCP/Hooks/finalizing 一律不自动重放。报表分析的本地 SQLite 跨进程取消和崩溃 owner 回收已有切片，Workflow Run 的持久化 pause/resume、启动时未终态 Run 恢复、导出副作用幂等登记和副作用重放保护已补齐本地入口，普通 Agent 校验环境预算、Workflow 图级预算 guard、跨进程原子预算预留、未知价格 fail-closed、SSE 客户端断开收尾、轻量来源/结论展示和固定预测质量评估已完成本地切片；知识预检、MCP/网页抓取、并行工具、同步 Hooks、Skills 自动匹配、看板 SQL 预取和 Excel/Word/PPT 交付已补齐本地 timeout/取消及临时发布边界，但尚未经过生产并发、真实业务语义/预测质量评测、真实外部连接、进程级故障恢复或跨服务恢复验收。Evidence 治理扩展不再作为当前未完成项推进。
 - 真实工作台与静态 `index.html` 仍是两套表面；还没有收敛成一个产品入口。
+- 2026-09-04 Agent 核心可靠性增量：JobsStore 为活动任务增加 owner lease/heartbeat 与过期巡检，第二个本地进程不会在有效租约内误收口，旧 worker 的迟到终态不能覆盖恢复后的状态，也不能追加迟到事件；Workflow 分发增加确定性 `operation_key`，同一 dispatch 不重复建 Job，已创建但尚未绑定的 Job 可按 key 重挂，旧 schema 先补列再建索引。该切片已通过恢复、幂等、迁移兼容和未绑定 Job 回归，边界仍是本地单主机/双存储交接，不等于跨服务队列、聊天无损续跑或外部副作用协议。
 - 内部仍有历史命名与兼容标识需要审计，例如前端全局命名空间、旧配置键、存储文件名和数据结构。
 - 本机尚无具体厂商 ODBC 驱动；内置流程图链路已有本地回归，但真实 MCP 连接仍待验证。
 - GitHub 私有仓库 `main` 已建立并接收当前 PFS 提交；尚未 deploy，也没有 PFS 线上验收证据。
@@ -240,7 +245,7 @@
 - Jobs、Workflows、Workflow Runs、审批、重试、恢复、取消和 fork；
 - Teams、受限委派和质量检查；
 - Hooks、生命周期清理、飞书机器人；
-- 业务画布、流程图、桌面能力和远程/GPU 能力。
+- 流程图、桌面能力和远程/GPU 能力；商业画布已按范围决策退役，不再作为兼容目标。
 
 ### 阶段验收标准
 
@@ -311,11 +316,27 @@
 
 ## 11. 推荐执行顺序与里程碑
 
+> 2026-09-05 最新本地可靠性复核：Queue/linked Job 终态一致性、completion pending→delivered 重试、旧队列表与旧 ChatStateStore schema 迁移、SQLite 初始化异常清理、Session close/get、remove 等待 runner 收尾后再关数据源、关闭期拒绝旧 JobRunner、heartbeat 线程 join、JobRunner 与 embedded sidecar 并发保护已通过本地回归；完整 Python 质量门为 484 项，严格可靠性专项为 77 项，真实聊天 worker 重启 8/8、独立进程竞争领取 8/8。该结果仍限于本地单机/共享卷，不代表多主机恢复、生产外部服务、Windows 实机或部署/live。
+
+> 2026-09-05 追加：模型目录的旧内置 provider 退役已从前端展示收口到后端公共目录、环境变量加载、会话选型、默认回退和模型测试接口；自定义 OpenAI-compatible 模型保留。7 个内置模型及 Coding Plan 已通过同一台本地 OpenAI-compatible fixture 的实际请求回归，但真实 Kimi/GLM/MiniMax（含 Coding Plan）请求与账单对账仍待验收；当时全量 Python 测试为 432 项（历史快照）。
+
+> 2026-09-05 后台任务增量：Compose 独立 Worker 已用本地 OpenAI-compatible fixture 完成成功流式聊天和一个 Agent Workflow 节点；异步 Memory 提取不再持有队列 handler 的临时 JobsStore，改用同一路径的独立 Runner，并通过临时 Runner 先关闭、Compose 成功对话和成功 Workflow 复核。该修复不扩展为真实供应商、外部副作用或多主机恢复。
+
+- 2026-09-04 当前修订：本轮已完成同一主机共享卷上的 durable queue、独立 worker、Job/queue lease-heartbeat、幂等 dispatch，以及聊天请求/来源/工作区快照和独立会话状态回写；独立 worker 进程完成聊天后，另一进程可读回 Job 终态和历史；又验证 worker 领取聊天任务后消失、租约过期后由新进程重挂并完成，并验证两个独立 worker 并发领取时只有一个获得任务租约；本机 Apple Silicon 未签名 macOS `.app`/`.dmg` 已通过 staging、冻结包审计和离线 smoke。队列默认关闭，当前仍待任意 in-flight 模型/工具 turn 的生产级无副作用续跑、多主机/复制存储、真实外部 MCP/Hooks/Teams/Feishu、生产外部副作用协议、Windows/跨平台安装、签名公证和部署/live 验收。全项目质量门为 430 项 Python 测试、前端格式/ESLint、Dashboard/Chat 构建、Ruff 和差异格式检查通过；本轮相关改动文件的 Ruff 格式检查通过，但全仓 `ruff format --check .` 仍有 292 个既有文件未格式化，未做无关的全仓重排。Teams 本地 mailbox、Hooks、飞书 Webhook、云端登录门禁与关闭态 API 休眠、GPU/远程安全边界、派生表删除 HTTP/审计/幂等、会话恢复和并发竞争、知识库结构化 Excel 无模型导入、DOCX/混合工作簿 fixture provider 提取、检索相关性/禁用过滤/Knowledge DATA ONLY 边界、飞书多维表格本地数据源/服务合同、版本化指标目录、受限安全聚合、通用报表重复行提示、自然语言 AVG 解析和扩展状态跨进程回读另有本地合同回归，但不代表真实外部/云端验收。
+
+- 2026-09-05 Agent 恢复边界增量：新增 server-only `chat_recovery_checkpoint`，在本地验证模型首轮安全前缀和已持久化 text delta 重建、显式内置只读工具 replay-safe 标记及保存调用参数后的直接工具续跑，以及写入/导出/外部/Teams/MCP/Hooks/finalizing 断点的 fail-closed；又用真实子进程退出和替代 worker 接管回归了安全前缀的跨进程消费；检查点不会进入浏览器回放。该切片不扩展为全部 in-flight 无损续跑、多主机/复制存储或真实外部服务验收。
+- 2026-09-05 发布与 Office 复核：基于当前工作树重新生成 496 文件 staging、macOS arm64 `.app`/`.dmg` 和 frozen smoke；固定 XLSX/Word/PPT 经本机 LibreOffice headless PDF/PNG 渲染，中文标题、表头、结论和来源留痕可读。该证据不扩展到复杂 Office 原生视觉、安装升级卸载、签名公证或跨平台。
+- 2026-09-05 Knowledge/Memory 复核：Ego 浏览器完成知识库规则/背景知识 CRUD 与启停、结构化三工作表 Excel 的无模型解析/预览/入库，以及设置→记忆的创建回显；两个独立进程可重新读取 Knowledge/Memory 状态。又使用本地 OpenAI-compatible fixture provider 完成 DOCX 的桌面选择、自由文本提取、预览和入库；混合检索相关性、禁用记录过滤和 Knowledge DATA ONLY 边界已补本地回归；真实供应商/生产文档、生产检索质量、复杂文档、生产数据和跨服务恢复仍未验收。
+
+- 2026-09-04 Agent Job/Workflow 交接阶段增量（已由上方当前修订覆盖）：早期切片完成了本地实现与专项验证，Job 排队态也由 heartbeat 保持租约，避免长队列被误回收；随后同一主机共享卷 durable queue、独立 worker、独立会话状态库和 worker 丢失后的聊天任务重挂已完成回归；当时完整质量门为 368 项，当前为 385 项 Python 测试及前端/静态检查通过。仍保留 fail-closed 边界，下一步需任意 in-flight 模型/工具 turn 的生产级无副作用续跑、真实脱敏业务数据、真实 provider/外部连接、多主机/复制存储恢复、生产外部副作用协议和部署/live 验收。
+
 - 2026-09-03 最新：需求预测场景已补订单与 GMV 的列边际 KS 距离、可选独立护栏、滚动窗口页面控件、last-value 朴素基线 WAPE 比较及可选改善下限，并完成页面/API/导出参数一致性回归；Workflow 导出节点又补本地 SQLite 幂等登记、内容冲突阻断和已完成 Artifact 复用，并完成重启后恢复回归；这只推进了当前场景的多指标边际漂移、可解释基线和单机导出副作用第一版，不改变真实脱敏数据、联合分布/生产语义、生产预测收益、外部副作用协议和跨服务恢复仍未完成的边界。
 
-现役顺序以 [`docs/HANDOFF.md`](HANDOFF.md) 第 5 节为准：P0 当前收口复核已完成本地质量门和 492 文件 staging 重建，但当前工作树仍未提交；远端 `origin/main` 已回读，尚不包含本轮工作树改动。P1/P2 当前保留确定性数据分析、业务验收、模型预测质量评估、普通 Agent/Workflow 预算与恢复、导出幂等、SSE 客户端断开收尾、Artifact 成本记录和轻量 Claim/Evidence/来源快照；本轮新增的 Claim–Evidence 治理关系核验、Evidence Ledger JSON/SQLite、质量门、语义复算、审批/修订和对应 UI/API 已撤回。下一步接入真实脱敏业务数据并验证生产语义/预测质量，再完成生产数据库与分布式恢复、外部副作用幂等协议、独立事实核查、原能力兼容复验、Office/安装包和部署/live 验收。
+现役顺序以 [`docs/HANDOFF.md`](HANDOFF.md) 第 5 节为准：P0 当前收口复核已完成本地质量门和 496 文件 staging 重建，但当前工作树仍未提交；远端 `origin/main` 已回读，尚不包含本轮工作树改动。P1/P2 当前保留确定性数据分析、业务验收、模型预测质量评估、普通 Agent/Workflow 预算与恢复、导出幂等、SSE 客户端断开收尾、聊天任务级事件回放、断开后后台执行、聊天重启安全失败收口、聊天安全恢复检查点、Agent Stop 取消传播、provider 请求 timeout、自动压缩 timeout/取消传播、父子剩余 deadline、知识库结构化 Excel 无模型导入、DOCX/混合工作簿 fixture provider 提取、Knowledge/Memory 跨进程状态回读、检索相关性/禁用过滤/Knowledge DATA ONLY 边界、Artifact 成本记录和轻量 Claim/Evidence/来源快照；本轮新增的 Claim–Evidence 治理关系核验、Evidence Ledger JSON/SQLite、质量门、语义复算、审批/修订和对应 UI/API 已撤回。下一步接入真实脱敏业务数据并验证生产语义/预测质量，再完成任意 in-flight turn 的生产级恢复、多主机/复制存储恢复、真实外部副作用幂等协议、独立事实核查、真实供应商/生产知识文档与检索质量、原能力兼容复验、复杂 Office/安装包验收和部署/live 验收。
 
 不再用主观百分比表达改造完成度；真正状态来自功能兼容矩阵的逐项证据。
+
+> 2026-09-06 发布切片覆盖：长期计划中早于本条的 484 项测试、496 文件 staging 等数字均保留为历史记录；当前发布复核以 `docs/HANDOFF.md` 和功能矩阵的 490 项测试、497 文件 staging、144 个工作区状态项为准。
 
 ## 12. 每轮改造的固定工作方式
 

@@ -66,7 +66,10 @@ const pfs = () => globalThis.PFS;
         </span>
         <span class="skill-picker-actions">
           <span class="skill-picker-source">${esc(sourceLabel(skill.source))}</span>
-          ${iconSpan("edit", { className: "skill-picker-view", size: 14 })}
+          <span class="skill-picker-view" data-skill-view="true" role="button" tabindex="0"
+                aria-label="查看或编辑 Skill">
+            ${iconSpan("edit", { className: "skill-picker-view-icon", size: 14 })}
+          </span>
         </span>`;
       button.addEventListener("click", (e) => {
         if (e.target.closest("[data-skill-view]")) {
@@ -76,6 +79,12 @@ const pfs = () => globalThis.PFS;
           return;
         }
         selectSkill(skill.name);
+      });
+      button.querySelector("[data-skill-view]")?.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        e.stopPropagation();
+        openSkillModal(skill.name);
       });
       list.appendChild(button);
     });
@@ -212,16 +221,21 @@ const pfs = () => globalThis.PFS;
     const deleteBtn = $("skill-delete-btn");
     msgEl.textContent = "";
 
-    // Move drawer inside sidebar-hub and position it at panel's right edge
-    const hub = document.getElementById("app-sidebar");
+    // Keep the editor in the document layer. The mobile-nav backdrop also
+    // occupies a top-level stacking context; nesting this drawer inside the
+    // sidebar makes its footer hit the backdrop instead of the save button.
     const panel = document.getElementById("sb-panel-skills");
-    if (hub && overlay.parentElement !== hub) {
-      hub.appendChild(overlay);
+    if (overlay && overlay.parentElement !== document.body) {
+      document.body.appendChild(overlay);
     }
-    // Dynamically set left to sidebar width + panel width (340px)
-    if (panel) {
-      const sidebarWidth = hub ? hub.querySelector(".sb-main")?.offsetWidth || 280 : 280;
-      overlay.style.left = (sidebarWidth + 340) + "px";
+    // On desktop, anchor the editor immediately after the active skills panel.
+    // On compact viewports, let the standalone drawer use its right edge.
+    overlay.style.left = "";
+    overlay.style.right = "";
+    if (!window.matchMedia?.("(max-width: 960px)").matches && panel) {
+      const panelRight = panel.getBoundingClientRect().right;
+      overlay.style.left = Math.round(panelRight) + "px";
+      overlay.style.right = "auto";
     }
 
     if (name) {
@@ -295,10 +309,11 @@ const pfs = () => globalThis.PFS;
     const overlay = $("skill-modal-overlay");
     overlay?.classList.add("hidden");
     _editingSkill = null;
-    // Move drawer back to body and clear inline style
-    if (overlay && overlay.parentElement !== document.body) {
+    // Clear desktop anchoring so the standalone drawer can be reused from any
+    // entry point or viewport size.
+    if (overlay) {
       overlay.style.left = "";
-      document.body.appendChild(overlay);
+      overlay.style.right = "";
     }
   }
 

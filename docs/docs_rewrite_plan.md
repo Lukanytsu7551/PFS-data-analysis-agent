@@ -19,12 +19,12 @@ PFS 是面向报表和经营数据的桌面端数据分析 Agent。系统采用 
 4. Tool Schema、Registry、Policy Gate、Executor 和 `ToolResultEnvelope` 共同构成工具运行合同。
 5. CSV、XLSX、SQL 和合并数据源统一实现 `DataSource` 接口。
 6. DuckDB/SQL 和 Python 分析函数负责确定性计算，模型不直接承担业务数值计算。
-7. Job、Run、Artifact、Claim、Evidence、Lineage 和 Audit 分别承载任务状态、交付物与可信治理。
+7. Job、Run、Artifact、Claim、Evidence 和 Audit 分别承载任务状态、交付物与轻量结果留痕；Evidence Ledger/Lineage 治理不属于当前运行链路。
 8. Skill、Command、MCP、Teams 和 Workflow 是可选扩展机制，不能与默认聊天主循环混为一谈。
 
 准确的技术定义如下：
 
-> PFS 是以 OpenAI-compatible LLM 为决策层、以受控 Tool Calling 为执行协议、以确定性数据计算为事实来源、以 Session/Run/Job 为运行状态、以 Artifact/Claim/Evidence/Lineage 为交付和治理载体，并通过 Flask/SSE 工作台向用户提供实时分析过程与结果的数据分析 Agent。
+> PFS 是以 OpenAI-compatible LLM 为决策层、以受控 Tool Calling 为执行协议、以确定性数据计算为事实来源、以 Session/Run/Job 为运行状态、以 Artifact/Claim/Evidence 为轻量交付留痕载体，并通过 Flask/SSE 工作台向用户提供实时分析过程与结果的数据分析 Agent。
 
 ## 2. 当前文档存在的问题
 
@@ -176,7 +176,7 @@ PFS 是面向报表和经营数据的桌面端数据分析 Agent。系统采用 
 5. 当前文档以通用“最小 Agent”示例占据较大篇幅，对 PFS 的工程建设顺序、模块边界和替换策略说明不足。
 6. 当前文档中的模型默认上下文值可能随配置变化；新文档应区分代码默认值、Provider 声明值和上游真实限制。
 7. 当前文档对 Memory 和 Knowledge 的边界已有提醒，但需要进一步区分会话历史、文件型长期记录、知识库检索和数据快照。
-8. 当前文档未集中说明商业画布和 Google Sheets 已退役，以及 Teams/Hooks/GPU/飞书/云登录默认休眠的产品边界。
+8. 商业画布和 Google Sheets 已退役，Teams/Hooks/GPU/飞书/云登录默认休眠的产品边界现已集中写入 `docs/HANDOFF.md`、`README.md` 和能力矩阵；本方案保留为已执行的文档重构记录。
 
 ## 10. 当前缺失但必须补充的技术内容
 

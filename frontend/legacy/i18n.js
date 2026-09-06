@@ -70,7 +70,8 @@
       "pfs_report.error_not_numeric": "请清理指标列中的文本或改选数值列。",
       "pfs_report.error_delivery_table": "当前数据源没有可交付的表，请重新选择有效工作表。",
       "pfs_report.error_file_too_large": "请压缩文件或拆分后再上传，单文件上限为 100 MB。",
-      "pfs_report.error_model_not_configured": "请先在模型设置中配置 DeepSeek 或其他可用模型，再运行 Agent。",
+      "pfs_report.error_model_not_configured":
+        "请先在模型设置中配置 DeepSeek 或其他可用模型，再运行 Agent。",
       "pfs_report.error_delivery_generation": "请检查输出目录权限后重试。",
       "pfs_report.error_delivery_ambiguous": "请先明确选择一个工作表，再生成交付物。",
       "pfs_report.value_column": "指标列",
@@ -167,6 +168,8 @@
       "model_picker.header": "选择模型",
       "model_picker.search": "搜索模型名称或 Model ID",
       "model_picker.empty": "没有匹配的模型",
+      "model_picker.empty_unconfigured": "还没有已配置的模型",
+      "model_picker.configure": "前往模型设置",
       "model_picker.manage": "管理模型",
       "skill_badge.clear": "移除技能",
       "composer.datasource": "添加或管理数据源",
@@ -222,8 +225,8 @@
       // ── Settings fields ──────────────────────────────────────────
       "settings.api_key": "API Key",
       "settings.api_key_ph": "sk-… 或留空清除",
-      "settings.api_key_local_ph": "本地模型无需 API Key，可留空",
-      "settings.local_no_key": "本地模型（如 Ollama）无需 API Key，可留空",
+      "settings.api_key_local_ph": "本地兼容模型无需 API Key，可留空",
+      "settings.local_no_key": "本地兼容模型无需 API Key，可留空",
       "settings.base_url": "Base URL",
       "settings.model": "Model",
       "settings.ctx_window": "上下文窗口",
@@ -411,6 +414,12 @@
       "job.status.succeeded": "已完成",
       "job.status.failed": "失败",
       "job.status.canceled": "已取消",
+      "job.restart_recovery":
+        "应用在本次对话完成前重启，本次对话未自动重放。可以点击“继续本次对话”恢复；系统不会重复调用模型或工具。",
+      "job.resume": "继续本次对话",
+      "job.resume_pending": "正在继续…",
+      "job.resume_failed": "继续对话失败",
+      "job.resume_unavailable": "当前页面不支持继续本次对话",
       "job.history.title": "任务历史",
       "job.history.summary": "共 {count} 个任务",
       "job.history.refresh": "刷新",
@@ -553,18 +562,27 @@
       "pfs_report.worksheet": "Worksheet",
       "pfs_report.worksheet_unavailable": "Unavailable",
       "pfs_report.error_worksheet_required": "Choose a worksheet, then run the analysis again.",
-      "pfs_report.error_worksheet_missing": "The worksheet changed. Refresh the source and choose it again.",
+      "pfs_report.error_worksheet_missing":
+        "The worksheet changed. Refresh the source and choose it again.",
       "pfs_report.error_header_missing": "Add complete, non-empty column names to the first row.",
       "pfs_report.error_no_rows": "Keep at least one valid data row below the header.",
-      "pfs_report.error_columns_missing": "Confirm that the metric, date, and group columns all exist in the source.",
-      "pfs_report.error_date_invalid": "Use YYYY-MM or YYYY-MM-DD consistently and correct invalid dates.",
-      "pfs_report.error_date_filter_invalid": "Check the date formats and make sure the start date is not after the end date.",
-      "pfs_report.error_not_numeric": "Clean text values from the metric column or select a numeric column.",
-      "pfs_report.error_delivery_table": "This source has no deliverable table. Select a valid worksheet and try again.",
-      "pfs_report.error_file_too_large": "Compress or split the file before uploading. The per-file limit is 100 MB.",
-      "pfs_report.error_model_not_configured": "Configure DeepSeek or another available model in Model Settings before running the Agent.",
+      "pfs_report.error_columns_missing":
+        "Confirm that the metric, date, and group columns all exist in the source.",
+      "pfs_report.error_date_invalid":
+        "Use YYYY-MM or YYYY-MM-DD consistently and correct invalid dates.",
+      "pfs_report.error_date_filter_invalid":
+        "Check the date formats and make sure the start date is not after the end date.",
+      "pfs_report.error_not_numeric":
+        "Clean text values from the metric column or select a numeric column.",
+      "pfs_report.error_delivery_table":
+        "This source has no deliverable table. Select a valid worksheet and try again.",
+      "pfs_report.error_file_too_large":
+        "Compress or split the file before uploading. The per-file limit is 100 MB.",
+      "pfs_report.error_model_not_configured":
+        "Configure DeepSeek or another available model in Model Settings before running the Agent.",
       "pfs_report.error_delivery_generation": "Check output-directory permissions and try again.",
-      "pfs_report.error_delivery_ambiguous": "Choose one worksheet explicitly before generating an artifact.",
+      "pfs_report.error_delivery_ambiguous":
+        "Choose one worksheet explicitly before generating an artifact.",
       "pfs_report.value_column": "Metric column",
       "pfs_report.date_column": "Date column",
       "pfs_report.dimension_column": "Group column",
@@ -586,7 +604,8 @@
       "pfs_report.completed": "Completed",
       "pfs_report.canceled": "Canceled",
       "pfs_report.cancel": "Cancel analysis",
-      "pfs_report.canceled_message": "Analysis canceled. No claims or evidence records were created.",
+      "pfs_report.canceled_message":
+        "Analysis canceled. No claims or evidence records were created.",
       "pfs_report.total": "Total sales",
       "pfs_report.coverage": "Data coverage",
       "pfs_report.rows": "Included rows",
@@ -662,6 +681,8 @@
       "model_picker.header": "Choose a model",
       "model_picker.search": "Search model name or model ID",
       "model_picker.empty": "No matching models",
+      "model_picker.empty_unconfigured": "No configured models yet",
+      "model_picker.configure": "Open model settings",
       "model_picker.manage": "Manage models",
       "skill_badge.clear": "Remove skill",
       "composer.datasource": "Add or manage data sources",
@@ -717,8 +738,8 @@
       // ── Settings fields ──────────────────────────────────────────
       "settings.api_key": "API Key",
       "settings.api_key_ph": "sk-… or leave blank to clear",
-      "settings.api_key_local_ph": "Local model needs no API key, leave blank",
-      "settings.local_no_key": "Local models (e.g. Ollama) need no API key — leave blank",
+      "settings.api_key_local_ph": "Local compatible models need no API key, leave blank",
+      "settings.local_no_key": "Local compatible models need no API key — leave blank",
       "settings.base_url": "Base URL",
       "settings.model": "Model",
       "settings.ctx_window": "Context Window",
@@ -911,6 +932,12 @@
       "job.status.succeeded": "Completed",
       "job.status.failed": "Failed",
       "job.status.canceled": "Canceled",
+      "job.restart_recovery":
+        "The app restarted before this conversation finished. It was not replayed. Click “Continue conversation” to resume; the model and tools will not be called twice.",
+      "job.resume": "Continue conversation",
+      "job.resume_pending": "Continuing…",
+      "job.resume_failed": "Could not continue conversation",
+      "job.resume_unavailable": "This page cannot continue the conversation",
       "job.history.title": "Job history",
       "job.history.summary": "{count} jobs",
       "job.history.refresh": "Refresh",

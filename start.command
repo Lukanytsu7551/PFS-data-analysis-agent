@@ -34,8 +34,8 @@ if [ ! -x "$VENV_PYTHON" ]; then
     exit 1
 fi
 
-if ! "$VENV_PYTHON" --version >/dev/null 2>&1; then
-    echo "[PFS][ERROR] The project Python executable cannot run: $VENV_PYTHON"
+if ! "$VENV_PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
+    echo "[PFS][ERROR] Python 3.10+ is required in the project virtual environment: $VENV_PYTHON"
     show_install_steps
     exit 1
 fi

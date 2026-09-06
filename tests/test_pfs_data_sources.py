@@ -27,7 +27,8 @@ class _FixtureHandler(BaseHTTPRequestHandler):
             status = 200
         elif self.path == "/sales.csv":
             payload = "region,sales\n华东,42000\n华南,28000\n".encode("utf-8")
-            content_type = "text/csv; charset=utf-8"
+            # Exercise the common API mistake: UTF-8 bytes with no declared charset.
+            content_type = "text/csv"
             status = 200
         elif self.path == "/empty.json":
             payload = b"[]"
@@ -140,6 +141,9 @@ class PfsDataSourceTests(unittest.TestCase):
         frame, error = csv_source.execute_query("SELECT COUNT(*) AS row_count FROM api_data")
         self.assertEqual("", error)
         self.assertEqual(2, int(frame.iloc[0]["row_count"]))
+        frame, error = csv_source.execute_query("SELECT region FROM api_data ORDER BY sales")
+        self.assertEqual("", error)
+        self.assertEqual(["华南", "华东"], frame["region"].tolist())
 
     def test_http_auth_header_is_sent_and_invalid_responses_fail_closed(self):
         HTTPAPIDataSource(

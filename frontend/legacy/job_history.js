@@ -36,6 +36,14 @@ async function cancelJob(jobId) {
   return data;
 }
 
+async function resumeJob(jobId) {
+  const resume = globalThis.PFS?.chatStream?.resumeConversationJob;
+  if (typeof resume !== "function") {
+    throw new Error(window.t?.("job.resume_unavailable") || "当前页面不支持继续本次对话");
+  }
+  return resume(jobId);
+}
+
 async function clearCompleted() {
   if (!sid) return;
   const accepted = await uiRegistry.confirm?.({
@@ -61,6 +69,7 @@ async function clearCompleted() {
 function callbacks() {
   return {
     onCancel: cancelJob,
+    onResume: resumeJob,
     onRefresh: refresh,
     onClearCompleted: clearCompleted,
     onArtifactDetail: loadArtifactDetail,
@@ -174,10 +183,7 @@ async function refresh() {
   vue.setLoading(true);
   vue.setError("");
   try {
-    const [jobs, artifacts] = await Promise.all([
-      fetchJobs(),
-      fetchRegisteredArtifacts(),
-    ]);
+    const [jobs, artifacts] = await Promise.all([fetchJobs(), fetchRegisteredArtifacts()]);
     vue.setJobs(jobs, callbacks());
     vue.setRegisteredArtifacts?.(artifacts);
     await replay();

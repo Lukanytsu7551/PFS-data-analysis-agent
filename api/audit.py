@@ -63,6 +63,9 @@ def get_session_audit(sid: str):
         lifecycle_events=(),
         usage_breakdowns=list(getattr(sess, "usage_breakdowns", []) or [])[-100:],
         command_metrics=list(getattr(sess, "command_metrics", []) or [])[-200:],
+        analysis_delete_operations=list(
+            getattr(sess, "analysis_delete_operations", []) or []
+        )[-100:],
         filters={
             "type": audit_type,
             "status": request.args.get("status") or "all",

@@ -74,6 +74,13 @@ def is_cloud_managed() -> bool:
     return cloud_login_enabled()
 
 
+def _cloud_login_gate():
+    """Keep the retained cloud-login API dormant in desktop mode."""
+    if not is_cloud_managed():
+        return jsonify({"error": "云端登录未启用"}), 404
+    return None
+
+
 def current_user() -> dict | None:
     """Return the authenticated user dict from the Flask session, or None."""
     uid = session.get("uid")
@@ -151,6 +158,9 @@ def login_page():
 
 @bp.post("/api/auth/send-code")
 def send_verification_code():
+    blocked = _cloud_login_gate()
+    if blocked:
+        return blocked
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
     if not email or "@" not in email:
@@ -178,6 +188,9 @@ def send_verification_code():
 
 @bp.post("/api/auth/register")
 def register():
+    blocked = _cloud_login_gate()
+    if blocked:
+        return blocked
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
     code = (data.get("code") or "").strip()
@@ -207,6 +220,9 @@ def register():
 
 @bp.post("/api/auth/login")
 def login():
+    blocked = _cloud_login_gate()
+    if blocked:
+        return blocked
     data = request.get_json(silent=True) or {}
     email = (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
@@ -224,12 +240,18 @@ def login():
 
 @bp.post("/api/auth/logout")
 def logout():
+    blocked = _cloud_login_gate()
+    if blocked:
+        return blocked
     session.clear()
     return jsonify({"ok": True})
 
 
 @bp.get("/api/auth/me")
 def me():
+    blocked = _cloud_login_gate()
+    if blocked:
+        return blocked
     user = current_user()
     if not user:
         return jsonify({"authenticated": False}), 401

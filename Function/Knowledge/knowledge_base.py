@@ -27,6 +27,7 @@ import os
 from infrastructure.compat import env
 import re
 from pathlib import Path
+from typing import Callable
 from infrastructure.compat import workspace_metadata_dir
 from infrastructure.paths import data_path
 import jieba
@@ -287,8 +288,15 @@ def _cosine(a: list[float], b: list[float]) -> float:
     """Cosine similarity (vectors are pre-normalized, so dot product suffices)."""
     return _neural_cosine(a, b)
 
-def _embed_query(text: str) -> list[float]:
-    return _neural_embed_query(text)
+def _embed_query(
+    text: str,
+    *,
+    timeout: float | None = None,
+    abort_check: Callable[[], None] | None = None,
+) -> list[float]:
+    return _neural_embed_query(
+        text, timeout=timeout, abort_check=abort_check,
+    )
 
 
 def _embedding_signature() -> str:
@@ -976,9 +984,12 @@ class KnowledgeBase:
         q_vec: list[float],
         limit: int,
         min_score: float = 0.0,
+        abort_check: Callable[[], None] | None = None,
     ) -> list[dict]:
         if not records:
             return []
+        if abort_check is not None:
+            abort_check()
         texts = [self._structured_text(entity_type, record) for record in records]
         embeddings = self._load_structured_embeddings(
             entity_type, records, _embedding_signature()
@@ -986,6 +997,8 @@ class KnowledgeBase:
 
         vec_ranked = []
         for record in records:
+            if abort_check is not None:
+                abort_check()
             embedding = embeddings.get(int(record["id"]))
             if embedding:
                 vec_ranked.append((_cosine(q_vec, embedding), record))
@@ -998,6 +1011,8 @@ class KnowledgeBase:
 
         lex_ranked = []
         for record, text in zip(records, texts):
+            if abort_check is not None:
+                abort_check()
             score = _text_match_score(query, text)
             lex_ranked.append((score, record))
         lex_ranked.sort(key=lambda item: -item[0])
@@ -1015,7 +1030,10 @@ class KnowledgeBase:
         limit: int = 5,
         min_score: float = MIN_CHUNK_SCORE,
         q_vec: list[float] | None = None,
+        abort_check: Callable[[], None] | None = None,
     ) -> list[dict]:
+        if abort_check is not None:
+            abort_check()
         q = question.strip()
         q_jieba = _jieba_tokenize(q)
         fts_rows: list[dict] = []
@@ -1049,11 +1067,13 @@ class KnowledgeBase:
                FROM rag_chunks
                WHERE enabled=1 AND category_id IN (SELECT id FROM knowledge_categories WHERE enabled=1)"""
         ))
+        if abort_check is not None:
+            abort_check()
         by_id = {r["id"]: r for r in all_rows}
         for r in fts_rows:
             by_id[r["id"]] = r
 
-        q_vec = q_vec or _embed_query(q)
+        q_vec = q_vec or _embed_query(q, abort_check=abort_check)
         # Channel 1: vector similarity
         vec_ranked: list[tuple[float, dict]] = []
         # Channel 2: lexical score
@@ -1063,7 +1083,9 @@ class KnowledgeBase:
 
         fts_ids = {r["id"] for r in fts_rows}
 
-        for row in by_id.values():
+        for index, row in enumerate(by_id.values()):
+            if abort_check is not None and index % 16 == 0:
+                abort_check()
             try:
                 emb = (
                     json.loads(row.get("embedding") or "[]")
@@ -1106,12 +1128,27 @@ class KnowledgeBase:
 
     # ── search (only enabled records) ─────────────────────────────────────────
 
-    def search(self, question: str, limit: int = 5) -> dict[str, list[dict]]:
+    def search(
+        self,
+        question: str,
+        limit: int = 5,
+        *,
+        timeout: float | None = None,
+        abort_check: Callable[[], None] | None = None,
+    ) -> dict[str, list[dict]]:
         """Hybrid RAG search with a global Top-K cap across all result types."""
+        if abort_check is not None:
+            abort_check()
         q = question.strip()
         limit = max(1, min(int(limit or 5), 10))
 
-        q_vec = _embed_query(q)
+        q_vec = _embed_query(
+            q,
+            timeout=timeout,
+            abort_check=abort_check,
+        )
+        if abort_check is not None:
+            abort_check()
 
         # Vector fallback for structured records.  This complements SQLite FTS,
         # especially for Chinese wording variations where tokenization is weak.
@@ -1132,6 +1169,7 @@ class KnowledgeBase:
             q_vec,
             limit,
             min_score=MIN_STRUCTURED_SCORE,
+            abort_check=abort_check,
         )
 
         note_rows = self._vector_rank_records(
@@ -1141,6 +1179,7 @@ class KnowledgeBase:
             q_vec,
             limit,
             min_score=MIN_STRUCTURED_SCORE,
+            abort_check=abort_check,
         )
 
         rule_rows = self._vector_rank_records(
@@ -1150,9 +1189,16 @@ class KnowledgeBase:
             q_vec,
             limit,
             min_score=MIN_STRUCTURED_SCORE,
+            abort_check=abort_check,
         )
 
-        chunk_rows = self._search_chunks(q, limit=limit, min_score=MIN_CHUNK_SCORE, q_vec=q_vec)
+        chunk_rows = self._search_chunks(
+            q,
+            limit=limit,
+            min_score=MIN_CHUNK_SCORE,
+            q_vec=q_vec,
+            abort_check=abort_check,
+        )
 
         ranked: list[tuple[float, str, dict]] = []
         for kind, rows in (

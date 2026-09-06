@@ -1,0 +1,48 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pfs-data-analysis-agent:compose
+    ports:
+      - "${PFS_COMPOSE_BIND:-127.0.0.1}:${PFS_COMPOSE_PORT:-5001}:5001"
+    environment:
+      PFS_HOST: "0.0.0.0"
+      PFS_PORT: "5001"
+      PFS_DATA_DIR: "/var/lib/pfs"
+      PFS_ENABLE_DURABLE_QUEUE: "1"
+      PFS_DURABLE_QUEUE_ROLE: "api"
+      PFS_DURABLE_QUEUE_DB_PATH: "/var/lib/pfs/durable-queue.db"
+      PFS_JOBS_DB_PATH: "/var/lib/pfs/jobs.db"
+      PFS_CHAT_STATE_DB_PATH: "/var/lib/pfs/chat-state.db"
+    volumes:
+      - pfs-data:/var/lib/pfs
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5001/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  worker:
+    image: pfs-data-analysis-agent:compose
+    command: ["python", "-u", "scripts/durable_queue_worker.py"]
+    environment:
+      PFS_DATA_DIR: "/var/lib/pfs"
+      PFS_ENABLE_DURABLE_QUEUE: "1"
+      PFS_DURABLE_QUEUE_ROLE: "worker"
+      PFS_DURABLE_QUEUE_DB_PATH: "/var/lib/pfs/durable-queue.db"
+      PFS_JOBS_DB_PATH: "/var/lib/pfs/jobs.db"
+      PFS_CHAT_STATE_DB_PATH: "/var/lib/pfs/chat-state.db"
+      PFS_QUEUE_WORKER_ID: "compose-worker"
+    volumes:
+      - pfs-data:/var/lib/pfs
+    # The worker does not expose the API port inherited by the image.
+    healthcheck:
+      disable: true
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  pfs-data:

@@ -93,6 +93,81 @@ class PfsReportingTests(unittest.TestCase):
         self.assertEqual("华东", result.groups[0]["dimension"])
         self.assertEqual(14000, result.groups[0]["value"])
 
+    def test_duplicate_rows_are_reported_without_automatic_deduplication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "duplicate-sales.csv"
+            path.write_text(
+                "month,region,sales_amount\n2026-01,华东,1200\n2026-01,华东,1200\n2026-02,华南,800\n",
+                encoding="utf-8",
+            )
+            result = analyze_file(path, metric=METRIC, request=self._request("duplicate-rows"))
+
+        self.assertEqual(1, result.snapshot.duplicate_rows)
+        self.assertEqual(3200, result.total)
+        self.assertTrue(any("检测到 1 条完全重复记录" in warning for warning in result.warnings))
+        self.assertTrue(any("系统未自动去重" in warning for warning in result.warnings))
+
+    def test_metric_formula_executes_only_supported_deterministic_aggregates(self):
+        average_metric = MetricContract(
+            metric_id="sales_amount_avg",
+            label="平均销售额",
+            formula="AVG(sales_amount)",
+            value_column="sales_amount",
+            date_column="month",
+            dimension="region",
+        )
+        average = analyze_csv(
+            FIXTURE,
+            metric=average_metric,
+            request=AnalysisRequest(
+                run_id="run-average",
+                metric_id="sales_amount_avg",
+                dimension="region",
+            ),
+        )
+        self.assertAlmostEqual(100000 / 9, average.total)
+        self.assertEqual(14000, average.groups[0]["value"])
+
+        distinct_metric = MetricContract(
+            metric_id="product_count",
+            label="商品数",
+            formula="COUNT_DISTINCT(product)",
+            value_column="product",
+            date_column="month",
+            dimension="region",
+        )
+        distinct = analyze_csv(
+            FIXTURE,
+            metric=distinct_metric,
+            request=AnalysisRequest(
+                run_id="run-distinct",
+                metric_id="product_count",
+                dimension="region",
+            ),
+        )
+        self.assertEqual(3, distinct.total)
+        self.assertEqual(2, distinct.groups[0]["value"])
+
+        unsupported = MetricContract(
+            metric_id="ratio",
+            label="比率",
+            formula="SUM(sales_amount) / SUM(product)",
+            value_column="sales_amount",
+            date_column="month",
+            dimension="region",
+        )
+        with self.assertRaisesRegex(ReportingContractError, "metric formula") as error:
+            analyze_csv(
+                FIXTURE,
+                metric=unsupported,
+                request=AnalysisRequest(
+                    run_id="run-unsupported-formula",
+                    metric_id="ratio",
+                    dimension="region",
+                ),
+            )
+        self.assertEqual("metric_formula_unsupported", error.exception.code)
+
     @unittest.skipUnless(__import__("importlib.util").util.find_spec("openpyxl"), "openpyxl is not installed")
     def test_xlsx_uses_the_same_metric_and_evidence_contract(self):
         from openpyxl import Workbook

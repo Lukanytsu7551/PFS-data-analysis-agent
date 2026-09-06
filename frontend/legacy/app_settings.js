@@ -1073,8 +1073,8 @@ const pfs = () => globalThis.PFS;
       ollama ? Vue.h("div", { class: "gpu-ollama-row" }, [
         Vue.h("span", { class: "gpu-dot " + (ollama.online ? "online" : "offline") }),
         ollama.online
-          ? "本地 Ollama：在线 · " + (ollama.models || []).length + " 个模型"
-          : "本地 Ollama：未运行（可安装 Ollama 后在 LLM 模型 tab 填写模型名）",
+          ? "本地推理服务：在线 · " + (ollama.models || []).length + " 个模型"
+          : "本地推理服务：未运行（启动服务后可在自定义模型中填写兼容接口）",
       ]) : null,
       Vue.h("div", { class: "gpu-remote-section" }, [
         Vue.h("div", { class: "gpu-remote-head" }, [
@@ -1602,7 +1602,7 @@ const pfs = () => globalThis.PFS;
     if (!p) return;
     var f = p.fields;
     var apiKey = f.apiKey.trim();
-    var isLocalProvider = key === "ollama" || _llmIsLocalUrl(f.baseUrl);
+    var isLocalProvider = _llmIsLocalUrl(f.baseUrl);
     if (!apiKey && !isLocalProvider) {
       _llmSetProviderMsg(key, "err", "请输入 API Key");
       return;

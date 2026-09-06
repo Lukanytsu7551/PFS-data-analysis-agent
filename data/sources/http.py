@@ -3,6 +3,7 @@
 """HTTPAPIDataSource — JSON/CSV REST endpoint → DataFrame → DuckDB."""
 import io
 import logging
+import re
 from typing import List, Tuple
 
 import pandas as pd
@@ -15,6 +16,41 @@ from ._utils import (
 from .base import DataSource
 
 log = logging.getLogger(__name__)
+
+
+def _decode_response_text(resp: requests.Response) -> str:
+    """Decode an HTTP body without losing UTF-8 data from charset-less APIs.
+
+    Requests defaults many ``text/*`` responses without an explicit charset to
+    ISO-8859-1.  That is a safe historical default for HTTP, but it turns
+    otherwise valid UTF-8 CSV data (especially Chinese business labels) into
+    mojibake.  An explicitly declared charset remains authoritative; when it
+    is absent, prefer the formats commonly emitted by JSON/CSV APIs.
+    """
+    content_type = resp.headers.get("Content-Type", "")
+    charset_match = re.search(r"(?:^|;)\s*charset\s*=\s*([^;\s]+)", content_type, re.I)
+    if charset_match:
+        encoding = charset_match.group(1).strip("\"'")
+        try:
+            return resp.content.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            log.warning("Unable to decode HTTP response with declared charset %s", encoding)
+            return resp.text
+
+    for encoding in ("utf-8-sig", "utf-8"):
+        try:
+            return resp.content.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+
+    for encoding in (getattr(resp, "apparent_encoding", None), resp.encoding, "latin-1"):
+        if not encoding:
+            continue
+        try:
+            return resp.content.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return resp.content.decode("utf-8", errors="replace")
 
 
 def _flatten_json(data) -> pd.DataFrame:
@@ -56,10 +92,10 @@ class HTTPAPIDataSource(DataSource):
         resp = requests.get(self._url, headers=self._build_headers(), timeout=30)
         resp.raise_for_status()
         content_type = resp.headers.get("Content-Type", "")
-        text = resp.text.strip()
+        text = _decode_response_text(resp).strip()
         if "csv" in content_type or (not text.startswith(("{", "["))):
             try:
-                df = pd.read_csv(io.StringIO(resp.text))
+                df = pd.read_csv(io.StringIO(text))
             except Exception:
                 df = _flatten_json(resp.json())
         else:

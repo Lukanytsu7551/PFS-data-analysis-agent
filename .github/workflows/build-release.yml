@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Package version without v prefix, for example 1.0.0"
+        description: "Package version without v prefix, for example 0.1.0"
         required: false
-        default: "1.2.0"
+        default: "0.1.0"
   push:
     tags:
       - "v*"
@@ -51,13 +51,117 @@ jobs:
             python -m pip install -r requirements.txt
           fi
           python -m pip install -r requirements-build.txt
+          python -m pip install ruff==0.16.5
       - name: Compile runtime sources
         shell: bash
         run: python -m compileall -q agent api data app.py
+      - name: Run Python regression suite
+        shell: bash
+        run: PYTHONDONTWRITEBYTECODE=1 python -B -m unittest discover -s tests -p 'test_*.py' -q
+      - name: Run Ruff checks
+        shell: bash
+        run: python -m ruff check .
+
+  frontend-quality:
+    name: Frontend quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check frontend formatting
+        run: pnpm run format:check
+      - name: Run frontend lint
+        run: pnpm run lint
+      - name: Build frontend bundles
+        run: pnpm run build:check
+
+  release-preflight:
+    name: Release source preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check launchers and source staging
+        shell: bash
+        run: |
+          bash -n install.sh start.command
+          test -f LICENSE
+          staging="$RUNNER_TEMP/pfs-release-staging"
+          manifest="$RUNNER_TEMP/pfs-release-manifest.json"
+          report="$RUNNER_TEMP/pfs-release-audit.json"
+          python packaging/build_manifest.py \
+            --source . \
+            --destination "$staging" \
+            --manifest "$manifest"
+          python packaging/audit_artifact.py "$staging" --report "$report"
+          python - "$manifest" "$report" <<'PY'
+          import json
+          import sys
+
+          manifest = json.loads(open(sys.argv[1], encoding="utf-8").read())
+          report = json.loads(open(sys.argv[2], encoding="utf-8").read())
+          if not report.get("ok"):
+              raise SystemExit("release staging audit failed")
+          if not manifest.get("file_count"):
+              raise SystemExit("release staging is empty")
+          print(
+              "release staging:",
+              manifest["file_count"],
+              "files /",
+              manifest["total_bytes"],
+              "bytes",
+          )
+          PY
+
+  windows-clean-install:
+    name: Windows clean source install
+    needs: [test, frontend-quality, release-preflight]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Run installer against a clean local clone
+        shell: pwsh
+        env:
+          PFS_REPO_URL: ${{ github.workspace }}
+          PFS_INSTALL_ROOT: ${{ runner.temp }}\pfs-install-root
+          PFS_PROJECT_NAME: pfs-clean-install
+          PFS_LAUNCHER_PATH: ${{ runner.temp }}\pfs-clean-install.bat
+        run: |
+          & powershell.exe -ExecutionPolicy Bypass -File .\install.ps1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Windows clean installer failed."
+          }
+          $project = Join-Path $env:PFS_INSTALL_ROOT $env:PFS_PROJECT_NAME
+          $python = Join-Path $project ".venv\Scripts\python.exe"
+          if (-not (Test-Path -LiteralPath $python)) {
+            throw "Clean install did not create its virtual environment."
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $project "app.py"))) {
+            throw "Clean install did not contain app.py."
+          }
+          if (-not (Test-Path -LiteralPath $env:PFS_LAUNCHER_PATH)) {
+            throw "Clean install did not create its launcher."
+          }
+          & $python -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'
 
   build-windows:
     name: Build Windows installer
-    needs: test
+    needs: [test, frontend-quality]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,10 +184,13 @@ jobs:
           cache: pip
       - name: Resolve package version
         shell: pwsh
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          $version = "${{ github.event.inputs.version || '' }}"
+          $version = $env:DISPATCH_VERSION
           if (-not $version) {
-            $version = "${{ github.ref_name }}" -replace '^v', ''
+            $version = $env:REF_NAME -replace '^v', ''
           }
           if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$') {
             throw "Invalid package version: $version"
@@ -120,7 +227,7 @@ jobs:
 
   build-macos:
     name: Build macOS DMG (${{ matrix.name }})
-    needs: test
+    needs: [test, frontend-quality]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -162,10 +269,14 @@ jobs:
           test -f "$(brew --prefix unixodbc)/lib/libodbc.2.dylib"
       - name: Resolve package version
         shell: bash
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          version="${{ github.event.inputs.version || '' }}"
+          version="${DISPATCH_VERSION:-}"
           if [ -z "$version" ]; then
-            version="${GITHUB_REF_NAME#v}"
+            ref_name="${REF_NAME:-}"
+            version="${ref_name#v}"
           fi
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid package version: $version" >&2
@@ -199,7 +310,7 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: [build-windows, build-macos]
+    needs: [build-windows, build-macos, windows-clean-install, release-preflight]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -210,19 +321,27 @@ jobs:
           path: release-artifacts
       - name: Resolve release tag
         shell: bash
+        env:
+          DISPATCH_VERSION: ${{ github.event.inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           # dispatch 输入 "1.0.0" → 拼 "v1.0.0";tag push 直接用 ref_name
-          version="${{ github.event.inputs.version || '' }}"
+          version="${DISPATCH_VERSION:-}"
           if [ -n "$version" ]; then
-            tag="v${version#v}"
+            normalized_version="${version#v}"
+            if [[ ! "$normalized_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+              echo "Invalid package version: $version" >&2
+              exit 2
+            fi
+            tag="v$normalized_version"
             draft_flag="--draft"
           else
-            tag="${GITHUB_REF_NAME}"
+            tag="${REF_NAME:-}"
+            if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+              echo "Invalid release tag: $tag" >&2
+              exit 2
+            fi
             draft_flag=""
-          fi
-          if [ -z "$tag" ] || [ "$tag" = "main" ]; then
-            echo "Cannot resolve release tag (tag='$tag')" >&2
-            exit 2
           fi
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
           echo "DRAFT_FLAG=$draft_flag" >> "$GITHUB_ENV"
@@ -247,11 +366,23 @@ jobs:
             echo "$forbidden" >&2
             exit 2
           fi
+      - name: Verify final public license
+        shell: bash
+        run: |
+          if grep -Fq "No public license has been selected" LICENSE; then
+            echo "A final public LICENSE is required before creating a Release." >&2
+            exit 2
+          fi
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.sha }}
         shell: bash
         run: |
+          if [[ ! "$TARGET_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "Invalid release target: $TARGET_SHA" >&2
+            exit 2
+          fi
           rm -rf release-upload
           mkdir -p release-upload
           while IFS= read -r file; do
@@ -277,7 +408,12 @@ jobs:
             echo "No release files found." >&2
             exit 2
           fi
-          notes="Unsigned PFS Data Analysis Agent desktop test packages. The Windows package is not code-signed; the macOS packages are not code-signed or notarized. Do not treat these artifacts as signed or notarized releases."
+          (
+            cd release-upload
+            sha256sum *.exe *.dmg > SHA256SUMS.txt
+          )
+          files+=(release-upload/SHA256SUMS.txt)
+          notes="Unsigned PFS Data Analysis Agent desktop test packages. The Windows package is not code-signed; the macOS packages are not code-signed or notarized. SHA256SUMS.txt is included for download verification. Do not treat these artifacts as signed or notarized releases."
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release edit "$RELEASE_TAG" \
               --title "$RELEASE_TAG" \
@@ -292,6 +428,6 @@ jobs:
           else
             gh release create "$RELEASE_TAG" "${files[@]}" $DRAFT_FLAG \
               --title "$RELEASE_TAG" \
-              --target ${{ github.sha }} \
+              --target "$TARGET_SHA" \
               --notes "$notes"
           fi

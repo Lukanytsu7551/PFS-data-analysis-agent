@@ -1,6 +1,7 @@
 import json
 import shutil
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -31,7 +32,7 @@ class PfsExportArtifactTests(unittest.TestCase):
         result = self.agent._tool_export_excel(["pfs_sales"], "pfs_sales_export")
         self.assertIn("/api/export/", result)
         from openpyxl import load_workbook
-        path = Path(self.tmp.name) / "pfs_sales_export.xlsx"
+        path = self.tmp / "pfs_sales_export.xlsx"
         workbook = load_workbook(path, read_only=True, data_only=True)
         self.assertEqual(workbook.sheetnames, ["pfs_sales"])
         rows = list(workbook["pfs_sales"].iter_rows(values_only=True))
@@ -52,6 +53,12 @@ class PfsExportArtifactTests(unittest.TestCase):
         self.assertIn("PFS 销售分析报告", text)
         self.assertIn("核心结论", text)
         self.assertIn("华东销售额最高", text)
+        docx_path = next(self.tmp.glob("*.docx"))
+        with zipfile.ZipFile(docx_path) as archive:
+            document_xml = archive.read("word/document.xml").decode("utf-8")
+            styles_xml = archive.read("word/styles.xml").decode("utf-8")
+        self.assertIn('w:eastAsia="Hiragino Sans"', document_xml)
+        self.assertIn('w:eastAsia="Hiragino Sans"', styles_xml)
 
     def test_ppt_is_parseable(self):
         result = self.agent._tool_generate_ppt(
@@ -70,6 +77,9 @@ class PfsExportArtifactTests(unittest.TestCase):
         self.assertEqual(len(presentation.slides), 2)
         texts = " ".join(shape.text for slide in presentation.slides for shape in slide.shapes if hasattr(shape, "text"))
         self.assertIn("PFS 销售分析", texts)
+        with zipfile.ZipFile(files[0]) as archive:
+            slide_xml = archive.read("ppt/slides/slide1.xml").decode("utf-8")
+        self.assertIn('typeface="Hiragino Sans"', slide_xml)
 
     def test_dashboard_html_export_is_pfs_branded(self):
         import api.dashboard as dashboard_module

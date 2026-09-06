@@ -9,7 +9,7 @@
 #     ruff check .
 #     ruff format --check .
 #
-# CI uses the same commands (see .github/workflows/test.yml).
+# CI uses the same commands (see .github/workflows/build-release.yml).
 
 [tool.ruff]
 target-version = "py310"

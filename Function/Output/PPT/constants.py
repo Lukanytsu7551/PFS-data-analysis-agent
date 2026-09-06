@@ -79,4 +79,8 @@ FOOTNOTE_SIZE      = Pt(9)
 
 FONT_HEADER = 'Georgia'
 FONT_BODY   = 'Arial'
-FONT_EA     = 'KaiTi'
+# KaiTi is not available in the supported macOS runtime and caused CJK text
+# to render as tofu in LibreOffice.  Keep Latin typography unchanged while
+# declaring an installed macOS CJK face for East Asian runs; Office on other
+# platforms may still apply its normal font fallback when this face is absent.
+FONT_EA     = 'Hiragino Sans'

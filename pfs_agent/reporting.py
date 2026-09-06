@@ -27,6 +27,41 @@ class ReportingContractError(ValueError):
 
 
 _DATE_PATTERNS = (re.compile(r"^\d{4}-\d{2}$"), re.compile(r"^\d{4}-\d{2}-\d{2}(?:[ T].*)?$"))
+_METRIC_FORMULA_PATTERN = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)\s*$", re.DOTALL)
+SUPPORTED_METRIC_AGGREGATIONS = frozenset({"SUM", "AVG", "COUNT", "COUNT_DISTINCT"})
+
+
+def parse_metric_formula(metric: "MetricContract") -> tuple[str, str]:
+    """Parse the intentionally small executable formula grammar.
+
+    Formula text is never evaluated as Python or SQL.  Only one aggregate
+    over the contract's declared value column is accepted, so the display
+    formula and the deterministic calculation cannot silently diverge.
+    """
+    match = _METRIC_FORMULA_PATTERN.fullmatch(str(metric.formula or ""))
+    if not match:
+        raise ReportingContractError(
+            "metric formula must be AGGREGATE(value_column)",
+            code="metric_formula_unsupported",
+        )
+    aggregation = match.group(1).upper()
+    operand = match.group(2).strip()
+    if aggregation not in SUPPORTED_METRIC_AGGREGATIONS:
+        raise ReportingContractError(
+            "metric formula aggregate must be one of SUM, AVG, COUNT, COUNT_DISTINCT",
+            code="metric_formula_unsupported",
+        )
+    if not operand or "(" in operand or ")" in operand:
+        raise ReportingContractError(
+            "metric formula must contain one aggregate over one column",
+            code="metric_formula_unsupported",
+        )
+    if operand != metric.value_column:
+        raise ReportingContractError(
+            "metric formula column must match value_column",
+            code="metric_formula_column_mismatch",
+        )
+    return aggregation, operand
 
 
 def _date_key(value: str, *, code: str) -> tuple[int, int, int]:
@@ -412,7 +447,7 @@ def analyze_snapshot(
     metric: MetricContract,
     request: AnalysisRequest,
 ) -> AnalysisResult:
-    """Apply the deterministic grouped SUM contract to a loaded snapshot."""
+    """Apply the deterministic single-column aggregate contract to a snapshot."""
     return _analyze_snapshot(snapshot, metric=metric, request=request)
 
 
@@ -424,7 +459,7 @@ def analyze_csv(
     source_id: str = "fixture",
     file_name: str = "",
 ) -> AnalysisResult:
-    """Run the first deterministic PFS report analysis: grouped SUM."""
+    """Run a deterministic PFS report analysis over a CSV source."""
     if request.metric_id != metric.metric_id:
         raise ReportingContractError("request metric_id does not match metric contract")
     if request.dimension != metric.dimension:
@@ -468,6 +503,7 @@ def _analyze_snapshot(
         raise ReportingContractError("request metric_id does not match metric contract")
     if request.dimension != metric.dimension:
         raise ReportingContractError("request dimension does not match metric contract")
+    aggregation, _value_column = parse_metric_formula(metric)
     missing_columns = {
         metric.value_column,
         metric.date_column,
@@ -480,8 +516,16 @@ def _analyze_snapshot(
         )
 
     buckets: dict[str, Decimal] = {}
-    total = Decimal("0")
+    bucket_counts: dict[str, int] = {}
+    bucket_distinct: dict[str, set[str]] = {}
+    total_sum = Decimal("0")
+    total_count = 0
+    total_distinct: set[str] = set()
     warnings: list[str] = []
+    if snapshot.duplicate_rows:
+        warnings.append(
+            f"检测到 {snapshot.duplicate_rows} 条完全重复记录，系统未自动去重，汇总结果可能被放大。"
+        )
     included_rows = 0
     for row in snapshot.rows:
         date_value = row.get(metric.date_column, "")
@@ -498,26 +542,61 @@ def _analyze_snapshot(
         if not dimension_value or not raw_value:
             warnings.append("存在缺少分组字段或指标值的行，已从本次汇总排除。")
             continue
-        try:
-            amount = Decimal(raw_value)
-        except InvalidOperation as exc:
-            raise ReportingContractError(
-                f"metric value is not numeric: {raw_value!r}",
-                code="metric_value_not_numeric",
-            ) from exc
-        buckets[dimension_value] = buckets.get(dimension_value, Decimal("0")) + amount
-        total += amount
+        if aggregation in {"SUM", "AVG"}:
+            try:
+                amount = Decimal(raw_value)
+            except InvalidOperation as exc:
+                raise ReportingContractError(
+                    f"metric value is not numeric: {raw_value!r}",
+                    code="metric_value_not_numeric",
+                ) from exc
+            if not amount.is_finite():
+                raise ReportingContractError(
+                    f"metric value is not finite: {raw_value!r}",
+                    code="metric_value_not_finite",
+                )
+            buckets[dimension_value] = buckets.get(dimension_value, Decimal("0")) + amount
+            total_sum += amount
+            if aggregation == "AVG":
+                bucket_counts[dimension_value] = bucket_counts.get(dimension_value, 0) + 1
+                total_count += 1
+        elif aggregation == "COUNT":
+            bucket_counts[dimension_value] = bucket_counts.get(dimension_value, 0) + 1
+            total_count += 1
+        else:
+            bucket_distinct.setdefault(dimension_value, set()).add(raw_value)
+            total_distinct.add(raw_value)
         included_rows += 1
 
     def _number(value: Decimal) -> int | float:
         return int(value) if value == value.to_integral_value() else float(value)
 
+    def _aggregate_group(name: str) -> Decimal | int:
+        if aggregation == "SUM":
+            return buckets.get(name, Decimal("0"))
+        if aggregation == "AVG":
+            count = bucket_counts.get(name, 0)
+            return buckets.get(name, Decimal("0")) / count if count else Decimal("0")
+        if aggregation == "COUNT":
+            return bucket_counts.get(name, 0)
+        return len(bucket_distinct.get(name, set()))
+
+    group_names = set(buckets) | set(bucket_counts) | set(bucket_distinct)
+    group_values = {name: _aggregate_group(name) for name in group_names}
     groups = tuple(
-        {"dimension": name, "value": _number(value), "rank": rank}
+        {"dimension": name, "value": _number(Decimal(value)), "rank": rank}
         for rank, (name, value) in enumerate(
-            sorted(buckets.items(), key=lambda item: (-item[1], item[0])), start=1
+            sorted(group_values.items(), key=lambda item: (-item[1], item[0])), start=1
         )
     )
+    if aggregation == "SUM":
+        total_value: Decimal | int = total_sum
+    elif aggregation == "AVG":
+        total_value = total_sum / total_count if total_count else Decimal("0")
+    elif aggregation == "COUNT":
+        total_value = total_count
+    else:
+        total_value = len(total_distinct)
     evidence_text = (
         f"{snapshot.file_name} · sha256:{snapshot.content_sha256[:16]} · "
         f"worksheet:{snapshot.worksheet or '-'} · "
@@ -544,7 +623,7 @@ def _analyze_snapshot(
     claims = [
         {
             "claim_id": "cl_" + hashlib.sha256(f"{request.run_id}:total".encode("utf-8")).hexdigest()[:16],
-            "text": f"{metric.label}合计为 {total}",
+            "text": f"{metric.label}合计为 {total_value}",
             "status": "supported" if included_rows else "unverified",
             "confidence": 1.0 if included_rows else 0.0,
             "evidence_ids": [evidence_id],
@@ -568,7 +647,7 @@ def _analyze_snapshot(
         metric=metric,
         request=request,
         snapshot=snapshot,
-        total=_number(total),
+        total=_number(Decimal(total_value)),
         groups=groups,
         claims=tuple(claims),
         evidence=(evidence,),

@@ -61,6 +61,9 @@ export function mountJobHistoryUi() {
       progress: Number(job.progress) || 0,
       message: job.message || "",
       error: job.error || "",
+      errorCode: job.error_code || "",
+      recoveryAction: job.recovery_action || "",
+      resumeAvailable: Boolean(job.resume_available),
       result: job.result || null,
       activation: job.activation || job.result?.activation || null,
       workspace: job.workspace || null,
@@ -151,6 +154,9 @@ export function mountJobHistoryUi() {
     } else if (ev.type === "job_error") {
       job.status = ev.status || "failed";
       job.error = ev.error || "Job failed";
+      job.errorCode = ev.error_code || "";
+      job.recoveryAction = ev.recovery_action || "";
+      job.resumeAvailable = Boolean(ev.resume_available);
       job.cancelPending = false;
     } else if (ev.type === "job_canceled") {
       job.status = ev.status || "canceled";
@@ -398,6 +404,13 @@ export function mountJobHistoryUi() {
     const progress = Math.max(0, Math.min(100, Number(job.progress) || 0));
     const title = job.label || job.type || text("job.default_label", "Background job");
     const isConversation = job.type === "conversation_analysis";
+    const canResume =
+      isConversation &&
+      job.status === "failed" &&
+      job.errorCode === "job_interrupted_after_restart" &&
+      job.resumeAvailable &&
+      typeof callbacks.onResume === "function" &&
+      !job.resumePending;
     const answer = typeof job.result === "object" ? job.result?.answer || "" : "";
     const detailCount = job.steps.length || Number(job.result?.step_count) || 0;
     const activation = job.activation || job.result?.activation;
@@ -467,7 +480,16 @@ export function mountJobHistoryUi() {
         ]),
       );
     }
-    if (job.error) children.push(h("div", { class: "job-error" }, job.error));
+    if (job.error) {
+      const errorText =
+        job.errorCode === "job_interrupted_after_restart"
+          ? text(
+              "job.restart_recovery",
+              "应用在本次任务完成前重启，本次任务未自动重放。可以点击“继续本次对话”恢复。",
+            )
+          : job.error;
+      children.push(h("div", { class: "job-error" }, errorText));
+    }
     if (isConversation && (job.steps.length || answer)) {
       children.push(
         h(
@@ -523,6 +545,32 @@ export function mountJobHistoryUi() {
             },
           },
           text("job.cancel", "Cancel"),
+        ),
+      );
+    }
+    if (canResume) {
+      children.push(
+        h(
+          "button",
+          {
+            class: "job-resume-btn",
+            type: "button",
+            onClick: async () => {
+              if (!callbacks.onResume || job.resumePending) return;
+              job.resumePending = true;
+              draw();
+              try {
+                await callbacks.onResume(job.id);
+              } catch (error) {
+                job.resumePending = false;
+                job.error = error?.message || text("job.resume_failed", "继续对话失败");
+                draw();
+              }
+            },
+          },
+          job.resumePending
+            ? text("job.resume_pending", "正在继续…")
+            : text("job.resume", "继续本次对话"),
         ),
       );
     }

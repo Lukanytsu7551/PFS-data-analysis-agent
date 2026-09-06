@@ -103,7 +103,12 @@ class WorkflowRuntime:
         provider = str(getattr(self.session, "model_provider", "") or "").strip()
         if not provider:
             provider = str(manager.get_default_provider() or "").strip()
-        config = manager.get_config(provider) if provider else None
+        selectable = getattr(manager, "is_selectable_provider", None)
+        config = (
+            manager.get_config(provider)
+            if provider and (selectable(provider) if callable(selectable) else True)
+            else None
+        )
         model = str(getattr(config, "model", "") or "").strip()
         profile_id = str(node.get("agent_profile_id") or "").strip()
         profile = self.workflow_store.get_agent_profile(profile_id) if profile_id else None

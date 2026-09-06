@@ -23,7 +23,7 @@ import os
 import pathlib
 import re as _re
 import urllib.request
-from typing import Sequence
+from typing import Callable, Sequence
 from urllib.parse import urlsplit
 
 import numpy as np
@@ -138,14 +138,21 @@ def _cloud_is_candidate() -> bool:
     return bool(_CLOUD_TOKEN and _CLOUD_URL) and _cloud_available is not False
 
 
-def _try_cloud_batch(texts: Sequence[str]) -> list[list[float]] | None:
+def _try_cloud_batch(
+    texts: Sequence[str], *, timeout: float | None = None,
+    abort_check: Callable[[], None] | None = None,
+) -> list[list[float]] | None:
     global _cloud_available
+    if abort_check is not None:
+        abort_check()
     if not _cloud_is_candidate():
         return None
     try:
-        vectors = _cloud_embed_batch(texts)
+        vectors = _cloud_embed_batch(texts, timeout=timeout)
         if len(vectors) != len(texts) or any(len(vector) != _CLOUD_DIM for vector in vectors):
             raise ValueError("cloud embedding response dimension mismatch")
+        if abort_check is not None:
+            abort_check()
         _cloud_available = True
         dim = len(vectors[0]) if vectors else 0
         log.info(
@@ -158,19 +165,38 @@ def _try_cloud_batch(texts: Sequence[str]) -> list[list[float]] | None:
         )
         return vectors
     except Exception as exc:
+        # A cloud/network failure may legitimately fall back to the local/hash
+        # backend, but cancellation and the parent Agent deadline must never be
+        # downgraded into a successful fallback result.
+        if abort_check is not None:
+            abort_check()
         _cloud_available = False
         log.info("[neural_embedder] cloud unavailable (%s), falling back", exc)
         return None
 
 
-def embed(text: str) -> list[float]:
+def embed(
+    text: str,
+    *,
+    timeout: float | None = None,
+    abort_check: Callable[[], None] | None = None,
+) -> list[float]:
     """Embed one text without a separate cloud probe request."""
+    if abort_check is not None:
+        abort_check()
     if _embed_mode in ("auto", "cloud"):
-        vectors = _try_cloud_batch([text])
+        if abort_check is None:
+            vectors = _try_cloud_batch([text], timeout=timeout)
+        else:
+            vectors = _try_cloud_batch(
+                [text], timeout=timeout, abort_check=abort_check,
+            )
         if vectors is not None:
             return vectors[0]
     if _embed_mode in ("auto", "local") and _init_neural():
         vector = _neural_embed(text)
+        if abort_check is not None:
+            abort_check()
         log.info(
             "[neural_embedder] embed backend=local mode=%s model=%s count=1 dim=%d",
             _embed_mode,
@@ -185,19 +211,35 @@ def embed(text: str) -> list[float]:
         "Hash projection",
         len(vector),
     )
+    if abort_check is not None:
+        abort_check()
     return vector
 
 
-def embed_batch(texts: Sequence[str]) -> list[list[float]]:
+def embed_batch(
+    texts: Sequence[str],
+    *,
+    timeout: float | None = None,
+    abort_check: Callable[[], None] | None = None,
+) -> list[list[float]]:
     """Embed multiple texts in one cloud or local batch."""
+    if abort_check is not None:
+        abort_check()
     if not texts:
         return []
     if _embed_mode in ("auto", "cloud"):
-        vectors = _try_cloud_batch(texts)
+        if abort_check is None:
+            vectors = _try_cloud_batch(texts, timeout=timeout)
+        else:
+            vectors = _try_cloud_batch(
+                texts, timeout=timeout, abort_check=abort_check,
+            )
         if vectors is not None:
             return vectors
     if _embed_mode in ("auto", "local") and _init_neural():
         vectors = _neural_embed_batch(texts)
+        if abort_check is not None:
+            abort_check()
         dim = len(vectors[0]) if vectors else 0
         log.info(
             "[neural_embedder] embed backend=local mode=%s model=%s count=%d dim=%d",
@@ -216,6 +258,8 @@ def embed_batch(texts: Sequence[str]) -> list[list[float]]:
         len(texts),
         dim,
     )
+    if abort_check is not None:
+        abort_check()
     return vectors
 
 
@@ -225,8 +269,15 @@ def get_embedding_signature() -> str:
     return f"{info['active']}:{info['model']}:{info['dim']}"
 
 
-def embed_query(text: str) -> list[float]:
+def embed_query(
+    text: str,
+    *,
+    timeout: float | None = None,
+    abort_check: Callable[[], None] | None = None,
+) -> list[float]:
     """Embed a user query once per active model and reuse it across retrievers."""
+    if abort_check is not None:
+        abort_check()
     normalized = str(text or "").strip()
     key = (
         get_embedding_signature(),
@@ -235,7 +286,14 @@ def embed_query(text: str) -> list[float]:
     cached = _query_embedding_cache.get(key)
     if cached is not None:
         return cached
-    vector = embed(normalized)
+    if abort_check is None:
+        vector = embed(normalized, timeout=timeout)
+    else:
+        vector = embed(
+            normalized,
+            timeout=timeout,
+            abort_check=abort_check,
+        )
     if len(_query_embedding_cache) >= 128:
         _query_embedding_cache.pop(next(iter(_query_embedding_cache)))
     _query_embedding_cache[key] = vector
@@ -446,7 +504,12 @@ def _cloud_embed_batch(texts, timeout: float | None = None):
             "User-Agent": _CLOUD_UA,
         },
     )
-    resp = urllib.request.urlopen(req, timeout=timeout or _CLOUD_TIMEOUT)
+    request_timeout = (
+        _CLOUD_TIMEOUT
+        if timeout is None
+        else max(0.001, float(timeout))
+    )
+    resp = urllib.request.urlopen(req, timeout=request_timeout)
     data = json.loads(resp.read().decode("utf-8"))
     return [d["embedding"] for d in data["data"]]
 

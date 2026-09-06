@@ -29,11 +29,21 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --version)
-      VERSION="${2:-}"
+      if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == -* ]]; then
+        echo "Option --version requires a value." >&2
+        usage >&2
+        exit 2
+      fi
+      VERSION="$2"
       shift 2
       ;;
     --work-root)
-      WORK_ROOT="${2:-}"
+      if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == -* ]]; then
+        echo "Option --work-root requires a value." >&2
+        usage >&2
+        exit 2
+      fi
+      WORK_ROOT="$2"
       shift 2
       ;;
     --prepare-only)
@@ -56,20 +66,34 @@ if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
   echo "Version must look like 1.2.3 or 1.2.3-test.1" >&2
   exit 2
 fi
-
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "macOS packages must be built on a native macOS runner." >&2
   exit 2
 fi
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+if [[ -n "${PFS_BUILD_PYTHON:-}" ]]; then
+  PYTHON_BIN="$PFS_BUILD_PYTHON"
+elif [[ -x "$PROJECT_ROOT/.venv/bin/python" ]]; then
+  PYTHON_BIN="$PROJECT_ROOT/.venv/bin/python"
+else
+  PYTHON_BIN="$(command -v python3 || true)"
+fi
+if [[ -z "$PYTHON_BIN" || ! -x "$PYTHON_BIN" ]]; then
+  echo "A Python executable with the build dependencies is required; set PFS_BUILD_PYTHON if needed." >&2
+  exit 2
+fi
+if ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
+  echo "Python 3.10+ is required." >&2
+  exit 2
+fi
 BUILD_ROOT="$PROJECT_ROOT/build"
 if [[ -z "$WORK_ROOT" ]]; then
   WORK_ROOT="$BUILD_ROOT/macos-package"
 fi
 mkdir -p "$BUILD_ROOT"
-WORK_ROOT="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$WORK_ROOT")"
-BUILD_ROOT_REAL="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$BUILD_ROOT")"
+WORK_ROOT="$("$PYTHON_BIN" -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$WORK_ROOT")"
+BUILD_ROOT_REAL="$("$PYTHON_BIN" -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$BUILD_ROOT")"
 case "$WORK_ROOT" in
   "$BUILD_ROOT_REAL"/*) ;;
   *)
@@ -89,16 +113,16 @@ DMG_OUTPUT="$WORK_ROOT/dmg"
 REPORTS="$WORK_ROOT/reports"
 mkdir -p "$REPORTS" "$DMG_OUTPUT"
 
-python3 "$PROJECT_ROOT/packaging/build_manifest.py" \
+"$PYTHON_BIN" "$PROJECT_ROOT/packaging/build_manifest.py" \
   --source "$PROJECT_ROOT" \
   --destination "$STAGING" \
   --manifest "$REPORTS/staging-manifest.json"
-python3 "$PROJECT_ROOT/packaging/audit_artifact.py" \
+"$PYTHON_BIN" "$PROJECT_ROOT/packaging/audit_artifact.py" \
   "$STAGING" \
   --report "$REPORTS/staging-audit.json"
 
 export PFS_STAGING_ROOT="$STAGING"
-python3 -m PyInstaller --clean --noconfirm \
+PFS_PRODUCT_VERSION="$VERSION" "$PYTHON_BIN" -m PyInstaller --clean --noconfirm \
   --distpath "$PYI_DIST" \
   --workpath "$PYI_WORK" \
   "$PROJECT_ROOT/packaging/pfs_data_analysis_agent.spec"
@@ -107,7 +131,7 @@ if [[ ! -d "$APP" ]]; then
   echo "PyInstaller did not produce the expected app bundle: $APP" >&2
   exit 2
 fi
-python3 "$PROJECT_ROOT/packaging/audit_artifact.py" \
+"$PYTHON_BIN" "$PROJECT_ROOT/packaging/audit_artifact.py" \
   "$APP" \
   --allow-contained-symlinks \
   --report "$REPORTS/app-audit.json"
@@ -122,7 +146,7 @@ if [[ ! -f "$SMOKE_REPORT" ]]; then
   echo "Frozen self-test did not create its report." >&2
   exit 2
 fi
-python3 - "$SMOKE_REPORT" <<'PY'
+"$PYTHON_BIN" - "$SMOKE_REPORT" <<'PY'
 import json
 import sys
 report = json.loads(open(sys.argv[1], encoding="utf-8").read())
@@ -148,7 +172,7 @@ DMG="$DMG_OUTPUT/$DMG_NAME"
 
 mkdir -p "$DMG_ROOT"
 ditto "$APP" "$DMG_ROOT/PFS Data Analysis Agent.app"
-python3 "$PROJECT_ROOT/packaging/audit_artifact.py" \
+"$PYTHON_BIN" "$PROJECT_ROOT/packaging/audit_artifact.py" \
   "$DMG_ROOT" \
   --allow-contained-symlinks \
   --report "$REPORTS/dmg-root-audit.json"
@@ -182,12 +206,12 @@ create_dmg() {
 }
 
 create_dmg
-python3 "$PROJECT_ROOT/packaging/audit_artifact.py" \
+"$PYTHON_BIN" "$PROJECT_ROOT/packaging/audit_artifact.py" \
   "$DMG" \
   --report "$REPORTS/dmg-audit.json"
 
 SHA256="$(shasum -a 256 "$DMG" | awk '{print $1}')"
-python3 - "$REPORTS/release.json" "$VERSION" "macos-$ARCH" "$DMG_NAME" "$DMG" "$SHA256" <<'PY'
+"$PYTHON_BIN" - "$REPORTS/release.json" "$VERSION" "macos-$ARCH" "$DMG_NAME" "$DMG" "$SHA256" <<'PY'
 import json
 import pathlib
 import sys

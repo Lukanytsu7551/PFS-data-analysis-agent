@@ -1,8 +1,9 @@
 # 报表数据分析 Agent：研究与验证台账
 
 > 文档日期：2026-09-01
-> 当前状态：PFS 源码边界、产品身份、只读策略门、固定/上传 CSV/XLSX 报表分析、多工作表显式选择、受限自然语言报表问题路由、JSON/CSV 下载、Excel/Word/PPT/Dashboard 统一交付区、动态 Evidence/Claim 登记与回链、会话统一审计、本地真实 HTTP/桌面浏览器回读和报表核验状态摘要已实现；完整功能迁移仍在进行
+> 当前状态（历史台账）：PFS 源码边界、产品身份、只读策略门、固定/上传 CSV/XLSX 报表分析、多工作表显式选择、受限自然语言报表问题路由、JSON/CSV 下载、Excel/Word/PPT/Dashboard 统一交付区、轻量 Claim/Evidence 来源留痕、会话统一审计、本地真实 HTTP/桌面浏览器回读和报表核验状态摘要已记录；本文件不用于判断当前发布是否完成
 > 现役交接、发布状态和剩余改造顺序以 [`docs/HANDOFF.md`](docs/HANDOFF.md) 为准。本文保留研究取证、分阶段验证和历史边界，不作为第二份现役待办。
+> 2026-09-05 口径提醒：本文是历史验证台账；当前四天交付范围、状态和验收门槛只看 `docs/HANDOFF.md`。本文中出现的旧 Evidence 治理、商业画布或 Google Sheets 条目保留作历史，不代表当前产品入口或运行能力。
 > 2026-08-30 范围决策：PFS 当前只交付桌面端工作台；手机端适配、移动端完整分析流程和移动端下载不再作为完成条件。此前已经完成的 390×844 验收仅作为历史质量证据保留。
 
 完整独立改造路线见：[PFS_FULL_TRANSFORMATION_PLAN.md](/Users/yangxuan/Desktop/实习/报表数据分析agent/docs/PFS_FULL_TRANSFORMATION_PLAN.md)。9 天改造与框架原理路线见：[FRAMEWORK_9_DAY_PLAN.md](/Users/yangxuan/Desktop/实习/报表数据分析agent/FRAMEWORK_9_DAY_PLAN.md)。第 2 天工具调用规则见：[DAY2_TOOL_POLICY.md](/Users/yangxuan/Desktop/实习/报表数据分析agent/DAY2_TOOL_POLICY.md)，本轮实现见 `/Users/yangxuan/Desktop/实习/报表数据分析agent/pfs_agent/`。
