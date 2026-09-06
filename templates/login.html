@@ -7,15 +7,16 @@
   <link rel="icon" href="{{ url_for('static', filename=product_icon) }}">
   <style>
     :root{
-      --pfs-ink:oklch(25% .035 166);
-      --pfs-ink-deep:oklch(19% .035 166);
-      --pfs-paper:oklch(94% .018 86);
-      --pfs-paper-light:oklch(98% .012 92);
-      --pfs-rule:oklch(83% .025 84);
-      --pfs-muted:oklch(74% .025 105);
-      --pfs-brass:oklch(64% .12 75);
-      --pfs-brass-bright:oklch(76% .14 75);
-      --pfs-error:oklch(73% .12 37);
+      --pfs-ink:#10366f;
+      --pfs-ink-deep:#0a2857;
+      --pfs-paper:#f4f8fd;
+      --pfs-paper-light:#ffffff;
+      --pfs-rule:#d7e4f2;
+      --pfs-muted:#a9bddb;
+      --pfs-blue:#2f6fe4;
+      --pfs-blue-bright:#79a6ff;
+      --pfs-primary:#2f6fe4;
+      --pfs-error:#ff9b9d;
       --pfs-radius:12px;
       --pfs-ease:cubic-bezier(.16,1,.3,1);
     }
@@ -36,7 +37,7 @@
       border:1px solid color-mix(in oklab,var(--pfs-rule) 56%,transparent);
     }
     body::before{inset:20px 12px 20px 12px;border-left:0;border-right:0}
-    body::after{width:18px;height:18px;right:28px;top:28px;border-radius:50%;border-color:var(--pfs-brass)}
+    body::after{width:18px;height:18px;right:28px;top:28px;border-radius:50%;border-color:var(--pfs-blue)}
     .login-card{
       width:400px;max-width:100%;
       position:relative;z-index:1;
@@ -44,7 +45,7 @@
       background:var(--pfs-ink);
       border:1px solid color-mix(in oklab,var(--pfs-paper-light) 14%,transparent);
       border-radius:var(--pfs-radius);
-      box-shadow:0 22px 54px oklch(25% .035 166 / .20),0 2px 0 var(--pfs-brass);
+      box-shadow:0 22px 54px rgba(16,54,111,.20),0 2px 0 var(--pfs-blue);
     }
     .login-card::before{
       content:"PFS / PRIVATE ANALYTICS WORKSPACE";
@@ -54,7 +55,7 @@
     }
     .login-mark{
       width:58px;height:58px;object-fit:contain;display:block;margin:0 auto 14px;
-      border-radius:15px;box-shadow:0 8px 18px oklch(10% .02 164 / .32);
+      border-radius:15px;box-shadow:0 8px 18px rgba(10,40,87,.32);
     }
     .login-logo{
       width:auto;height:auto;box-shadow:none;border-radius:0;
@@ -62,7 +63,7 @@
       line-height:1.15;letter-spacing:-.025em;text-align:center;margin:0 0 8px;
     }
     .login-subtitle{text-align:center;font-size:13px;line-height:1.6;color:var(--pfs-muted);margin-bottom:28px}
-    .login-subtitle a{color:var(--pfs-brass-bright);text-decoration:none;font-weight:650}
+    .login-subtitle a{color:var(--pfs-blue-bright);text-decoration:none;font-weight:650}
     .form-group{margin-bottom:16px}
     .form-label{display:block;margin-bottom:7px;color:color-mix(in oklab,var(--pfs-paper-light) 78%,var(--pfs-muted));font-size:12px;font-weight:600;letter-spacing:.02em}
     .form-input{
@@ -73,7 +74,7 @@
     }
     .form-input::placeholder{color:color-mix(in oklab,var(--pfs-muted) 82%,var(--pfs-ink))}
     .form-input:hover{border-color:color-mix(in oklab,var(--pfs-paper-light) 28%,transparent)}
-    .form-input:focus{border-color:var(--pfs-brass-bright);background:var(--pfs-ink);box-shadow:0 0 0 3px oklch(76% .14 75 / .16)}
+    .form-input:focus{border-color:var(--pfs-blue-bright);background:var(--pfs-ink);box-shadow:0 0 0 3px rgba(121,166,255,.18)}
     .code-row{display:flex;gap:8px}.code-row .form-input{flex:1;min-width:0}
     .code-btn{
       flex-shrink:0;min-height:44px;padding:10px 13px;
@@ -83,31 +84,31 @@
       font:inherit;font-size:12px;cursor:pointer;white-space:nowrap;
       transition:background 140ms var(--pfs-ease),border-color 140ms var(--pfs-ease),color 140ms var(--pfs-ease),opacity 140ms var(--pfs-ease);
     }
-    .code-btn:hover:not(:disabled){background:var(--pfs-ink);border-color:var(--pfs-brass);color:var(--pfs-paper-light)}
+    .code-btn:hover:not(:disabled){background:var(--pfs-ink);border-color:var(--pfs-blue);color:var(--pfs-paper-light)}
     .code-btn:disabled,.btn:disabled{opacity:.48;cursor:not-allowed}
     .btn{
       width:100%;min-height:46px;padding:11px 14px;border:1px solid transparent;border-radius:8px;
       font:inherit;font-size:14px;font-weight:650;cursor:pointer;
       transition:background 140ms var(--pfs-ease),border-color 140ms var(--pfs-ease),color 140ms var(--pfs-ease),opacity 140ms var(--pfs-ease),transform 140ms var(--pfs-ease);
     }
-    .btn-primary{background:var(--pfs-brass);color:var(--pfs-ink-deep)}
-    .btn-primary:hover:not(:disabled){background:var(--pfs-brass-bright);transform:translateY(-1px)}
+    .btn-primary{background:var(--pfs-blue);color:var(--pfs-paper-light)}
+    .btn-primary:hover:not(:disabled){background:var(--pfs-blue-bright);transform:translateY(-1px)}
     .btn-primary:active:not(:disabled){transform:translateY(0)}
     .form-error{min-height:20px;margin-bottom:8px;color:var(--pfs-error);font-size:12px;line-height:1.6;text-align:center}
     .tab-row{display:flex;gap:4px;margin-bottom:24px;padding:4px;border:1px solid color-mix(in oklab,var(--pfs-paper-light) 14%,transparent);border-radius:9px;background:var(--pfs-ink-deep)}
     .tab-btn{min-height:38px;flex:1;padding:8px 10px;background:transparent;border:0;border-radius:6px;color:var(--pfs-muted);font:inherit;font-size:13px;cursor:pointer;transition:background 140ms var(--pfs-ease),color 140ms var(--pfs-ease)}
     .tab-btn:hover{color:var(--pfs-paper-light)}
     .tab-btn.active{background:var(--pfs-paper-light);color:var(--pfs-ink)}
-    button:focus-visible,.agree-row a:focus-visible{outline:2px solid var(--pfs-brass-bright);outline-offset:3px}
+    button:focus-visible,.agree-row a:focus-visible{outline:2px solid var(--pfs-blue-bright);outline-offset:3px}
     .spinner{display:inline-block;width:15px;height:15px;border:2px solid color-mix(in oklab,var(--pfs-ink-deep) 28%,transparent);border-top-color:var(--pfs-ink-deep);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-3px}
     @keyframes spin{to{transform:rotate(360deg)}}
     .agree-row{display:flex;align-items:flex-start;gap:8px;margin-top:16px;color:var(--pfs-muted);font-size:11px;line-height:1.6}
-    .agree-row input{width:16px;height:16px;flex:0 0 16px;margin-top:1px;accent-color:var(--pfs-brass)}
-    .agree-row a{color:var(--pfs-brass-bright);text-decoration:none;cursor:pointer}
+    .agree-row input{width:16px;height:16px;flex:0 0 16px;margin-top:1px;accent-color:var(--pfs-blue)}
+    .agree-row a{color:var(--pfs-blue-bright);text-decoration:none;cursor:pointer}
     .agree-row a:hover{text-decoration:underline;text-underline-offset:3px}
-    .agreement-overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:100;padding:20px;background:oklch(19% .035 166 / .64)}
+    .agreement-overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:100;padding:20px;background:rgba(10,40,87,.64)}
     .agreement-overlay.show{display:flex}
-    .agreement-box{width:min(520px,100%);max-height:70vh;overflow-y:auto;padding:30px;background:var(--pfs-paper-light);border:1px solid var(--pfs-rule);border-radius:var(--pfs-radius);color:var(--pfs-ink);font-size:13px;line-height:1.7;box-shadow:0 20px 54px oklch(19% .035 166 / .28)}
+    .agreement-box{width:min(520px,100%);max-height:70vh;overflow-y:auto;padding:30px;background:var(--pfs-paper-light);border:1px solid var(--pfs-rule);border-radius:var(--pfs-radius);color:var(--pfs-ink);font-size:13px;line-height:1.7;box-shadow:0 20px 54px rgba(10,40,87,.28)}
     .agreement-box h3{margin-bottom:16px;color:var(--pfs-ink);font-size:17px}
     .agreement-box h4{margin:16px 0 6px;color:var(--pfs-primary,var(--pfs-ink));font-size:14px}
     .agreement-box p{margin-bottom:8px}

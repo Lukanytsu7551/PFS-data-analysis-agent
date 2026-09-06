@@ -11,8 +11,8 @@
       minutes_5: "5 分钟",
       minutes_10: "10 分钟",
       refresh: "刷新数据",
-      save_layout: "💾 保存布局",
-      saved: "💾 已保存",
+      save_layout: "保存布局",
+      saved: "已保存",
       countdown: (s) => `${s}s 后刷新`,
       no_id: "未找到看板 ID",
       net_error: (m) => "网络错误：" + m,
@@ -34,17 +34,17 @@
       refreshed_ok: (t) => `"${t}" 已刷新`,
       timeout_single: "刷新超时（30s）",
       timeout_all: "刷新超时（60s）",
-      layout_saved: "布局已保存 ✓",
+      layout_saved: "布局已保存",
       save_fail: (m) => "保存失败：" + m,
       session_invalid: "Session 无效",
       session_re_enter: " — 请重新输入 Session ID",
       refresh_fail_prefix: (m) => "刷新失败：" + m,
-      data_refreshed: "数据已刷新 ✓",
+      data_refreshed: "数据已刷新",
       errors_count: (n) => `刷新完成，${n} 个图表出错`,
       close_fs: "关闭全屏",
       empty_title: "看板为空",
       empty_desc: "该看板没有任何图表组件",
-      modal_title: "🔗 连接数据源",
+      modal_title: "连接数据源",
       modal_desc: "刷新看板需要有效的对话 Session ID（聊天页面地址栏可找到），以便重新查询数据。",
       modal_placeholder: "输入 Session ID…",
       modal_cancel: "取消",
@@ -58,8 +58,8 @@
       minutes_5: "5 min",
       minutes_10: "10 min",
       refresh: "Refresh",
-      save_layout: "💾 Save Layout",
-      saved: "💾 Saved",
+      save_layout: "Save Layout",
+      saved: "Saved",
       countdown: (s) => `Refresh in ${s}s`,
       no_id: "Dashboard ID not found",
       net_error: (m) => "Network error: " + m,
@@ -81,17 +81,17 @@
       refreshed_ok: (t) => `"${t}" refreshed`,
       timeout_single: "Refresh timeout (30s)",
       timeout_all: "Refresh timeout (60s)",
-      layout_saved: "Layout saved ✓",
+      layout_saved: "Layout saved",
       save_fail: (m) => "Save failed: " + m,
       session_invalid: "Session invalid",
       session_re_enter: " — Please re-enter Session ID",
       refresh_fail_prefix: (m) => "Refresh failed: " + m,
-      data_refreshed: "Data refreshed ✓",
+      data_refreshed: "Data refreshed",
       errors_count: (n) => `Refresh done, ${n} chart${n === 1 ? "" : "s"} with errors`,
       close_fs: "Close fullscreen",
       empty_title: "Dashboard empty",
       empty_desc: "This dashboard has no chart widgets",
-      modal_title: "🔗 Connect Data Source",
+      modal_title: "Connect Data Source",
       modal_desc: "A valid Session ID is needed to re-query data for this dashboard. You can find it in the chat page URL.",
       modal_placeholder: "Enter Session ID…",
       modal_cancel: "Cancel",
@@ -116,6 +116,24 @@
     return String(s ?? "")
       .replace(/&/g, "&amp;").replace(/</g, "&lt;")
       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  const DB_ICON_PATHS = Object.freeze({
+    arrowLeft: '<path d="m15 18-6-6 6-6"/>',
+    check: '<path d="m5 12 4 4L19 6"/>',
+    close: '<path d="m6 6 12 12M18 6 6 18"/>',
+    eye: '<path d="M3 12s3.2-5 9-5 9 5 9 5-3.2 5-9 5-9-5-9-5Z"/><circle cx="12" cy="12" r="2"/>',
+    eyeOff: '<path d="m4 4 16 16M10.6 6.9A9.4 9.4 0 0 1 12 7c5.8 0 9 5 9 5a16 16 0 0 1-3.2 3.5M6.2 8.1C4.1 9.5 3 12 3 12s3.2 5 9 5c.7 0 1.4-.1 2-.2"/>',
+    expand: '<path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/>',
+    refresh: '<path d="M20 11a8 8 0 1 0 1 4"/><path d="M20 4v7h-7"/>',
+    save: '<path d="M5 3h11l3 3v15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M7 3v6h8V3M7 21v-8h10v8"/>',
+    warning: '<path d="m12 3 9 17H3L12 3Z"/><path d="M12 9v5M12 17h.01"/>',
+  });
+  function dbIconMarkup(name, className = "db-icon") {
+    const paths = DB_ICON_PATHS[name] || DB_ICON_PATHS.warning;
+    return `<svg class="${className}" viewBox="0 0 24 24" aria-hidden="true">${paths}</svg>`;
+  }
+  function dbButtonMarkup(iconName, label) {
+    return `${dbIconMarkup(iconName)}<span>${esc(label)}</span>`;
   }
   function fmtDate(iso) {
     if (!iso) return "";
@@ -181,7 +199,7 @@
   function applyStaticI18n() {
     const s = (id, text) => { const el = $(id); if (el) el.textContent = text; };
     const p = (id, text) => { const el = $(id); if (el) el.placeholder = text; };
-    s("btn-back", "←"); $("btn-back").title = T.back;
+    $("btn-back").innerHTML = dbIconMarkup("arrowLeft"); $("btn-back").title = T.back;
     s("nav-brand-label", _lang === "en" ? "PFS Data Analysis Agent" : "PFS 数据分析 Agent");
     s("opt-manual", T.manual_refresh);
     s("opt-30s", T.seconds_30);
@@ -189,7 +207,7 @@
     s("opt-5m", T.minutes_5);
     s("opt-10m", T.minutes_10);
     s("btn-refresh-label", T.refresh);
-    s("btn-save-layout", T.save_layout);
+    $("btn-save-layout").innerHTML = dbButtonMarkup("save", T.save_layout);
     s("empty-title", T.empty_title);
     s("empty-desc", T.empty_desc);
     s("sid-modal-title", T.modal_title);
@@ -355,22 +373,22 @@
         <span class="widget-badge">${esc(badge)}</span>
         <div class="widget-actions">
           <button class="widget-btn" title="${esc(T.refresh_widget)}"
-            data-action="refreshWidget" data-wid="${esc(w.id)}">↻</button>
+            data-action="refreshWidget" data-wid="${esc(w.id)}">${dbIconMarkup("refresh")}</button>
           <button class="widget-btn" title="${esc(T.expand_widget)}" ${w.chart_id ? "" : "disabled"}
             data-action="expandWidget" data-wid="${esc(w.id)}"
-            data-title="${esc(w.title || T.chart)}" data-cid="${esc(w.chart_id || "")}">⛶</button>
+            data-title="${esc(w.title || T.chart)}" data-cid="${esc(w.chart_id || "")}">${dbIconMarkup("expand")}</button>
           <button class="widget-btn" title="${esc(T.hide_widget)}"
-            data-action="toggleHide" data-wid="${esc(w.id)}">🙈</button>
+            data-action="toggleHide" data-wid="${esc(w.id)}">${dbIconMarkup("eyeOff")}</button>
         </div>
       </div>
       <div class="widget-body" id="wb-${esc(w.id)}">${w.error ? buildErrorHTML(w.error) : buildLoadingHTML()}</div>`;
   }
 
   function buildLoadingHTML() {
-    return `<div class="widget-loading"><span class="spin">↻</span> ${esc(T.loading)}</div>`;
+    return `<div class="widget-loading"><span class="spin">${dbIconMarkup("refresh")}</span> ${esc(T.loading)}</div>`;
   }
   function buildErrorHTML(msg) {
-    return `<div class="widget-error"><div class="widget-error-icon">⚠️</div><div class="widget-error-msg">${esc(msg)}</div></div>`;
+    return `<div class="widget-error"><div class="widget-error-icon">${dbIconMarkup("warning")}</div><div class="widget-error-msg">${esc(msg)}</div></div>`;
   }
   function buildIframeHTML(chartId) {
     return `<iframe class="widget-iframe" src="/api/chart/${esc(chartId)}" loading="lazy" title="${esc(T.chart_iframe_title)}" sandbox="allow-scripts allow-same-origin" referrerpolicy="no-referrer"></iframe>`;
@@ -391,8 +409,8 @@
     isDirty = val;
     const btn = $("btn-save-layout");
     btn.disabled = !val;
-    if (val) { btn.classList.add("dirty"); btn.textContent = T.save_layout; }
-    else { btn.classList.remove("dirty"); btn.textContent = T.saved; setTimeout(() => { btn.textContent = T.save_layout; }, 1800); }
+    if (val) { btn.classList.add("dirty"); btn.innerHTML = dbButtonMarkup("save", T.save_layout); }
+    else { btn.classList.remove("dirty"); btn.innerHTML = dbButtonMarkup("check", T.saved); setTimeout(() => { btn.innerHTML = dbButtonMarkup("save", T.save_layout); }, 1800); }
   }
 
   /* ── Event delegation for widget buttons ─────────────────────── */
@@ -418,14 +436,14 @@
       grid.removeWidget(el, false);
       el.style.display = "none"; w._hidden = true; setDirty(true);
       const btn = el.querySelector("[data-action=toggleHide]");
-      if (btn) { btn.textContent = "👁️"; btn.title = T.show_widget; }
+      if (btn) { btn.innerHTML = dbIconMarkup("eye"); btn.title = T.show_widget; }
     } else {
       const saved = _hiddenWidgets.get(widgetId);
       el.style.display = "";
       grid.addWidget(el, { x: saved.x, y: saved.y, w: saved.w, h: saved.h, id: widgetId });
       _hiddenWidgets.delete(widgetId); w._hidden = false; setDirty(true);
       const btn = el.querySelector("[data-action=toggleHide]");
-      if (btn) { btn.textContent = "🙈"; btn.title = T.hide_widget; }
+      if (btn) { btn.innerHTML = dbIconMarkup("eyeOff"); btn.title = T.hide_widget; }
     }
   }
 
@@ -487,7 +505,7 @@
       fs.id = "db-fullscreen"; fs.className = "db-fullscreen";
       fs.innerHTML = `<div class="db-fullscreen-header">
         <span class="db-fullscreen-title" id="fs-title"></span>
-        <button class="btn-fs-close" id="fs-close" title="${esc(T.close_fs)}">✕</button>
+        <button class="btn-fs-close" id="fs-close" aria-label="${esc(T.close_fs)}" title="${esc(T.close_fs)}">${dbIconMarkup("close")}</button>
       </div><div class="db-fullscreen-body" id="fs-body"></div>`;
       document.body.appendChild(fs);
       document.getElementById("fs-close").addEventListener("click", closeFullscreen);
@@ -596,8 +614,8 @@
     isRefreshing = on;
     const btn = $("btn-refresh"), icon = $("refresh-icon");
     btn.disabled = on;
-    if (on) { icon.className = "spin"; icon.textContent = "↻"; }
-    else { icon.className = ""; icon.textContent = "↻"; }
+    if (on) { icon.className = "spin"; icon.innerHTML = dbIconMarkup("refresh"); }
+    else { icon.className = ""; icon.innerHTML = dbIconMarkup("refresh"); }
   }
 
   function promptSessionId() {

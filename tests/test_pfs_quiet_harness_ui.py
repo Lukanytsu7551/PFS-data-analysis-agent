@@ -17,6 +17,10 @@ MODELS = (ROOT / "frontend" / "features" / "models.js").read_text(encoding="utf-
 SETTINGS_UI = (ROOT / "frontend" / "features" / "ui" / "settings-ui.js").read_text(encoding="utf-8")
 LLM_CONFIG = (ROOT / "LLM" / "llm_config_manager.py").read_text(encoding="utf-8")
 DASHBOARD = (ROOT / "templates" / "dashboard.html").read_text(encoding="utf-8")
+DASHBOARD_CSS = (ROOT / "static" / "css" / "dashboard.css").read_text(encoding="utf-8")
+INDEX = (ROOT / "index.html").read_text(encoding="utf-8")
+LOGIN = (ROOT / "templates" / "login.html").read_text(encoding="utf-8")
+MARK = (ROOT / "static" / "Images" / "pfs-mark.svg").read_text(encoding="utf-8")
 PRODUCTION_UI_FILES = (
     ROOT / "templates" / "agent_chat.html",
     ROOT / "templates" / "dashboard.html",
@@ -77,6 +81,22 @@ class QuietHarnessUiContractTests(unittest.TestCase):
         ):
             self.assertIn(token, THEME)
         self.assertIn("background-image: none !important", THEME)
+
+    def test_public_surfaces_use_the_blue_white_icon_system(self):
+        for token in (
+            "--color-icon: #145dcc",
+            "--color-sidebar-bg: #ffffff",
+            ".pfs-icon,",
+            ".pfs-icon-slot > .pfs-icon",
+            ".pfs-side-surface",
+        ):
+            self.assertIn(token, THEME)
+        for token in ("Blue-white dashboard surface", "--db-nav-bg:  #ffffff", ".db-icon"):
+            self.assertIn(token, DASHBOARD_CSS)
+        self.assertIn("--primary: #0b5bd3", INDEX)
+        self.assertIn("--pfs-blue:#2f6fe4", LOGIN)
+        self.assertIn('fill="#0b5bd3"', MARK)
+        self.assertNotRegex(DASHBOARD, r"[\U0001F300-\U0001FAFF]")
 
     def test_sidebar_rail_has_persistence_and_motion_guards(self):
         for token in (
