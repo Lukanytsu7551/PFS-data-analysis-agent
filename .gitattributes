@@ -26,7 +26,6 @@ Dockerfile text eol=lf
 *.sql text eol=lf
 *.txt text eol=lf
 *.svg text eol=lf
-LICENSE text eol=lf
 
 # Repository metadata and offline fixtures have an explicit LF policy.
 /.dockerignore text eol=lf

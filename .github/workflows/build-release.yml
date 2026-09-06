@@ -33,8 +33,6 @@ jobs:
             name: Windows x64
           - os: macos-15
             name: macOS Apple Silicon
-          - os: macos-15-intel
-            name: macOS Intel x64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -87,16 +85,27 @@ jobs:
   release-preflight:
     name: Release source preflight
     runs-on: ubuntu-latest
+    outputs:
+      public_license_present: ${{ steps.public_license.outputs.present }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Check public release policy
+        id: public_license
+        shell: bash
+        run: |
+          if [ -f LICENSE ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No public software license is present; GitHub Release creation will be skipped."
+          fi
       - name: Check launchers and source staging
         shell: bash
         run: |
           bash -n install.sh start.command
-          test -f LICENSE
           staging="$RUNNER_TEMP/pfs-release-staging"
           manifest="$RUNNER_TEMP/pfs-release-manifest.json"
           report="$RUNNER_TEMP/pfs-release-audit.json"
@@ -237,10 +246,6 @@ jobs:
             name: Apple Silicon
             uname: arm64
             artifact: macos-arm64-package
-          - os: macos-15-intel
-            name: Intel x64
-            uname: x86_64
-            artifact: macos-x64-package
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -311,6 +316,7 @@ jobs:
   release:
     name: Create GitHub Release
     needs: [build-windows, build-macos, windows-clean-install, release-preflight]
+    if: ${{ needs.release-preflight.outputs.public_license_present == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -364,13 +370,6 @@ jobs:
           \) -print)"
           if [ -n "$forbidden" ]; then
             echo "$forbidden" >&2
-            exit 2
-          fi
-      - name: Verify final public license
-        shell: bash
-        run: |
-          if grep -Fq "No public license has been selected" LICENSE; then
-            echo "A final public LICENSE is required before creating a Release." >&2
             exit 2
           fi
       - name: Create release
@@ -431,3 +430,12 @@ jobs:
               --target "$TARGET_SHA" \
               --notes "$notes"
           fi
+
+  release-disabled:
+    name: Release disabled (no public license)
+    needs: [build-windows, build-macos, windows-clean-install, release-preflight]
+    if: ${{ needs.release-preflight.outputs.public_license_present != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain release policy
+        run: echo "Build artifacts were validated; GitHub Release creation remains disabled because this repository has no public software license."

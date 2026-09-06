@@ -69,7 +69,6 @@ class GitAttributesStaticTests(unittest.TestCase):
             "*.iss text eol=lf",
             "*.spec text eol=lf",
             "*.svg text eol=lf",
-            "LICENSE text eol=lf",
             ".gitattributes text eol=lf",
             "*.py text eol=lf",
             "*.js text eol=lf",

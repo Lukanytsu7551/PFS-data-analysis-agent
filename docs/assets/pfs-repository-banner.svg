@@ -3,20 +3,20 @@
   <desc id="desc">PFS 可追踪、可核验、可交付的数据分析工作台</desc>
   <defs>
     <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0d1b2a"/>
-      <stop offset="0.58" stop-color="#173c39"/>
-      <stop offset="1" stop-color="#102c30"/>
+      <stop offset="0" stop-color="#081b3c"/>
+      <stop offset="0.58" stop-color="#0e4aa8"/>
+      <stop offset="1" stop-color="#082d73"/>
     </linearGradient>
     <radialGradient id="glow" cx="0.78" cy="0.18" r="0.75">
-      <stop offset="0" stop-color="#4d8b7a" stop-opacity="0.32"/>
-      <stop offset="1" stop-color="#4d8b7a" stop-opacity="0"/>
+      <stop offset="0" stop-color="#79b8ff" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#79b8ff" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="gold" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0" stop-color="#b87d30"/>
-      <stop offset="1" stop-color="#e3bf6a"/>
+    <linearGradient id="blue" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#5f9eff"/>
+      <stop offset="1" stop-color="#c5ddff"/>
     </linearGradient>
     <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
-      <path d="M48 0H0V48" fill="none" stroke="#d7efe5" stroke-opacity="0.055"/>
+      <path d="M48 0H0V48" fill="none" stroke="#dcebff" stroke-opacity="0.075"/>
     </pattern>
   </defs>
 
@@ -25,27 +25,27 @@
   <rect x="34" y="34" width="1532" height="372" rx="22" fill="url(#grid)"/>
 
   <g transform="translate(92 75)">
-    <rect width="292" height="292" rx="72" fill="#203d35" stroke="#8fc7b1" stroke-opacity="0.42" stroke-width="3"/>
-    <path d="M63 221h38v-69H63v69Zm63 0h38V91h-38v130Zm63 0h38V54h-38v167Z" fill="url(#gold)"/>
-    <path d="m58 163 48-39 42 22 81-82" fill="none" stroke="#f6edda" stroke-linecap="round" stroke-linejoin="round" stroke-width="15"/>
-    <circle cx="228" cy="64" r="12" fill="#f6edda"/>
-    <path d="M55 244h185" fill="none" stroke="#f6edda" stroke-opacity="0.45" stroke-width="4"/>
+    <rect width="292" height="292" rx="72" fill="#0b3b86" stroke="#a7cbff" stroke-opacity="0.52" stroke-width="3"/>
+    <path d="M63 221h38v-69H63v69Zm63 0h38V91h-38v130Zm63 0h38V54h-38v167Z" fill="url(#blue)"/>
+    <path d="m58 163 48-39 42 22 81-82" fill="none" stroke="#f7fbff" stroke-linecap="round" stroke-linejoin="round" stroke-width="15"/>
+    <circle cx="228" cy="64" r="12" fill="#f7fbff"/>
+    <path d="M55 244h185" fill="none" stroke="#f7fbff" stroke-opacity="0.5" stroke-width="4"/>
   </g>
 
-  <g fill="#f6edda" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
+  <g fill="#f7fbff" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif">
     <text x="490" y="170" font-size="72" font-weight="750" letter-spacing="2">PFS 数据分析 Agent</text>
-    <text x="494" y="236" font-size="34" fill="#d7efe5" letter-spacing="7">可追踪 · 可核验 · 可交付</text>
-    <text x="496" y="306" font-size="24" fill="#b9d2cb">Local-first workbench for general-purpose data analysis</text>
+    <text x="494" y="236" font-size="34" fill="#dcebff" letter-spacing="7">可追踪 · 可核验 · 可交付</text>
+    <text x="496" y="306" font-size="24" fill="#bdd6f7">Local-first workbench for general-purpose data analysis</text>
   </g>
 
-  <g transform="translate(1248 82)" fill="none" stroke="#d7efe5" stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(1248 82)" fill="none" stroke="#dcebff" stroke-linecap="round" stroke-linejoin="round">
     <path d="M0 244h242M0 244V20" stroke-opacity="0.28" stroke-width="3"/>
-    <path d="M18 195 68 154l45 20 77-91 38 14" stroke="#f6edda" stroke-width="8"/>
-    <circle cx="18" cy="195" r="7" fill="#f6edda" stroke="none"/>
-    <circle cx="68" cy="154" r="7" fill="#f6edda" stroke="none"/>
-    <circle cx="113" cy="174" r="7" fill="#f6edda" stroke="none"/>
-    <circle cx="190" cy="83" r="7" fill="#f6edda" stroke="none"/>
-    <circle cx="228" cy="97" r="7" fill="#f6edda" stroke="none"/>
-    <path d="M18 226h34v-31H18v31Zm54 0h34v-58H72v58Zm54 0h34v-91h-34v91Zm54 0h34v-124h-34v124Z" fill="url(#gold)" stroke="none" opacity="0.9"/>
+    <path d="M18 195 68 154l45 20 77-91 38 14" stroke="#f7fbff" stroke-width="8"/>
+    <circle cx="18" cy="195" r="7" fill="#f7fbff" stroke="none"/>
+    <circle cx="68" cy="154" r="7" fill="#f7fbff" stroke="none"/>
+    <circle cx="113" cy="174" r="7" fill="#f7fbff" stroke="none"/>
+    <circle cx="190" cy="83" r="7" fill="#f7fbff" stroke="none"/>
+    <circle cx="228" cy="97" r="7" fill="#f7fbff" stroke="none"/>
+    <path d="M18 226h34v-31H18v31Zm54 0h34v-58H72v58Zm54 0h34v-91h-34v91Zm54 0h34v-124h-34v124Z" fill="url(#blue)" stroke="none" opacity="0.9"/>
   </g>
 </svg>

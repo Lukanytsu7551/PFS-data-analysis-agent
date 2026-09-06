@@ -86,6 +86,15 @@ docker run --rm -p 5001:5001 pfs-data-analysis-agent:local
 
 Keep API keys out of Dockerfiles, images, and Git. See `docker-compose.yml` for the optional API/worker setup.
 
+## Documentation
+
+- [Product overview](PRODUCT.md): positioning, capabilities, interface, and runtime
+- [User guide](Information/Instruction.md): from data connection to result review
+- [Knowledge base](Information/repository_tutorial.md): business context and analysis rules
+- [MCP guide](Information/MCP_tutorial.md): optional external tool connections
+- [Release notes](Information/Version_Update_Log_EN.md)
+- [Security policy](SECURITY.md) · [Rights and third-party notice](NOTICE.md)
+
 ## Slash commands
 
 | Command | Purpose |
@@ -162,4 +171,4 @@ git diff --check
 
 ## Rights and security
 
-Software, dependencies, fonts, icons, and other materials are governed by their applicable copyright, license, or written authorization. Read [`LICENSE`](LICENSE) and [`NOTICE.md`](NOTICE.md) before using or redistributing the repository. See [`SECURITY.md`](SECURITY.md) for security reports.
+This repository grants no public software license. Software, dependencies, fonts, icons, and other materials are governed by their applicable copyright, license, or written authorization. Read [`NOTICE.md`](NOTICE.md) before using or redistributing the repository. See [`SECURITY.md`](SECURITY.md) for security reports.

@@ -95,6 +95,15 @@ docker run --rm -p 5001:5001 pfs-data-analysis-agent:local
 
 不要把 API Key 写入 Dockerfile、镜像或 Git。需要队列 worker 时，参见仓库内的 `docker-compose.yml` 和对应环境配置。
 
+## 文档
+
+- [产品说明](PRODUCT.md)：产品定位、能力范围、界面和运行方式
+- [使用说明](Information/Instruction.md)：从数据接入到结果核验
+- [知识库使用说明](Information/repository_tutorial.md)：管理业务背景和分析规则
+- [MCP 使用说明](Information/MCP_tutorial.md)：配置可选外部工具连接
+- [版本更新日志](Information/Version_Update_Log.md)
+- [安全策略](SECURITY.md) · [权利与第三方说明](NOTICE.md)
+
 ## 斜杠命令
 
 | 命令 | 作用 |
@@ -206,4 +215,4 @@ git diff --check
 
 ## 权利与安全
 
-软件、依赖、字体、图标和其他材料分别受适用的版权、许可证或书面授权约束。使用和再分发前请阅读 [`LICENSE`](LICENSE) 与 [`NOTICE.md`](NOTICE.md)。安全问题请参见 [`SECURITY.md`](SECURITY.md)。
+本仓库未授予公开软件许可证，软件、依赖、字体、图标和其他材料分别受适用的版权、许可证或书面授权约束。使用和再分发前请阅读 [`NOTICE.md`](NOTICE.md)。安全问题请参见 [`SECURITY.md`](SECURITY.md)。

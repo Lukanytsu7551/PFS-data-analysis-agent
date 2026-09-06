@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 
 
-ALLOWED_ROOT_FILES = frozenset({"app.py", "LICENSE"})
+ALLOWED_ROOT_FILES = frozenset({"app.py"})
 ALLOWED_ROOT_DIRS = (
     "agent",
     "api",

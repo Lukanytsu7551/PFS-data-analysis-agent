@@ -1,6 +1,6 @@
 # Copyright 2026 Zafer-Liu
 # PFS 数据分析 Agent · 数据分析演示文稿生成框架
-# Licensed under CC BY-NC 4.0 — see LICENSE.
+# Licensed under CC BY-NC 4.0 — see NOTICE.md and the applicable component terms.
 #
 """MckEngine — The presentation engine that wraps python-pptx with high-level layout methods.
 

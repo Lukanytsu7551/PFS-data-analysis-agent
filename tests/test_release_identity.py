@@ -5,7 +5,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = PROJECT_ROOT / ".github" / "workflows" / "build-release.yml"
-LICENSE_PATH = PROJECT_ROOT / "LICENSE"
+PUBLIC_LICENSE_PATH = PROJECT_ROOT / "LICENSE"
 WINDOWS_INSTALLER_PATH = PROJECT_ROOT / "installer" / "setup.iss"
 MACOS_BUILD_PATH = PROJECT_ROOT / "packaging" / "build_macos.sh"
 WINDOWS_BUILD_PATH = PROJECT_ROOT / "packaging" / "build_windows.ps1"
@@ -89,12 +89,24 @@ class ReleaseIdentityTests(unittest.TestCase):
         self.assertIn("notarized", self.workflow)
         self.assertIn("SHA256SUMS.txt", self.workflow)
 
-    def test_release_defaults_are_pfs_scoped_and_license_gate_is_fail_closed(self):
+    def test_release_defaults_are_pfs_scoped_and_no_public_license_keeps_release_closed(self):
         self.assertIn('default: "0.1.0"', self.workflow)
         self.assertNotIn('default: "1.2.0"', self.workflow)
-        self.assertIn("Verify final public license", self.workflow)
-        self.assertIn("No public license has been selected", self.workflow)
-        self.assertIn("No public license has been selected", read_text(LICENSE_PATH))
+        self.assertIn("No public software license is present", self.workflow)
+        self.assertIn("public_license_present", self.workflow)
+        self.assertIn("release-disabled", self.workflow)
+        self.assertIn(
+            "needs.release-preflight.outputs.public_license_present == 'true'",
+            self.workflow,
+        )
+        self.assertFalse(PUBLIC_LICENSE_PATH.exists())
+
+    def test_release_matrix_targets_windows_and_apple_silicon_only(self):
+        self.assertIn("name: Windows x64", self.workflow)
+        self.assertIn("name: macOS Apple Silicon", self.workflow)
+        self.assertNotIn("macos-15-intel", self.workflow)
+        self.assertNotIn("macOS Intel x64", self.workflow)
+        self.assertNotIn("macos-x64-package", self.workflow)
 
     def test_workflow_passes_version_and_refs_through_step_environment(self):
         expected_steps = (
