@@ -485,7 +485,7 @@ export function mountChatUi() {
   function _artifactNode(artifact, index) {
     const typeName = {
       chart: "分析图表", file: "生成文件", export: "导出文件",
-      tool_result: "完整工具结果", schema: "数据结构", report: "分析报告",
+      tool_result: "完整工具结果", schema: "数据结构", report: "分析结果",
       tool_result_summary: "工具结果",
       ppt: "演示文稿", dashboard: "仪表盘", checkpoint: "工作目录检查点",
     }[String(artifact.type || "").toLowerCase()] || "任务结果";

@@ -321,7 +321,7 @@ class InstallerScriptTests(unittest.TestCase):
                 text = (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
                 self.assertIn("PFS_REPO_URL", text)
                 self.assertIn("PFS-data-analysis-agent.git", text)
-                self.assertNotIn("Data-Analysis-Agent-main", text)
+                self.assertNotIn("-Agent-main", text)
 
 
 if __name__ == "__main__":

@@ -77,19 +77,16 @@ class GitAttributesStaticTests(unittest.TestCase):
             "/.dockerignore text eol=lf",
             "/.env.example text eol=lf",
             "/.gitignore text eol=lf",
-            "/.impeccable.md text eol=lf",
             "/.prettierignore text eol=lf",
             "/.prettierrc.json text eol=lf",
             "/MCP/AtlasCloud/.gitignore text eol=lf",
             "/MCP/AtlasCloud/.npmignore text eol=lf",
-            "/docs/Readme text eol=lf",
             "data/fixtures/** text eol=lf",
         ):
             with self.subTest(rule=rule):
                 self.assertIn(rule, text)
 
         for rule in (
-            "Data-Analysis-Agent-main/** binary -eol",
             "data/datasource_config.json binary -eol",
             "LLM/llm_config.json binary -eol",
             "memory/** binary -eol",
@@ -138,7 +135,6 @@ class GitAttributesStaticTests(unittest.TestCase):
             ".dockerignore": {"text": "set", "eol": "lf", "binary": "unspecified"},
             ".env.example": {"text": "set", "eol": "lf", "binary": "unspecified"},
             ".gitignore": {"text": "set", "eol": "lf", "binary": "unspecified"},
-            ".impeccable.md": {"text": "set", "eol": "lf", "binary": "unspecified"},
             ".prettierignore": {"text": "set", "eol": "lf", "binary": "unspecified"},
             ".prettierrc.json": {"text": "set", "eol": "lf", "binary": "unspecified"},
             "MCP/AtlasCloud/.gitignore": {
@@ -151,7 +147,6 @@ class GitAttributesStaticTests(unittest.TestCase):
                 "eol": "lf",
                 "binary": "unspecified",
             },
-            "docs/Readme": {"text": "set", "eol": "lf", "binary": "unspecified"},
             "data/fixtures/pfs_sales.csv": {
                 "text": "set",
                 "eol": "lf",

@@ -6,7 +6,11 @@
 
 <h1 align="center">PFS Data Analysis Agent</h1>
 
-<p align="center">A traceable, reviewable, and deliverable workbench for report and operating-data analysis.</p>
+<p align="center">A local, general-purpose data analysis workbench.</p>
+
+<p align="center">
+  Connect files, databases, or controlled data sources; ask questions in natural language; run bounded analysis; and keep the result trail for review.
+</p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB.svg" alt="Python 3.10+" />
@@ -15,18 +19,37 @@
   <img src="https://img.shields.io/badge/Desktop-macOS%20%2F%20Windows-0f766e.svg" alt="Desktop" />
 </p>
 
-> PFS Data Analysis Agent is a local intelligent workbench for report and operating-data analysis, with natural-language analysis, controlled data queries, chart generation, multi-format report delivery, and result history.
-
-> PFS Data Analysis Agent is an independently maintained local workbench for report and operating-data analysis. Product capabilities, runtime identity, and release status are defined by this repository; source, authorization, and redistribution boundaries are recorded separately in [`NOTICE.md`](NOTICE.md) and [`LICENSE`](LICENSE).
+> Current version: `0.1.0-dev`. This is a desktop-first development build focused on local startup and reviewable analysis flows.
 
 ## Highlights
 
-- Ask business questions in natural language instead of starting with SQL.
-- Connect or upload data, inspect schema and quality signals, and run bounded analysis.
-- Produce charts, JSON/CSV results, Excel, Word, PPT, and Dashboard artifacts.
-- Keep lightweight claim/evidence source references, run state, artifact metadata, and download history.
-- Use a desktop-first local workflow with macOS and Windows source launchers.
-- Extend the agent with models, Skills, knowledge, workspaces, MCP, teams, hooks, Feishu, and workflows as those integrations are separately verified.
+- Ask questions in natural language instead of starting with SQL.
+- Inspect schema, coverage, and data-quality signals before running bounded queries.
+- Keep run state, source references, lightweight result trace, artifact metadata, and download history.
+- Produce charts, dashboards, JSON, CSV, Excel, Word, and PPT deliverables.
+- Run locally on macOS or Windows with a simple launcher.
+- Extend the Agent with models, Skills, knowledge, workspaces, workflows, and optional integrations.
+
+## Core capabilities
+
+| Area | What PFS provides |
+|---|---|
+| Data | CSV/XLSX upload, SQLite/MySQL/PostgreSQL/SQL Server entry points, and controlled HTTP sources |
+| Understanding | Table and field preview, coverage, missing/duplicate signals, and source snapshots |
+| Analysis | Read-only SQL, grouped metrics, safe aggregations, anomaly detection, clustering, decision trees, and forecast-evaluation entry points |
+| Visualization | Chart recommendations, interactive charts, and a Dashboard delivery entry point |
+| Agent | SSE chat, tool calls, Skills, knowledge base, workflows, jobs, and context management |
+| Extensions | MCP, Teams, Hooks, Feishu, GPU/remote execution, and cloud-login interfaces; off by default and environment-dependent |
+
+## Quick demo
+
+1. Start PFS and open `http://127.0.0.1:5001`.
+2. Create a conversation and upload `data/fixtures/pfs_sales.csv`.
+3. Select the table and inspect its fields, row count, date range, and dimensions.
+4. Ask: `Summarize sales by region and identify the top region.`
+5. Review the result and download JSON or CSV.
+
+The bundled fixture contains 9 rows, 3 months, 3 regions, and a total sales amount of `100,000`. This deterministic path does not require an external model; configure a supported model to exercise the open-ended Agent loop.
 
 ## Quick start
 
@@ -44,29 +67,71 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 .\start.bat
 ```
 
-Open `http://127.0.0.1:5001`. The normal user path does not require Docker.
+Open `http://127.0.0.1:5001`. Docker is not required for the normal local path.
 
-## Local demo
+If dependencies are already installed:
 
-1. Start PFS and create a new conversation.
-2. Upload `data/fixtures/pfs_sales.csv`.
-3. Select `pfs_sales` and inspect its fields and date range.
-4. Ask: `Summarize sales by region and identify the top region.`
-5. Review the result, source information, and downloadable JSON or CSV artifact.
+```bash
+python app.py
+```
 
-The fixture contains 9 rows, 3 months, 3 regions, and a total sales amount of `100,000`. This deterministic path does not require an external model. Configure a supported model when you want to exercise the open-ended Agent loop.
+### Docker
 
-## Core capabilities
+Docker is provided for development, image verification, and deployment attempts:
 
-| Area | What PFS provides |
+```bash
+docker build -t pfs-data-analysis-agent:local .
+docker run --rm -p 5001:5001 pfs-data-analysis-agent:local
+```
+
+Keep API keys out of Dockerfiles, images, and Git. See `docker-compose.yml` for the optional API/worker setup.
+
+## Slash commands
+
+| Command | Purpose |
 |---|---|
-| Data | CSV/XLSX upload, SQLite/MySQL/PostgreSQL/SQL Server entry points, and controlled HTTP sources |
-| Analysis | Read-only SQL, grouped metrics, versioned metric catalog, safe aggregations, statistical analysis, and forecast evaluation entry points |
-| Visualization | 41 registered chart IDs and a Dashboard delivery entry point; fixture-level generation smoke tests are available |
-| Delivery | JSON, CSV, Excel, Word, PPT, and Dashboard artifacts with local history metadata |
-| Agent surface | SSE chat, Skills, knowledge base, workspace permissions, jobs, workflows, MCP, teams, hooks, and optional Feishu/cloud surfaces |
+| `/new` | Start a clean analysis conversation |
+| `/sessions` | View or refresh saved conversations |
+| `/data` | Open data preview and table selection |
+| `/status` | Inspect model, source, and context state |
+| `/jobs` | View task history and status |
+| `/skills` | View or select Skills |
+| `/knowledge` | Open the knowledge base |
+| `/mcp` | Manage MCP connections and tools |
+| `/workspace` | Manage workspace and permissions |
+| `/stop` | Stop the current response |
+| `/compact` | Compact the current context |
+| `/help` | Show command help |
 
-## Supported models
+`/teams` and `/robot` remain optional extension surfaces. Real external-service availability depends on the target environment.
+
+## Examples
+
+### Analyze grouped data
+
+```text
+Summarize sales by region, identify the top region, and recommend a clear chart.
+```
+
+PFS inspects fields and scope first, then runs a controlled query and returns grouped results with source information.
+
+### Check data quality
+
+```text
+Check missing values, duplicate records, date coverage, and unusual amounts. Explain which issues could affect the result.
+```
+
+Quality signals stay separate from conclusions; original records are not silently removed and unresolved items remain visible.
+
+### Create deliverables
+
+```text
+Turn this analysis into an Excel file and a PPT deck while keeping the source, analysis definition, and conclusion.
+```
+
+Deliverables are registered in the current conversation with source and run metadata. Complex file content and cross-platform rendering should be checked in the target environment.
+
+## Models
 
 The public built-in catalog currently contains:
 
@@ -76,22 +141,13 @@ The public built-in catalog currently contains:
 - MiniMax and MiniMax Coding Plan
 - Custom OpenAI-compatible providers
 
-OpenAI / ChatGPT, AtlasCloud, and Ollama remain cleanup-only compatibility identifiers for old local configuration. They are not restored to the default catalog, session selector, or fallback chain.
+Keep model keys in local configuration or environment variables. Other legacy provider identifiers are not part of the default catalog.
 
-## Slash commands
+## Current boundary
 
-Useful local commands include `/new`, `/sessions`, `/data`, `/status`, `/jobs`, `/skills`, `/knowledge`, `/mcp`, `/workspace`, `/stop`, `/compact`, and `/help`. `/teams` and `/robot` are retained optional surfaces; local contracts do not prove Microsoft Teams or Feishu SaaS acceptance.
+The current delivery focus is a downloadable source repository, desktop local startup, and a core data-analysis loop. macOS startup, core chat, CSV/XLSX, charts, deliverables, jobs, and workspace basics have local evidence; clean Windows installation, CI/Release download readback, real external services, deployment, and live verification still require their target environments.
 
-## Verification boundary
-
-The current P0 delivery target is a downloadable source repository, local macOS/Windows startup, and a demonstrable core data-analysis loop. Local tests and fixed fixtures are not equivalent to production data, external-service acceptance, deployment, or live verification.
-
-See:
-
-- [`docs/HANDOFF.md`](docs/HANDOFF.md) — current handoff and remaining order
-- [`docs/FUNCTION_COMPATIBILITY_MATRIX.md`](docs/FUNCTION_COMPATIBILITY_MATRIX.md) — feature-by-feature evidence
-- [`PRODUCT.md`](PRODUCT.md) — product specification
-- [`SECURITY.md`](SECURITY.md) — security reporting and runtime boundaries
+Local tests, fixed fixtures, or configuration files prove only their respective layer. Optional integrations stay off and do not start without explicit configuration.
 
 ## Development checks
 
@@ -101,10 +157,9 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -B -m unittest discover -s tests -p '
 pnpm run format:check
 pnpm run lint
 pnpm run build:check
+git diff --check
 ```
 
-## Attribution and license
+## Rights and security
 
-PFS is based on the authorized [Data-Analysis-Agent](https://github.com/Zafer-Liu/Data-Analysis-Agent) transformation effort. Original source code, third-party resources, copyright notices, and applicable licenses retain their own boundaries. PFS-specific product code and documentation are maintained in this repository.
-
-The final public license for PFS has not yet been selected. Do not infer commercial redistribution rights from this README. See [`NOTICE.md`](NOTICE.md) for the current source and authorization record.
+Software, dependencies, fonts, icons, and other materials are governed by their applicable copyright, license, or written authorization. Read [`LICENSE`](LICENSE) and [`NOTICE.md`](NOTICE.md) before using or redistributing the repository. See [`SECURITY.md`](SECURITY.md) for security reports.

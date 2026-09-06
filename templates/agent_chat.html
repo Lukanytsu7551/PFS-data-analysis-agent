@@ -650,7 +650,7 @@
       <div class="welcome" id="welcome">
         <img src="{{ url_for('static', filename=product_icon) }}" alt="{{ product_name }}" class="welcome-brand-logo">
         <h2 data-i18n="welcome.title">连接数据源，开始分析</h2>
-        <p data-i18n-html="welcome.desc">连接报表、业务数据库或上传 Excel；用自然语言描述问题，结论会回到指标定义、数据快照与证据。<br>
+        <p data-i18n-html="welcome.desc">连接数据文件、业务数据库或上传 Excel；用自然语言描述问题，结论会回到指标定义、数据快照与证据。<br>
            输入 <strong>/</strong> 可快速选择分析命令。</p>
         <div class="hint-chips">
           <button class="hint-chip" type="button" data-action="fillHint" data-i18n="hint.sales_category">各品类的销售额是多少？</button>
@@ -897,7 +897,7 @@
   <div class="modal pfs-report-modal">
     <div class="pfs-report-head">
       <div>
-        <div class="modal-title" data-i18n="modal.pfs_report.title">PFS 报表口径预览</div>
+        <div class="modal-title" data-i18n="modal.pfs_report.title">PFS 分析口径预览</div>
         <div class="pfs-report-subtitle" data-i18n="modal.pfs_report.subtitle">固定 fixture / 当前 CSV · 确定性计算 · 每个结论均绑定证据</div>
       </div>
       <span class="pfs-report-status" id="pfs-report-status" data-state="idle">未运行</span>
@@ -906,7 +906,7 @@
       <label class="pfs-report-control">
         <span data-i18n="pfs_report.source_picker">数据源</span>
         <select id="pfs-report-source-select" aria-label="数据源">
-          <option value="fixture">PFS 固定示例销售报表</option>
+          <option value="fixture">PFS 固定示例销售数据</option>
         </select>
       </label>
       <label class="pfs-report-control" id="pfs-report-worksheet-control" hidden>
@@ -1007,7 +1007,7 @@
       </div>
     </section>
     <div class="pfs-report-content" id="pfs-report-content">
-      <div class="pfs-report-loading" data-i18n="pfs_report.loading">正在读取固定报表…</div>
+      <div class="pfs-report-loading" data-i18n="pfs_report.loading">正在读取固定样例…</div>
     </div>
     <div class="pfs-report-note" id="pfs-report-note" data-i18n="pfs_report.fixture_note">该预览使用本地固定 fixture，不调用模型、不连接外部数据源。</div>
     <section class="pfs-report-delivery" aria-labelledby="pfs-report-delivery-title">
@@ -1044,7 +1044,7 @@
               disabled
               data-i18n="pfs_report.delivery_word"
             >
-              Word 报告
+              Word 文档
             </button>
             <button
               class="btn-sm btn-sm-ghost"

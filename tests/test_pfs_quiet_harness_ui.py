@@ -130,8 +130,8 @@ class QuietHarnessUiContractTests(unittest.TestCase):
             '"welcome.title": "Connect a data source, start analysis"',
         ):
             self.assertIn(token, I18N)
-        self.assertIn("连接报表、业务数据库或上传 Excel", I18N)
-        self.assertIn("Connect a report, business database, or upload Excel", I18N)
+        self.assertIn("连接数据文件、业务数据库或上传 Excel", I18N)
+        self.assertIn("Connect a data file, business database, or upload Excel", I18N)
         self.assertNotIn("applyQuietHarnessCopy", APP)
         self.assertNotIn("DOMContentLoaded, applyQuietHarnessCopy", APP)
         self.assertNotIn('langchange", applyQuietHarnessCopy', APP)

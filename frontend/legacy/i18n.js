@@ -14,7 +14,7 @@
     zh: {
       // ── App ──────────────────────────────────────────────────────
       "app.title": "PFS 数据分析 Agent",
-      "app.subtitle": "可追踪、可核验的报表数据分析工作台",
+      "app.subtitle": "可追踪、可核验的数据分析工作台",
       // ── Sidebar ──────────────────────────────────────────────────
       "sidebar.datasource": "数据源",
       "sidebar.disconnected": "未连接",
@@ -55,7 +55,7 @@
       "header.subtitle": "口径、证据、交付可回溯",
       "header.schema": "数据预览",
       "header.pfs_report": "口径预览",
-      "modal.pfs_report.title": "PFS 报表口径预览",
+      "modal.pfs_report.title": "PFS 分析口径预览",
       "modal.pfs_report.subtitle": "固定 fixture / 当前 CSV · 确定性计算 · 每个结论均绑定证据",
       "pfs_report.source_picker": "数据源",
       "pfs_report.worksheet": "工作表",
@@ -85,10 +85,10 @@
       "pfs_report.question_run": "按问题分析",
       "pfs_report.interpretation": "系统识别的口径",
       "pfs_report.question_requires_source": "请先上传并选择一个 CSV 或 XLSX 数据源。",
-      "pfs_report.question_required": "请先输入一个明确的报表问题。",
-      "pfs_report.loading": "正在读取固定报表…",
+      "pfs_report.question_required": "请先输入一个明确的分析问题。",
+      "pfs_report.loading": "正在读取固定样例…",
       "pfs_report.ready_to_run": "数据源已切换，请运行分析。",
-      "pfs_report.error": "报表预览加载失败",
+      "pfs_report.error": "分析预览加载失败",
       "pfs_report.idle": "未运行",
       "pfs_report.running": "计算中",
       "pfs_report.completed": "已完成",
@@ -125,7 +125,7 @@
       "pfs_report.delivery_title": "生成交付物",
       "pfs_report.delivery_help": "基于当前口径和数据快照生成，文件会保留来源与核验信息。",
       "pfs_report.delivery_excel": "Excel 数据",
-      "pfs_report.delivery_word": "Word 报告",
+      "pfs_report.delivery_word": "Word 文档",
       "pfs_report.delivery_ppt": "PPT 演示",
       "pfs_report.delivery_dashboard": "分析看板",
       "pfs_report.delivery_running": "正在生成 {format}…",
@@ -141,12 +141,12 @@
       "pfs_report.claim_pass": "通过",
       "pfs_report.claim_fail": "未通过",
       "pfs_report.claim_unverified": "待补充来源",
-      "pfs_report.chat_mode_on": "已切换到报表分析",
+      "pfs_report.chat_mode_on": "已切换到数据分析",
       "pfs_report.chat_mode_off": "已切换到对话分析",
       // ── Welcome ──────────────────────────────────────────────────
       "welcome.title": "连接数据源，开始分析",
       "welcome.desc":
-        "连接报表、业务数据库或上传 Excel；用自然语言描述问题，结论会回到指标定义、数据快照与证据。<br>输入 <strong>/</strong> 可快速选择分析命令。",
+        "连接数据文件、业务数据库或上传 Excel；用自然语言描述问题，结论会回到指标定义、数据快照与证据。<br>输入 <strong>/</strong> 可快速选择分析命令。",
       // ── Input ────────────────────────────────────────────────────
       "input.placeholder": "今天帮你做些什么？  @ 引用对话文件，/ 调用命令",
       "input.kbd_hint":
@@ -156,7 +156,7 @@
       "composer.skill_action": "选择技能",
       "composer.skills": "技能",
       "composer.commands": "打开斜杠命令",
-      "composer.pfs_report": "报表口径",
+      "composer.pfs_report": "分析口径",
       "composer.mcp": "MCP 工具",
       "composer.workspace": "工作目录",
       "composer.teams_action": "团队协作",
@@ -495,7 +495,7 @@
       "cmd.winsorize.desc": "按分位数截断极端值（如 1% ~ 99%）",
       "cmd.trimming.desc": "保留指定最大值和最小值范围内的行",
       "cmd.export.desc": "将数据表导出为 Excel（需说「导出」）",
-      "cmd.report.desc": "生成 Word 分析报告（需说「导出」）",
+      "cmd.report.desc": "生成 Word 分析文档（需说「导出」）",
       "cmd.ppt.desc": "生成麦肯锡风格 PowerPoint（两阶段：大纲确认 → 生成）",
       "cmd.dashboard.desc": "生成可交互数据看板（多图表 · 可拖拽 · 可刷新）",
       "cmd.status.desc": "查看模型、数据源与 Token 用量",
@@ -514,7 +514,7 @@
     en: {
       // ── App ──────────────────────────────────────────────────────
       "app.title": "PFS Data Analysis Agent",
-      "app.subtitle": "Traceable Reporting Workspace",
+      "app.subtitle": "Traceable Data Analysis Workbench",
       // ── Sidebar ──────────────────────────────────────────────────
       "sidebar.datasource": "Data Source",
       "sidebar.disconnected": "Not connected",
@@ -555,7 +555,7 @@
       "header.subtitle": "Definitions, evidence, and deliverables stay traceable.",
       "header.schema": "Data Preview",
       "header.pfs_report": "Metric Preview",
-      "modal.pfs_report.title": "PFS Report Contract Preview",
+      "modal.pfs_report.title": "PFS Analysis Contract Preview",
       "modal.pfs_report.subtitle":
         "Fixed fixture or current CSV · deterministic computation · every claim is evidence-linked",
       "pfs_report.source_picker": "Data source",
@@ -595,10 +595,10 @@
       "pfs_report.question_run": "Analyze question",
       "pfs_report.interpretation": "Detected contract",
       "pfs_report.question_requires_source": "Upload and select a CSV or XLSX data source first.",
-      "pfs_report.question_required": "Enter a clear report question first.",
-      "pfs_report.loading": "Reading the fixed report…",
+      "pfs_report.question_required": "Enter a clear analysis question first.",
+      "pfs_report.loading": "Reading the fixed sample…",
       "pfs_report.ready_to_run": "Data source changed. Run the analysis to refresh results.",
-      "pfs_report.error": "Failed to load the report preview",
+      "pfs_report.error": "Failed to load the analysis preview",
       "pfs_report.idle": "Not run",
       "pfs_report.running": "Computing",
       "pfs_report.completed": "Completed",
@@ -638,7 +638,7 @@
       "pfs_report.delivery_help":
         "Generated from the current contract and data snapshot, with provenance and verification details preserved.",
       "pfs_report.delivery_excel": "Excel data",
-      "pfs_report.delivery_word": "Word report",
+      "pfs_report.delivery_word": "Word document",
       "pfs_report.delivery_ppt": "PPT deck",
       "pfs_report.delivery_dashboard": "Analysis dashboard",
       "pfs_report.delivery_running": "Creating {format}…",
@@ -654,12 +654,12 @@
       "pfs_report.claim_pass": "Passed",
       "pfs_report.claim_fail": "Not passed",
       "pfs_report.claim_unverified": "Source needed",
-      "pfs_report.chat_mode_on": "Switched to report analysis",
+      "pfs_report.chat_mode_on": "Switched to data analysis",
       "pfs_report.chat_mode_off": "Switched to conversation analysis",
       // ── Welcome ──────────────────────────────────────────────────
       "welcome.title": "Connect a data source, start analysis",
       "welcome.desc":
-        "Connect a report, business database, or upload Excel; ask in natural language and trace each conclusion back to its metric definition, data snapshot, and evidence.<br>Type <strong>/</strong> to choose an analysis command.",
+        "Connect a data file, business database, or upload Excel; ask in natural language and trace each conclusion back to its metric definition, data snapshot, and evidence.<br>Type <strong>/</strong> to choose an analysis command.",
       // ── Input ────────────────────────────────────────────────────
       "input.placeholder": "What can I help with?  @ reference files, / for commands",
       "input.kbd_hint":
@@ -669,7 +669,7 @@
       "composer.skill_action": "Choose skill",
       "composer.skills": "Skills",
       "composer.commands": "Open slash commands",
-      "composer.pfs_report": "Report contract",
+      "composer.pfs_report": "Analysis contract",
       "composer.mcp": "MCP tools",
       "composer.workspace": "Workspace",
       "composer.teams_action": "Team collaboration",
@@ -1014,7 +1014,7 @@
       "cmd.winsorize.desc": "Clip extreme values by percentile (e.g. 1% ~ 99%)",
       "cmd.trimming.desc": "Keep rows within specified min / max range",
       "cmd.export.desc": 'Export data tables to Excel (say "export")',
-      "cmd.report.desc": 'Generate Word analysis report (say "export")',
+      "cmd.report.desc": 'Generate a Word analysis document (say "export")',
       "cmd.ppt.desc": "Generate McKinsey-style PowerPoint (outline → confirm → generate)",
       "cmd.dashboard.desc":
         "Generate interactive dashboard (multi-chart · drag-and-drop · refreshable)",

@@ -106,12 +106,11 @@ LLM/mcp_config.json
 LLM/embedding_config.json
 data/datasource_config.json
 .playwright-mcp
+# Keep only public repository artwork under docs; local engineering notes stay untracked.
 docs/*
-!docs/14-local-duckdb-concurrency-import-plan.md
-!docs/10-ai-team-workflow-optimization-plan.md
-!docs/11-ai-team-workflow-wf0-decisions.md
 !docs/
-!docs/**
+!docs/assets/
+!docs/assets/**
 test.bat
 01-notes-for-development.md
 
@@ -146,9 +145,8 @@ Information/assets/LOGO.png
 Information/assets/
 !PRODUCT.md
 
-# The original extracted snapshot stays local as a reference and is not part
-# of the PFS repository source tree.
-Data-Analysis-Agent-main/
+# Local compatibility snapshots are not part of the repository source tree.
+*-Agent-main/
 
 # Original installer artwork is not part of the PFS product surface.
 installer/assets/Banner.psd

@@ -1,5 +1,5 @@
 # Copyright 2026 Zafer-Liu
-# 自然语言交互式经营数据分析软件 V1.0
+# PFS 数据分析 Agent · 数据分析演示文稿生成框架
 # Licensed under CC BY-NC 4.0 — see LICENSE.
 #
 """Low-level drawing primitives for McKinsey PPT framework.

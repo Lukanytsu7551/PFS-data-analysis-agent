@@ -45,6 +45,6 @@ auth.db-*
 *.db-wal
 *.db-shm
 
-# Local-only reference source and generated acceptance artifacts
-Data-Analysis-Agent-main/
+# Local-only compatibility snapshots and generated acceptance artifacts
+*-Agent-main/
 _pfs-export-test/

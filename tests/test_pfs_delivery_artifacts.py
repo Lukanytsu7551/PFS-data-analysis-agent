@@ -588,7 +588,7 @@ class PfsDeliveryArtifactTests(unittest.TestCase):
             document_text = "\n".join(
                 paragraph.text for paragraph in Document(next(Path(tmp).glob("*.docx"))).paragraphs
             )
-            self.assertIn("PFS 销售额分析报告", document_text)
+            self.assertIn("PFS 销售额分析文档", document_text)
             self.assertIn("SHA-256", document_text)
             presentation = Presentation(next(Path(tmp).glob("*.pptx")))
             self.assertEqual(4, len(presentation.slides))
