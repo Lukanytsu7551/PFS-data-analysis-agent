@@ -26,6 +26,9 @@ from data.jobs_store import (
 )
 
 
+_CHAT_PROCESS_RESTART_LEASE_SECONDS = 1.0
+
+
 def _stop_process(process) -> None:
     if process is None or process.pid is None:
         return
@@ -171,7 +174,10 @@ def _run_restarting_durable_chat_worker_in_child(
         child_session_manager._chat_state_store = state_store
         app = create_app()
         app.config.update(TESTING=True)
-        queue = DurableQueueStore(Path(queue_path), default_lease_seconds=0.2)
+        queue = DurableQueueStore(
+            Path(queue_path),
+            default_lease_seconds=_CHAT_PROCESS_RESTART_LEASE_SECONDS,
+        )
         worker = DurableQueueWorker(
             queue,
             build_handlers(app),
@@ -180,7 +186,7 @@ def _run_restarting_durable_chat_worker_in_child(
                 if crash_after_delta
                 else "queue-service-chat-restart-replacement"
             ),
-            lease_seconds=0.2,
+            lease_seconds=_CHAT_PROCESS_RESTART_LEASE_SECONDS,
         )
         with patch(
             "api.chat._build_agent",
@@ -1079,7 +1085,7 @@ class ChatRestartResumeTests(unittest.TestCase):
                 store = JobsStore(
                     jobs_path,
                     owner_id="api-service-before-chat-process-restart",
-                    lease_seconds=0.2,
+                    lease_seconds=_CHAT_PROCESS_RESTART_LEASE_SECONDS,
                 )
                 runner = JobRunner(self.sid, store, max_workers=1)
                 self.session._job_runner = runner
@@ -1130,7 +1136,7 @@ class ChatRestartResumeTests(unittest.TestCase):
                     # The first process exited without acknowledging either
                     # lease.  Give the replacement worker a real expired-lease
                     # boundary instead of relying on a same-process shortcut.
-                    time.sleep(0.5)
+                    time.sleep(_CHAT_PROCESS_RESTART_LEASE_SECONDS + 0.5)
                     replacement_result_queue = context.Queue()
                     replacement = context.Process(
                         target=_run_restarting_durable_chat_worker_in_child,
