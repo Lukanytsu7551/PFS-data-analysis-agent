@@ -102,9 +102,3 @@ pnpm run format:check
 pnpm run lint
 pnpm run build:check
 ```
-
-## Attribution and license
-
-PFS is based on the authorized [Data-Analysis-Agent](https://github.com/Zafer-Liu/Data-Analysis-Agent) transformation effort. Original source code, third-party resources, copyright notices, and applicable licenses retain their own boundaries. PFS-specific product code and documentation are maintained in this repository.
-
-The final public license for PFS has not yet been selected. Do not infer commercial redistribution rights from this README. See [`NOTICE.md`](NOTICE.md) for the current source and authorization record.
