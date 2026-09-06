@@ -378,11 +378,3 @@ tests/                 PFS 契约、适配层和分析选择器测试
 
 代码改动应至少通过相关回归、格式检查和 `git diff --check`。外部连接、部署和线上能力必须附上目标环境的可复核响应、页面或日志，不能只提交配置文件。
 
-<a id="attribution"></a>
-## 📄 来源与授权
-
-PFS 是基于已获授权的 [Zafer-Liu/Data-Analysis-Agent](https://github.com/Zafer-Liu/Data-Analysis-Agent) 进行的独立改造。参考仓库的代码、版权、第三方资源和原始许可证不因 PFS 的品牌改造而自动改变；PFS 新增的产品层、业务契约、界面和验证文档按本仓库当前文件维护。
-
-- 来源、授权和参考快照边界：[NOTICE.md](NOTICE.md)
-- 安全问题报告：[SECURITY.md](SECURITY.md)
-- 当前最终公开许可证尚未在本仓库选定；在许可证补齐前，不应从本 README 推断商业再分发权。
