@@ -60,6 +60,14 @@
 
 仓库内置样例包含 9 行数据、3 个月、3 个地区，销售额合计为 `100,000`。这条确定性演示不依赖外部模型；配置模型后，可以继续体验更开放的 Agent 分析流程。
 
+## 界面预览
+
+下面是当前真实 Flask 工作台的桌面入口。截图来自隔离本地服务的 `1280×720` 视口；根目录 `index.html` 仍是静态设计预览，不代表实际应用入口。
+
+![PFS 数据分析 Agent 工作台](./docs/assets/pfs-workbench-overview.png)
+
+展示路径：启动 → 上传 `data/fixtures/pfs_sales.csv` → 打开“口径预览” → 运行分析 → 查看 Claim/Evidence 与来源快照 → 生成交付物 → 在任务历史回看。
+
 ## 快速开始
 
 需要 Python 3.10+。进入项目目录后执行对应系统的入口：
@@ -102,7 +110,7 @@ docker run --rm -p 5001:5001 pfs-data-analysis-agent:local
 - [知识库使用说明](Information/repository_tutorial.md)：管理业务背景和分析规则
 - [MCP 使用说明](Information/MCP_tutorial.md)：配置可选外部工具连接
 - [版本更新日志](Information/Version_Update_Log.md)
-- [安全策略](SECURITY.md) · [权利与第三方说明](NOTICE.md)
+- [许可证](LICENSE) · [安全策略](SECURITY.md) · [权利与第三方说明](NOTICE.md)
 
 ## 斜杠命令
 
@@ -163,7 +171,9 @@ docker run --rm -p 5001:5001 pfs-data-analysis-agent:local
 
 ## 当前边界
 
-当前交付重点是可下载源码、桌面本地启动和核心数据分析闭环。macOS 本地启动、核心对话、CSV/XLSX、图表、交付物、任务和工作区基础链路已有本地证据；Windows 干净系统安装、CI/Release 下载回读、真实外部服务、部署和线上验收仍需在对应环境单独完成。
+当前交付重点是可下载源码、桌面本地启动和核心数据分析闭环。macOS 本地启动、核心对话、CSV/XLSX、图表、交付物、任务和工作区基础链路已有本地证据；GitHub Actions 已通过 Windows x64/macOS Apple Silicon 构建与 Windows 干净源码安装，当前构建产物也可从 Actions 下载。根目录 [`LICENSE`](LICENSE) 现已提供自定义非商业许可；正式 GitHub Release 仍等待最终功能和业务验收，不会仅因许可证文件存在而提前创建。
+
+真实 Windows 电脑安装、macOS/Windows 的安装升级卸载、复杂 Office 原生视觉、真实业务数据验收、真实模型和外部服务、部署及线上验收仍需在对应环境单独完成。真实模型和外部服务当前按约定默认关闭，不阻塞本地首版。
 
 本地测试、固定样例或配置文件只能证明对应层级，不等同于生产数据、外部服务或线上可用性。默认关闭的扩展不会在未配置时自动启动。
 
@@ -215,4 +225,4 @@ git diff --check
 
 ## 权利与安全
 
-本仓库未授予公开软件许可证，软件、依赖、字体、图标和其他材料分别受适用的版权、许可证或书面授权约束。使用和再分发前请阅读 [`NOTICE.md`](NOTICE.md)。安全问题请参见 [`SECURITY.md`](SECURITY.md)。
+本仓库采用 [`LICENSE`](LICENSE) 中的自定义非商业许可：注明出处后可学习、研究、非商业使用、修改和再分发；商业用途须事先取得著作权人的书面授权。软件、依赖、字体、图标和其他材料仍分别受适用的版权、许可证或书面授权约束，使用和再分发前请阅读 [`NOTICE.md`](NOTICE.md)。安全问题请参见 [`SECURITY.md`](SECURITY.md)。

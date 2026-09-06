@@ -7,6 +7,11 @@ on:
         description: "Package version without v prefix, for example 0.1.0"
         required: false
         default: "0.1.0"
+      release_confirmed:
+        description: "Confirm that final feature and business acceptance is complete"
+        required: true
+        type: boolean
+        default: false
   push:
     tags:
       - "v*"
@@ -92,15 +97,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Check public release policy
+      - name: Check release policy
         id: public_license
         shell: bash
         run: |
-          if [ -f LICENSE ]; then
+          if [ -s LICENSE ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "No public software license is present; GitHub Release creation will be skipped."
+            echo "No LICENSE file is present; GitHub Release creation will be skipped."
           fi
       - name: Check launchers and source staging
         shell: bash
@@ -316,7 +321,7 @@ jobs:
   release:
     name: Create GitHub Release
     needs: [build-windows, build-macos, windows-clean-install, release-preflight]
-    if: ${{ needs.release-preflight.outputs.public_license_present == 'true' }}
+    if: ${{ needs.release-preflight.outputs.public_license_present == 'true' && github.event_name == 'workflow_dispatch' && inputs.release_confirmed == true }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -432,10 +437,19 @@ jobs:
           fi
 
   release-disabled:
-    name: Release disabled (no public license)
+    name: Release held (final confirmation required)
     needs: [build-windows, build-macos, windows-clean-install, release-preflight]
-    if: ${{ needs.release-preflight.outputs.public_license_present != 'true' }}
+    if: ${{ needs.release-preflight.outputs.public_license_present != 'true' || github.event_name != 'workflow_dispatch' || inputs.release_confirmed != true }}
     runs-on: ubuntu-latest
     steps:
       - name: Explain release policy
-        run: echo "Build artifacts were validated; GitHub Release creation remains disabled because this repository has no public software license."
+        env:
+          LICENSE_PRESENT: ${{ needs.release-preflight.outputs.public_license_present }}
+          RELEASE_CONFIRMED: ${{ inputs.release_confirmed }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$LICENSE_PRESENT" != "true" ]]; then
+            echo "Build artifacts were validated; GitHub Release is held because LICENSE is missing."
+          elif [[ "$EVENT_NAME" != "workflow_dispatch" || "$RELEASE_CONFIRMED" != "true" ]]; then
+            echo "Build artifacts were validated; GitHub Release is held until the final feature and business acceptance is explicitly confirmed."
+          fi

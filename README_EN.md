@@ -51,6 +51,14 @@
 
 The bundled fixture contains 9 rows, 3 months, 3 regions, and a total sales amount of `100,000`. This deterministic path does not require an external model; configure a supported model to exercise the open-ended Agent loop.
 
+## Interface preview
+
+The image below shows the current Flask workbench, captured from an isolated local service at a `1280×720` desktop viewport. The root `index.html` remains a static design preview and is not the runtime application entry point.
+
+![PFS Data Analysis Agent workbench](./docs/assets/pfs-workbench-overview.png)
+
+Showcase path: start the app → upload `data/fixtures/pfs_sales.csv` → open metric preview → run the analysis → review Claim/Evidence and the source snapshot → create a deliverable → revisit it in task history.
+
 ## Quick start
 
 Python 3.10+ is required. From the repository directory:
@@ -93,7 +101,7 @@ Keep API keys out of Dockerfiles, images, and Git. See `docker-compose.yml` for 
 - [Knowledge base](Information/repository_tutorial.md): business context and analysis rules
 - [MCP guide](Information/MCP_tutorial.md): optional external tool connections
 - [Release notes](Information/Version_Update_Log_EN.md)
-- [Security policy](SECURITY.md) · [Rights and third-party notice](NOTICE.md)
+- [License](LICENSE) · [Security policy](SECURITY.md) · [Rights and third-party notice](NOTICE.md)
 
 ## Slash commands
 
@@ -154,7 +162,9 @@ Keep model keys in local configuration or environment variables. Other legacy pr
 
 ## Current boundary
 
-The current delivery focus is a downloadable source repository, desktop local startup, and a core data-analysis loop. macOS startup, core chat, CSV/XLSX, charts, deliverables, jobs, and workspace basics have local evidence; clean Windows installation, CI/Release download readback, real external services, deployment, and live verification still require their target environments.
+The current delivery focus is a downloadable source repository, desktop local startup, and a core data-analysis loop. macOS startup, core chat, CSV/XLSX, charts, deliverables, jobs, and workspace basics have local evidence; GitHub Actions has passed the Windows x64/macOS Apple Silicon builds and the clean Windows source-install job, and the resulting artifacts are available from Actions. The root [`LICENSE`](LICENSE) now provides a custom non-commercial license; a formal GitHub Release remains deferred until final feature and business acceptance, and will not be created merely because a license file exists.
+
+Installation on a physical Windows computer, macOS/Windows install-upgrade-uninstall flows, complex Office rendering in native applications, real business-data acceptance, real models and external services, deployment, and live verification still require their target environments. Real models and external services remain off by default as agreed and do not block the local first release.
 
 Local tests, fixed fixtures, or configuration files prove only their respective layer. Optional integrations stay off and do not start without explicit configuration.
 
@@ -171,4 +181,4 @@ git diff --check
 
 ## Rights and security
 
-This repository grants no public software license. Software, dependencies, fonts, icons, and other materials are governed by their applicable copyright, license, or written authorization. Read [`NOTICE.md`](NOTICE.md) before using or redistributing the repository. See [`SECURITY.md`](SECURITY.md) for security reports.
+This repository uses the custom non-commercial license in [`LICENSE`](LICENSE): learning, research, non-commercial use, modification, and redistribution are allowed with attribution; commercial use requires prior written authorization from the copyright holder. Software, dependencies, fonts, icons, and other materials remain governed by their applicable copyright, license, or written authorization. Read [`NOTICE.md`](NOTICE.md) before using or redistributing the repository. See [`SECURITY.md`](SECURITY.md) for security reports.
