@@ -417,3 +417,18 @@ class ExcelDataSource(DataSource):
 
     def get_preview_table(self, table_name: str, max_rows: int = 100) -> dict:
         return _preview_table_dict(self._conn, table_name, table_name, max_rows)
+
+    def close(self) -> None:
+        """Release the DuckDB handle owned by this source.
+
+        Session teardown calls this hook when available.  Keeping it
+        idempotent matters for Windows, where an open DuckDB handle prevents
+        the uploaded workbook or derived database from being recycled.
+        """
+        conn = getattr(self, "_conn", None)
+        self._conn = None
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                log.debug("[ExcelDS] connection close failed", exc_info=True)

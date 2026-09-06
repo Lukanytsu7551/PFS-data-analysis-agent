@@ -63,7 +63,7 @@ function setStatus(status) {
     idle: translate("pfs_report.idle", "未运行"),
     running: translate("pfs_report.running", "计算中"),
     completed: translate("pfs_report.completed", "已完成"),
-    error: translate("pfs_report.error", "报表预览加载失败"),
+    error: translate("pfs_report.error", "分析预览加载失败"),
     canceled: translate("pfs_report.canceled", "已取消"),
   };
   element.textContent = labels[status] || status;
@@ -73,7 +73,7 @@ function renderLoading() {
   const content = document.getElementById("pfs-report-content");
   if (!content) return;
   content.replaceChildren(
-    makeElement("div", "pfs-report-loading", translate("pfs_report.loading", "正在读取报表…")),
+    makeElement("div", "pfs-report-loading", translate("pfs_report.loading", "正在读取样例…")),
   );
 }
 
@@ -224,7 +224,7 @@ function renderError(message, code = "") {
     makeElement(
       "strong",
       "pfs-report-error-title",
-      translate("pfs_report.error", "报表预览加载失败"),
+      translate("pfs_report.error", "分析预览加载失败"),
     ),
     makeElement("span", "pfs-report-error-message", errorGuidance(code, message)),
   );
@@ -266,7 +266,7 @@ function deliveryLabel(format) {
   return (
     {
       xlsx: translate("pfs_report.delivery_excel", "Excel 数据"),
-      docx: translate("pfs_report.delivery_word", "Word 报告"),
+      docx: translate("pfs_report.delivery_word", "Word 文档"),
       pptx: translate("pfs_report.delivery_ppt", "PPT 演示"),
       dashboard: translate("pfs_report.delivery_dashboard", "分析看板"),
     }[format] || format
@@ -362,8 +362,8 @@ function toggleDeterministicMode() {
     button.setAttribute("aria-pressed", String(appState.pfsDeterministicMode));
     button.classList.toggle("is-active", appState.pfsDeterministicMode);
     button.title = appState.pfsDeterministicMode
-      ? translate("pfs_report.chat_mode_on", "聊天将按报表口径分析")
-      : translate("pfs_report.chat_mode_off", "关闭报表口径分析");
+      ? translate("pfs_report.chat_mode_on", "聊天将按分析口径运行")
+      : translate("pfs_report.chat_mode_off", "关闭分析口径模式");
     button.setAttribute("aria-label", button.title);
   }
   return appState.pfsDeterministicMode;
@@ -443,7 +443,7 @@ function renderSourceOptions() {
   if (!select) return;
   const previous = state.sourceValue || select.value || "fixture";
   select.replaceChildren();
-  select.append(makeElement("option", "", "PFS 固定示例销售报表"));
+  select.append(makeElement("option", "", "PFS 固定示例销售数据"));
   select.options[0].value = "fixture";
   for (const source of state.sources) {
     const repairLabel = source.validation_error
@@ -900,7 +900,7 @@ function renderBusinessAcceptance(result) {
   }
 
   const caveats = makeElement("section", "pfs-report-section pfs-report-warnings");
-  caveats.append(makeElement("h3", "pfs-report-section-title", "汇报限制"));
+  caveats.append(makeElement("h3", "pfs-report-section-title", "使用限制"));
   const caveatList = makeElement("ul");
   for (const caveat of result.caveats || []) caveatList.append(makeElement("li", "", caveat));
   caveats.append(caveatList);
@@ -1074,7 +1074,7 @@ async function loadFromQuestion() {
     return;
   }
   if (!question) {
-    renderError(translate("pfs_report.question_required", "请先输入一个明确的报表问题。"));
+    renderError(translate("pfs_report.question_required", "请先输入一个明确的分析问题。"));
     setStatus("error");
     input?.focus();
     return;

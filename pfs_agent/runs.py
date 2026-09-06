@@ -214,8 +214,46 @@ class PersistentAnalysisRunRegistry(AnalysisRunRegistry):
         owner_host = str(row["owner_host"] if isinstance(row, sqlite3.Row) else row[5])
         if owner_host != current_host:
             return True
+        pid_value = row["owner_pid"] if isinstance(row, sqlite3.Row) else row[4]
         try:
-            pid = int(row["owner_pid"] if isinstance(row, sqlite3.Row) else row[4])
+            pid = int(pid_value)
+        except (TypeError, ValueError):
+            return True
+
+        if os.name == "nt":
+            # ``os.kill(pid, 0)`` is not a liveness probe on Windows: it can
+            # report success for an exited process.  Ask Kernel32 for the
+            # actual exit code instead.  Access-denied remains conservative so
+            # a permission boundary cannot cause two owners to run together.
+            try:
+                import ctypes
+
+                PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+                STILL_ACTIVE = 259
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+                kernel32.OpenProcess.restype = ctypes.c_void_p
+                kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
+                kernel32.GetExitCodeProcess.restype = ctypes.c_int
+                kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+                kernel32.CloseHandle.restype = ctypes.c_int
+                handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid)
+                if not handle:
+                    error = ctypes.get_last_error()
+                    return error not in {6, 87, 1168}
+                try:
+                    exit_code = ctypes.c_uint32()
+                    if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                        return True
+                    return exit_code.value == STILL_ACTIVE
+                finally:
+                    kernel32.CloseHandle(handle)
+            except Exception:
+                # Keep the existing fail-closed behavior if the native probe
+                # itself is unavailable on a particular Windows runtime.
+                return True
+
+        try:
             os.kill(pid, 0)
         except ProcessLookupError:
             return False

@@ -94,7 +94,9 @@ class PfsExportArtifactTests(unittest.TestCase):
                     "field_mapping": {"x": "region", "y": "total_sales"},
                 }], color_scheme="pfs",
             )
-            dashboard = json.loads((self.tmp / (data["dashboard_id"] + ".json")).read_text())
+            dashboard = json.loads(
+                (self.tmp / (data["dashboard_id"] + ".json")).read_text(encoding="utf-8")
+            )
         from api.dashboard_html_export import build_export_html
         html = build_export_html(dashboard, self.agent._chart_store)
         self.assertIn("PFS 数据分析 Agent", html)

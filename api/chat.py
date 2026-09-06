@@ -66,7 +66,7 @@ def _pfs_deterministic_chat_response(sid: str, message: str, payload: dict, sess
         return None
     source_id = str(payload.get("source_id") or "").strip()
     if not source_id:
-        return jsonify({"error": "确定性报表分析需要 source_id", "code": "pfs_source_required"}), 400
+        return jsonify({"error": "确定性分析需要 source_id", "code": "pfs_source_required"}), 400
     try:
         from api.pfs import _session_tabular_source, _worksheet_from_payload
         from pfs_agent.query import parse_report_question
@@ -95,7 +95,7 @@ def _pfs_deterministic_chat_response(sid: str, message: str, payload: dict, sess
             file_name=display_file_name,
         )
         # Keep the chat bridge aligned with the direct PFS endpoints while
-        # retaining only the report's lightweight result trace.
+        # retaining only the lightweight result trace.
         result_dict = result.to_dict()
     except (TypeError, ValueError, OSError) as exc:
         return jsonify({"ok": False, "error": str(exc), "code": "pfs_query_failed"}), 400
@@ -107,11 +107,11 @@ def _pfs_deterministic_chat_response(sid: str, message: str, payload: dict, sess
 
     total = result_dict.get("total", 0)
     groups = result_dict.get("groups", [])
-    lines = ["已按确定性口径完成报表分析：" + parsed.interpretation, "合计：" + str(total)]
+    lines = ["已按确定性口径完成数据分析：" + parsed.interpretation, "合计：" + str(total)]
     if groups:
         lines.append("分组结果：")
         lines.extend("- " + str(item.get("dimension")) + "：" + str(item.get("value")) for item in groups)
-    lines.append("本次结果保留来源快照与轻量结论留痕，可在报表口径预览中回看。")
+    lines.append("本次结果保留来源快照与轻量结论留痕，可在分析口径预览中回看。")
     answer = "\n".join(lines)
     sess.add_user(message)
     sess.add_assistant(answer)
@@ -1460,7 +1460,7 @@ def resume_chat(sid: str, jid: str):
     if body.get("pfs_mode") == "deterministic":
         return jsonify(
             {
-                "error": "确定性报表分析请从报表分析入口重新执行，不能重复提交原请求。",
+                "error": "确定性分析请从分析入口重新执行，不能重复提交原请求。",
                 "code": "chat_resume_not_supported",
             }
         ), 409
@@ -2039,7 +2039,7 @@ def chat_stream(sid: str):
                 "profile_data": "数据概况结果",
                 "clean_data": "数据清洗结果",
                 "export_excel": "Excel 导出结果",
-                "export_report": "报告生成结果",
+                "export_report": "分析文档生成结果",
                 "generate_ppt": "PPT 生成结果",
                 "generate_dashboard": "看板生成结果",
             }.get(tool, f"{tool} 结果")

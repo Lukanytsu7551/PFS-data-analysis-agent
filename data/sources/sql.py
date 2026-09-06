@@ -544,6 +544,31 @@ class SQLDataSource(DataSource):
         return {"name": table_name, "columns": list(df.columns),
                 "rows": rows, "total_rows": None}
 
+    def close(self) -> None:
+        """Close active remote and local connections owned by this source."""
+        with self._active_remote_lock:
+            remote = self._active_remote_connection
+            self._active_remote_connection = None
+        if remote is not None:
+            try:
+                remote.close()
+            except Exception:
+                log.debug("[SQLDataSource] active remote connection close failed", exc_info=True)
+        duck = getattr(self, "_duck", None)
+        self._duck = None
+        if duck is not None:
+            try:
+                duck.close()
+            except Exception:
+                log.debug("[SQLDataSource] DuckDB connection close failed", exc_info=True)
+        engine = getattr(self, "_engine", None)
+        self._engine = None
+        if engine is not None:
+            try:
+                engine.dispose()
+            except Exception:
+                log.debug("[SQLDataSource] SQLAlchemy engine dispose failed", exc_info=True)
+
     # ── Cache inspection ──────────────────────────────────────────────────────
 
     def cache_status(self) -> dict:

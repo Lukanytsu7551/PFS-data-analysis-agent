@@ -178,7 +178,7 @@ class ReleaseIdentityTests(unittest.TestCase):
             "auth.db",
             "*.sqlite",
             "*.db",
-            "Data-Analysis-Agent-main/",
+            "*-Agent-main/",
             "outputs/",
             "_pfs-export-test/",
             "build/",

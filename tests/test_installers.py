@@ -117,7 +117,11 @@ class InstallerScriptTests(unittest.TestCase):
     def test_powershell_launcher_preserves_unicode_paths_with_utf8_without_bom(self):
         path = PROJECT_ROOT / "install.ps1"
         raw = path.read_bytes()
-        text = raw.decode("utf-8")
+        # The repository intentionally keeps generated PowerShell launchers in
+        # CRLF for Windows.  Normalize only the test view so the structural
+        # assertions are independent of the checkout platform; the raw-byte
+        # checks above still protect the UTF-8-without-BOM contract.
+        text = raw.decode("utf-8").replace("\r\n", "\n")
 
         self.assertFalse(raw.startswith(b"\xef\xbb\xbf"))
         self.assertIn('$LauncherContent = @"', text)
@@ -317,7 +321,7 @@ class InstallerScriptTests(unittest.TestCase):
                 text = (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
                 self.assertIn("PFS_REPO_URL", text)
                 self.assertIn("PFS-data-analysis-agent.git", text)
-                self.assertNotIn("Data-Analysis-Agent-main", text)
+                self.assertNotIn("-Agent-main", text)
 
 
 if __name__ == "__main__":

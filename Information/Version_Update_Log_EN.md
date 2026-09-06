@@ -1,30 +1,22 @@
-# PFS Development Log
+# PFS Release Notes
 
-## 0.1.0-dev · 2026-08-28
+## 0.1.0-dev · 2026-09-06
 
-### Implemented
+### Product capabilities
 
-- Established the PFS runtime source boundary without carrying secrets, SQLite runtime state, or uploaded data from the local reference snapshot.
-- Added PFS product identity, an independent SVG mark, service identifier, login branding, and chat-page branding.
-- Rewrote the README, product specification, usage guide, security policy, and user/data-processing note for PFS while retaining license materials.
-- Switched update checks to an explicitly configured PFS release channel, disabled by default during development.
-- Added PFS tool contracts and a deterministic policy gate for the first read/compute tool slice.
-- Added a fixed sales-report fixture, metric contract, data snapshot, claims, evidence records, and a read-only preview API.
-- Added the first Evidence Ledger contract: URL-plus-snippet identity, idempotent batch registration, claim links, conflict detection, and an atomic JSON persistence adapter.
-- Added an explicit metric-column analysis endpoint and source selector for CSV files uploaded in the current session; calculations remain deterministic Decimal sums.
-- Replaced the desktop installer artwork with a multi-size PFS icon and staged the Windows PyInstaller icon for audit.
-- Fixed existing frontend format and ESLint gate issues, then rebuilt the chat bundle.
+- Added the PFS local runtime entry points, application identity, icons, and desktop workbench.
+- Added CSV/XLSX upload, data preview, field inspection, quality signals, and controlled analysis.
+- Added natural-language chat, read-only queries, charts, Dashboard, JSON, CSV, Excel, Word, and PPT deliverables.
+- Added conversations, jobs, workspaces, Skills, knowledge, workflows, and lightweight source trace.
+- Added DeepSeek, Kimi, GLM, MiniMax, their Coding Plan variants, and custom OpenAI-compatible providers.
+- Added optional MCP, Teams, Hooks, Feishu, GPU/remote execution, and cloud-login surfaces; all remain off by default.
 
-### Verified
+### Local checks
 
-- 21 offline unit tests covering PFS contracts, the runtime adapter, reporting contracts, the Evidence Ledger, and chart selection passed.
-- Modified Python modules passed `py_compile`.
-- Prettier check, ESLint, and chat-bundle verification passed.
-- Flask test-client and Waitress local HTTP readbacks passed in the isolated `.venv`; PFS health, fixture, capability, ledger, and uploaded-CSV analysis responses matched expectations.
-- Release staging passed artifact audit with 3,868 files, 183,143,559 bytes, and no findings; the PFS fixture, Windows icon, PFS packaging spec, and chat bundle are included.
+- macOS startup, core chat, CSV/XLSX analysis, charts, deliverables, jobs, and workspace basics have local evidence.
+- Code, frontend formatting, static checks, and offline regression tests follow the development gates.
 
-### Not yet verified
+### Current boundary
 
-- Full Flask startup, model connections, real XLSX/database connections, and SSE long-running jobs.
-- Docker, queues, external MCP, Feishu, desktop packaging, restart recovery, deployment, and live login flow.
-- Automatic Evidence consumption, semantic verification, complete reporting UI, and formal evaluation datasets.
+- Clean Windows installation, CI/Release downloads, real external services, deployment, and live access require separate checks in their target environments.
+- Local samples and offline tests do not promise production data quality, external-service availability, or live service operation.

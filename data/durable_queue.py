@@ -1251,7 +1251,7 @@ class DurableQueueWorker:
                 )
 
                 def renew() -> None:
-                    while not heartbeat_stop.wait(interval):
+                    while not heartbeat_stop.is_set():
                         with context._lease_guard:
                             if heartbeat_stop.is_set():
                                 return
@@ -1286,6 +1286,8 @@ class DurableQueueWorker:
                                     task["id"],
                                 )
                                 return
+                        if heartbeat_stop.wait(interval):
+                            return
 
                 heartbeat_thread = threading.Thread(
                     target=renew,

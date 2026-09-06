@@ -930,7 +930,7 @@ async function sendMessage() {
   if (state.pfsDeterministicMode) {
     const pfsSource = pfs()?.pfsReport?.selectedUploadedSource?.();
     if (!pfsSource?.source_id) {
-      _localReply("请先在“口径预览”中选择一个已上传的 CSV/XLSX 数据源，或关闭“报表口径”模式。");
+      _localReply("请先在“口径预览”中选择一个已上传的 CSV/XLSX 数据源，或关闭“分析口径”模式。");
       return;
     }
     payload.pfs_mode = "deterministic";
@@ -1756,7 +1756,7 @@ function _onPfsResult(ev, ctx) {
   const metric = interpretation.metric || result.metric || {};
   const card = document.createElement("section");
   card.className = "pfs-chat-result";
-  card.setAttribute("aria-label", "PFS 报表分析结果");
+  card.setAttribute("aria-label", "PFS 数据分析结果");
 
   const heading = document.createElement("div");
   heading.className = "pfs-chat-result-heading";

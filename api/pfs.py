@@ -376,7 +376,7 @@ def _ppt_slides(result: object) -> list[dict]:
             "layout": "cover",
             "params": {
                 "title": f"PFS {metric['label']}分析",
-                "subtitle": f"{snapshot['file_name']} · 可追踪报表交付物",
+                "subtitle": f"{snapshot['file_name']} · 可追踪数据交付物",
             },
         },
         {
@@ -543,7 +543,7 @@ def _delivery_artifacts(result: object, data_source: object, sid: str, output_fo
             tool_result = agent._tool_export_excel([selected_table], f"pfs-report-{run_id}")
         elif output_format == "docx":
             tool_result = agent._tool_export_report(
-                f"PFS {metric['label']}分析报告", _report_sections(result)
+                f"PFS {metric['label']}分析文档", _report_sections(result)
             )
         elif output_format == "pptx":
             tool_result = agent._tool_generate_ppt(

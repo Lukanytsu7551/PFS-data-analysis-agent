@@ -141,13 +141,16 @@ def extract_text(filepath: str) -> str:
         return _extract_docx_text(filepath)
     if ext in (".xlsx", ".xls"):
         xl = pd.ExcelFile(filepath)
-        parts = []
-        for sheet in xl.sheet_names:
-            df = xl.parse(sheet)
-            if df.empty:
-                continue
-            parts.append(f"[Sheet: {sheet}]\n{_df_to_text(df)}")
-        return "\n\n".join(parts)
+        try:
+            parts = []
+            for sheet in xl.sheet_names:
+                df = xl.parse(sheet)
+                if df.empty:
+                    continue
+                parts.append(f"[Sheet: {sheet}]\n{_df_to_text(df)}")
+            return "\n\n".join(parts)
+        finally:
+            xl.close()
     raise ValueError(f"Unsupported file type: {ext}")
 
 
@@ -329,18 +332,21 @@ def parse_file(filepath: str, client=None, model: str = "") -> dict[str, Any]:
     if ext in (".xlsx", ".xls"):
         # Try every sheet; use the first one that looks structured
         xl = pd.ExcelFile(filepath)
-        structured_records: list[dict] = []
-        unstructured_texts: list[str] = []
+        try:
+            structured_records: list[dict] = []
+            unstructured_texts: list[str] = []
 
-        for sheet in xl.sheet_names:
-            df = xl.parse(sheet)
-            if df.empty:
-                continue
-            table_type, confidence = _detect_template(list(df.columns))
-            if confidence >= _TEMPLATE_THRESHOLD:
-                structured_records.extend(_df_to_structured(df, table_type))
-            else:
-                unstructured_texts.append(f"[Sheet: {sheet}]\n{_df_to_text(df)}")
+            for sheet in xl.sheet_names:
+                df = xl.parse(sheet)
+                if df.empty:
+                    continue
+                table_type, confidence = _detect_template(list(df.columns))
+                if confidence >= _TEMPLATE_THRESHOLD:
+                    structured_records.extend(_df_to_structured(df, table_type))
+                else:
+                    unstructured_texts.append(f"[Sheet: {sheet}]\n{_df_to_text(df)}")
+        finally:
+            xl.close()
 
         # If we found any structured sheets, return them directly.
         # Unstructured sheets in the same file are also sent to LLM.

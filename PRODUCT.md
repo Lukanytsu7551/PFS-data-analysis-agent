@@ -1,207 +1,90 @@
-# PFS Product Specification
+# PFS 数据分析 Agent
 
-## Register
+## 产品定位
 
-product
+PFS 数据分析 Agent 是一款本地运行的通用数据分析工作台。它连接文件、数据库或受控数据源，让用户用自然语言提出问题，查看数据结构，执行有边界的查询与分析，生成图表和交付物，并回看每次运行的来源与状态。
 
-## Platform
+## 目标用户
 
-web (Flask + vanilla JS, desktop-only delivery scope)
+- 需要快速理解文件或数据库的业务人员；
+- 需要重复执行分析、检查数据质量和交付结果的数据分析师；
+- 需要在本地或受控工作区复核分析过程的团队负责人。
 
-## Product Name
+## 核心工作流
 
-PFS 数据分析 Agent — 可追踪、可核验的报表数据分析工作台
-
-## Summary
-
-一个面向报表、经营数据和团队分析任务的 AI Agent 工作台。用户连接数据源后，可以用自然语言提出问题，系统完成数据结构识别、受控 SQL 查询、统计分析、图表和可审计产出，并通过 SSE 展示运行过程。平台支持本地和受控托管部署；具体部署能力必须以实际环境验收为准。
-
-## Delivery status
-
-本文件描述目标产品，不等于全部能力已经完成。当前四天交付先以可下载源码、macOS/Windows 本地启动和核心数据分析演示为 P0；CSV/XLSX 确定性分析、PFS 第一段策略门、轻量 Claim/Evidence/来源快照、JSON/CSV 下载和固定报表的 Excel/Word/PPT/Dashboard 统一交付已有本地证据。真实外部服务、干净 Windows 安装、签名公证、部署和线上功能仍需单独验收；现役边界见 [docs/HANDOFF.md](docs/HANDOFF.md)。
-
-## Confirmed four-day release plan
-
-本轮按用户确认的四天顺序执行：Day 1 冻结范围、授权/许可证、文档规则和工作区发布切片；Day 2 完成核心演示闭环，并为每个继承目标功能做一次成功 smoke 和关键入口交互检查；Day 3 完成 Windows、CI 和发布候选验证；Day 4 对齐 README/Release，完成提交、推送和下载回读。核心演示完整验证一次即可；默认休眠能力只确认不会误启动；不做生产压测、多主机恢复、完整安全认证和签名公证。没有真实证据的能力只能标为保留、实验性或待配置。
-
-本轮范围例外固定为：商业画布和 Google Sheets 退役；Teams、Hooks、GPU/远程执行、飞书和云端登录保留扩展接口但默认关闭，不阻塞首版发布。后续任务默认不使用 Sol-Luna task lane。
-
-## Users
-
-面向需要在本地或受控工作区完成数据查询、业务分析、复核和报告交付的业务分析人员、数据分析师与团队负责人。用户通常处于连续工作流中，需要快速查看数据、调用分析能力、跟踪团队任务并审计结果来源。
-
-## Product Purpose
-
-提供一个可调用数据工具、Skills、知识库和多 Agent Workflow 的分析工作台。成功意味着用户能从对话或场景启动真实分析任务，清楚看到执行状态和待办，并将最终结论追溯到数据、SQL、节点和 Artifact。
-
-## Key Features
-
-### Core Analysis
-- **自然语言数据分析**：输入自然语言问题，自动生成 SQL、执行查询、推荐图表并输出业务洞察
-- **多数据源支持**：文件（Excel / CSV）、数据库（SQLite / MySQL / PostgreSQL / SQL Server）
-- **智能图表系统**：当前注册 41 个图表 ID，已有固定夹具生成证据；真实业务数据和桌面视觉仍需逐项验收
-- **SSE 流式输出**：分析过程实时可见，分阶段展示进度
-
-### Advanced Capabilities
-- **多模型兼容**：DeepSeek、Kimi、GLM、MiniMax（含 Coding Plan）以及用户自定义 OpenAI-compatible 模型
-- **深度分析**：异常值处理、十分位分组、K-Means 聚类、决策树建模
-- **报告生成**：Excel 表格、Word 文档、PPT 演示文稿和 Dashboard 统一即时交付；会话 Artifact 历史已接入，跨进程关联与复杂 Office 视觉尚未完成
-- **MCP 拓展**：连接本地或远程 MCP 服务器，扩展 Agent 工具能力
-- **知识库**：上传业务知识文档，让 Agent 理解业务上下文
-
-### Workflow & Collaboration
-- **AI 团队协作**：复杂任务拆分给多个专长 Agent 协同完成
-- **Skills 系统**：可复用的分析技能模块
-- **工作流引擎**：WF0 规范的确定性工作流执行，支持审批、暂停、恢复
-- **Hook 系统**：事件驱动的自动化钩子，支持条件触发和一次性执行
-
-### Workspace & Session
-- **工作区管理**：多工作区隔离，每个工作区独立的数据源、会话和文件
-- **会话系统**：持久化会话，支持历史回溯和上下文延续
-- **跨会话记忆**：持久化用户偏好和分析上下文
-
-## Architecture
-
-```
-app.py                          — 应用入口，Flask factory
-├── agent/                      — Agent 核心引擎
-│   ├── agent.py                — 主 Agent 循环（SSE 流式、工具调用、上下文压缩）
-│   ├── prompts.py              — 系统提示词构建
-│   ├── tools/                  — 工具系统（数据查询、分析、导出、工作区）
-│   ├── workflows/              — WF0 工作流引擎（DAG 执行、审批、状态机）
-│   ├── teams/                  — 多 Agent 团队协作
-│   ├── hooks/                  — 事件钩子系统
-│   ├── memory.py               — 跨会话记忆
-│   ├── compaction.py           — 上下文窗口管理与压缩
-│   └── skills.py               — Skills 加载与执行
-├── api/                        — Flask Blueprint 路由层
-│   ├── chat.py                 — 聊天 SSE 接口
-│   ├── datasource.py           — 数据源管理
-│   ├── workspace.py            — 工作区 API
-│   ├── jobs.py                 — 后台任务管理
-│   ├── workflows.py / workflow_runs.py — 工作流 API
-│   ├── teams.py                — 团队协作 API
-│   ├── hooks.py                — Hook 管理
-│   ├── dashboard.py            — 仪表盘
-│   ├── knowledge.py            — 知识库
-│   ├── skills.py               — Skills API
-│   └── ...
-├── data/                       — 数据存储层
-│   ├── session.py              — 会话持久化
-│   ├── workspace.py            — 工作区存储
-│   ├── memory_store.py         — 记忆存储
-│   └── ...
-├── Function/                   — 分析功能模块
-│   ├── Analyze/                — 统计分析（聚类、决策树、异常值）
-│   ├── Charts_generation/      — 图表生成引擎
-│   ├── Clean/                  — 数据清洗
-│   ├── Knowledge/              — 知识库 RAG
-│   └── Output/                 — 报告导出
-├── LLM/                        — LLM 配置与图表选择器
-├── frontend/                   — 前端 ES 模块（Vite 构建）
-│   ├── features/               — 功能模块（chat-stream, models, teams, UI）
-│   └── legacy/                 — 遗留模块
-├── static/                     — 静态资源
-│   ├── css/parts/tokens.css    — 设计令牌（浅色 / 深色主题）
-│   ├── css/parts/chat.css      — 聊天界面
-│   ├── css/parts/modals.css    — 模态框
-│   └── dist/                   — Vite 构建产物
-└── templates/
-    └── agent_chat.html         — 主聊天页面
+```text
+提出问题 → 连接或上传数据 → 检查结构与范围 → 执行受控工具
+→ 查看分析结果 → 生成图表或交付物 → 回看来源与运行记录
 ```
 
-## Tech Stack
+工作台把数据、对话、任务状态、来源留痕和交付物放在同一个工作上下文中。模型负责理解和编排，权限、数据范围和副作用由应用策略控制。
 
-| Layer | Technology |
-|-------|-----------|
-| Backend | Python 3.10+, Flask, Waitress/Gunicorn |
-| Frontend | Vanilla JS (ES modules), Vite, CSS Custom Properties |
-| Data | Pandas, NumPy, DuckDB, SQLAlchemy, SciPy |
-| Visualization | Plotly, Matplotlib, PyEcharts |
-| LLM | OpenAI SDK (DeepSeek / Kimi / GLM / MiniMax / custom compatible) |
-| RAG | Jieba 分词, ONNX Runtime (BGE-small-zh 嵌入) |
-| Export | python-docx, python-pptx, openpyxl |
-| Database Drivers | PyMySQL, psycopg2, pyodbc |
-| Package Manager | pip (Python), pnpm (Node) |
-| Deployment | Railway, Vercel, Docker, Windows installer (PyInstaller) |
+## 能力范围
 
-## Surface Inventory
+### 数据接入与理解
 
-| Surface | Route | Description |
-|---------|-------|-------------|
-| 聊天主界面 | `/` | 对话式分析主工作区：消息列表 + 输入框 + 侧边栏 |
-| 侧边栏 | inline | 会话、模型、数据源、MCP、工作区状态与入口 |
-| 数据预览模态框 | modal | 多 Sheet 数据预览，含侧边栏和主内容区 |
-| 设置面板 | overlay | LLM 配置、API Key、Base URL、Model 选择 |
-| 仪表盘 | `/dashboard` | 可视化看板（独立页面，遗留实现） |
-| 工作流详情 | overlay | 工作流 DAG 可视化、节点状态、审批操作 |
-| 任务历史 | drawer | 后台任务运行记录与状态 |
-| MCP 配置 | overlay | MCP 服务器连接管理 |
-| 知识库管理 | overlay | 业务知识文档上传与管理 |
+- CSV、XLSX 上传和会话内数据预览；
+- SQLite、MySQL、PostgreSQL、SQL Server 连接入口；
+- 受控 HTTP 数据源；
+- 表、字段、行数、时间范围、缺失值和重复记录提示；
+- 数据源标识、内容快照和轻量来源信息。
 
-## Design Tokens
+### 分析与可视化
 
-### Light theme
-- **Primary**: `#002FA7` (Klein Blue) — primary actions, selection, links
-- **Background**: `#f4f6fa` — app shell
-- **Surface**: `#ffffff` — cards, modals, bubbles
-- **Surface layers**: `#f8fafc` (surface-2), `#f1f5f9` (surface-3)
-- **Text**: `#1e293b` (body), `#475569` (soft), `#64748b` (mute), `#94a3b8` (dim)
-- **Sidebar**: `#1c1f33` background, `#e2e8f0` foreground — dark sidebar on light app
-- **Code blocks**: `#0f172a` background
-- **User bubble**: `#2e6df0` — deeper blue for AA contrast on white text
-- **Semantic**: success (`#22c55e`), warning (`#f59e0b`), danger (`#ef4444`), accent (`#7c3aed`)
+- 自然语言问题解析与 SQL 生成；
+- 只读查询、分组统计、安全聚合和指标目录；
+- 异常检测、十分位、K-Means、决策树和预测评估入口；
+- 图表推荐、交互式图表和 Dashboard 交付入口；
+- 原始记录保留，数据质量问题显式提示，不自动静默去重。
 
-### Dark theme
-- **Primary**: `#4a7ad8` — desaturated for dark background readability
-- **Background**: `#0b0f1c` — deep navy-black
-- **Surface**: `#161a2c` → `#1e2238` → `#2a2f47`
-- **Text**: `#e6e8f0` (body), stepping down through `#c2c8d6`, `#97a0b3`, `#6b7388`
-- **Sidebar**: `#0d1124` — slightly darker than main bg
+### Agent 与工作空间
 
-### Typography
-- System font stack (`system-ui, -apple-system, Segoe UI, Roboto, ...`)
-- Single sans family across all surfaces — no display/body pairing
-- Monospace for code, SQL, and data
-- Fixed rem scale (no fluid typography outside hero areas)
+- SSE 流式对话和工具调用状态；
+- Skills、知识库、工作区权限和上下文管理；
+- 任务队列、停止、重试、历史和本地恢复边界；
+- Workflow、团队协作、Hooks 和 MCP 扩展入口；
+- Teams、飞书、GPU/远程执行和云端登录保留为可选能力，默认关闭。
 
-### Spacing & Layout
-- Chat layout: dark sidebar (left) + light content area (right)
-- 24px content padding, 14px gap between messages
-- Modals: resizable, min 520px width, max 94vw
-- Responsive: structural breakpoints, not fluid type
+### 结果交付
 
-### Component Vocabulary
-- **Buttons**: solid primary, ghost secondary, icon buttons for compact actions
-- **Status dots**: colored indicators (green=connected, gray=disconnected, animated=loading)
-- **Chevrons**: `›` for expandable rows, `⌄` for dropdowns
-- **Sidebar**: collapsible dark panel with status rows, drawers for detail views
-- **Modals**: overlay with backdrop blur, resizable, header + body structure
-- **Messages**: user = compact blue bubble (right), assistant = left-rule report style (left)
-- **Scrollbar**: slim custom (4px, primary gradient)
+- JSON、CSV、Excel、Word、PPT 和 Dashboard；
+- 会话内 Artifact 元数据和下载记录；
+- 结果与数据源、运行 ID、分析口径和轻量结论留痕关联。
 
-### Motion
-- Message entrance: 350ms slide-up with scale (cubic-bezier .2, .8, .2, 1)
-- Avatar hover: 200ms scale transform
-- Modals: fade + scale entrance
-- No orchestrated page-load sequences; motion conveys state, not decoration
+## 模型目录
 
-## Brand Personality
+公共内置模型包括 DeepSeek、Kimi、GLM、MiniMax 及其 Coding Plan。用户也可以配置自定义 OpenAI-compatible provider。密钥只进入本地配置或环境变量，不写入仓库。
 
-专业、克制、可信。表达直接、信息密度适中，强调事实、状态和可操作性，让界面在长时间报表分析工作中保持安静而可靠。
+## 产品界面
 
-## Anti-references
+| 区域 | 作用 |
+|---|---|
+| 主对话区 | 提出问题、查看流式过程和阅读分析结果 |
+| 左侧工作区 | 管理会话、模型、数据源、工作目录和常用入口 |
+| 数据预览 | 查看表、字段、样例行和数据质量信息 |
+| 任务历史 | 查看后台任务状态、失败原因和可恢复状态 |
+| 结果交付区 | 生成、下载和回看分析交付物 |
+| 设置与帮助 | 配置模型、语言、主题、运行偏好和使用说明 |
 
-不做营销落地页式构图，不用装饰性卡片、夸张大标题或无意义动效。普通用户不应先理解复杂 DAG 才能运行任务；自动化也不能隐藏失败、审批、数据来源或人工修改记录。
+## 运行方式
 
-## Design Principles
+- macOS：`./install.sh` 后运行 `./start.command`；
+- Windows：运行 `install.ps1` 后使用 `start.bat`；
+- Docker：用于开发、镜像验证和部署尝试；
+- 默认地址：`http://127.0.0.1:5001`。
 
-1. 任务优先：首屏直接进入分析、运行和审批，不用功能宣传占据工作空间。
-2. 状态可读：运行中、等待、失败和完成必须有稳定、一致、可操作的表达。
-3. 渐进披露：默认展示用户当前需要的信息，图结构、JSON 和血缘细节按需展开。
-4. 证据可追溯：结论、Job、Artifact、SQL、数据快照和审批记录之间保持可导航关联。
-5. 熟悉胜过新奇：复用现有控件、颜色和交互词汇，让用户把注意力留给分析任务。
+普通本地用户不需要 Docker。实际能力受操作系统、依赖、模型、数据库权限、工作区路径和外部服务配置影响。
 
-## Accessibility & Inclusion
+## 数据与安全原则
 
-以键盘可达、清晰焦点、可读对比度和语义化状态为基础；支持深浅主题和减少动态效果偏好。当前验收范围为桌面视口，按钮、长名称、错误信息和结构化结果不得重叠或溢出。
+1. 模型输出不是事实本身，用户应复核数据、字段、筛选条件和计算结果。
+2. 查询和计算优先使用只读工具；写入、导出和外部调用需要明确目标与权限。
+3. 外部网页、MCP 返回、文件内容和模型输出都按不可信输入处理。
+4. 不提交 API Key、密码、上传数据、数据库、生成文件和本地运行状态。
+5. 默认关闭的外部能力不会因代码存在而自动连接或发送数据。
+
+## 验收边界
+
+本文件描述产品结构，不替代运行验收。当前版本重点验证桌面本地启动、核心分析、图表、交付物、任务和工作区基础链路；Windows 干净安装、CI/Release 下载、真实外部服务、部署和线上访问需要在对应环境单独确认。
+
+“源码存在”“固定样例通过”“本地测试通过”“已提交”“已推送”“已部署”和“线上可访问”是不同状态，产品说明不把它们合并为一个结论。

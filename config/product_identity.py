@@ -13,7 +13,7 @@ PRODUCT_SHORT_NAME = "PFS"
 PRODUCT_NAME = os.environ.get("PFS_PRODUCT_NAME", "PFS 数据分析 Agent").strip()
 PRODUCT_TAGLINE = os.environ.get(
     "PFS_PRODUCT_TAGLINE",
-    "可追踪、可核验的报表数据分析工作台",
+    "可追踪、可核验的数据分析工作台",
 ).strip()
 _DEFAULT_PRODUCT_VERSION = "0.1.0-dev"
 _FROZEN_PRODUCT_METADATA = "pfs-product-metadata.json"

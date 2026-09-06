@@ -28,21 +28,18 @@ Dockerfile text eol=lf
 *.svg text eol=lf
 LICENSE text eol=lf
 
-# Reviewed project metadata and offline fixtures have an explicit LF policy.
+# Repository metadata and offline fixtures have an explicit LF policy.
 /.dockerignore text eol=lf
 /.env.example text eol=lf
 /.gitignore text eol=lf
-/.impeccable.md text eol=lf
 /.prettierignore text eol=lf
 /.prettierrc.json text eol=lf
 /MCP/AtlasCloud/.gitignore text eol=lf
 /MCP/AtlasCloud/.npmignore text eol=lf
-/docs/Readme text eol=lf
 data/fixtures/** text eol=lf
 
-# Reference snapshots and runtime configuration are opaque: never normalize
-# or diff their contents. Clear eol explicitly after broad text rules above.
-Data-Analysis-Agent-main/** binary -eol
+# Runtime configuration is opaque: never normalize or diff its contents.
+# Clear eol explicitly after broad text rules above.
 data/datasource_config.json binary -eol
 LLM/llm_config.json binary -eol
 memory/** binary -eol

@@ -71,6 +71,7 @@ class PfsDeliveryArtifactTests(unittest.TestCase):
                 downloaded = self.client.get(f"/api/session/{self.sid}/lifecycle/artifacts/{artifact_id}/download")
                 self.assertEqual(200, downloaded.status_code)
                 self.assertEqual(b"pfs artifact", downloaded.data)
+                downloaded.close()
                 self.assertEqual(1, self.client.get(f"/api/session/{self.sid}/lifecycle/artifacts/{artifact_id}").get_json()["artifact"]["download_count"])
                 cross_session = self.client.get(f"/api/session/{other_sid}/lifecycle/artifacts/{artifact_id}")
                 self.assertEqual(404, cross_session.status_code)
@@ -377,6 +378,7 @@ class PfsDeliveryArtifactTests(unittest.TestCase):
             )
             downloaded = self.client.get(f"/api/session/{self.sid}/lifecycle/artifacts/{artifact_id}/download")
             self.assertEqual(200, downloaded.status_code)
+            downloaded.close()
             recycled = self.client.post(
                 "/api/lifecycle/artifacts/registered/recycle",
                 json={"artifact_id": artifact_id},
@@ -478,6 +480,7 @@ class PfsDeliveryArtifactTests(unittest.TestCase):
             self.assertTrue(reopened_artifact["workspace"]["available"])
             self.assertEqual(200, downloaded.status_code)
             self.assertEqual(b"workspace-linked-artifact", downloaded.data)
+            downloaded.close()
 
             probe = subprocess.run(
                 [
@@ -585,7 +588,7 @@ class PfsDeliveryArtifactTests(unittest.TestCase):
             document_text = "\n".join(
                 paragraph.text for paragraph in Document(next(Path(tmp).glob("*.docx"))).paragraphs
             )
-            self.assertIn("PFS 销售额分析报告", document_text)
+            self.assertIn("PFS 销售额分析文档", document_text)
             self.assertIn("SHA-256", document_text)
             presentation = Presentation(next(Path(tmp).glob("*.pptx")))
             self.assertEqual(4, len(presentation.slides))
@@ -660,6 +663,7 @@ class PfsDeliveryArtifactTests(unittest.TestCase):
             disposition.encode("latin-1")
             self.assertIn("filename*=UTF-8''", disposition)
             self.assertIn("PFS_", disposition)
+            export_response.close()
 
     def test_delivery_rejects_unknown_format(self):
         response = self.client.post(

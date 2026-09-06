@@ -1,94 +1,58 @@
-# MCP使用教程
+# MCP 使用说明
+
+MCP 是 PFS 的可选扩展协议，用于把经过授权的外部工具接入 Agent。它默认关闭；只有在用户明确配置并启动服务器后，PFS 才会尝试连接。
+
+## 配置前准备
+
+1. 确认 MCP 服务的来源、权限、网络范围和数据处理方式。
+2. 为 MCP 服务准备独立目录，不要把依赖和配置散落到用户目录。
+3. 不要把 API Key、Cookie、密码或带有个人数据的配置提交到 Git。
+
+## 本地 MCP 配置
+
+在 PFS 的 MCP 面板中填写服务的启动命令、参数和工作目录。一个通用的本地配置形态如下：
+
+```json
+{
+  "command": "node",
+  "args": ["/path/to/mcp-server.js"],
+  "cwd": "/path/to/mcp"
+}
 ```
-以playwright为例
-Playwright 是微软开源的现代浏览器自动化框架，
-可通过编程方式模拟真实用户在浏览器中的操作，
-广泛用于端到端测试（E2E）、网页自动化和数据采集。
+
+Windows 路径请使用实际目录，例如：
+
+```json
+{
+  "command": "node",
+  "args": ["C:\\pfs-mcp\\server.js"],
+  "cwd": "C:\\pfs-mcp"
+}
 ```
 
-## 1. 在项目目录里初始化项目
+配置完成后，先点击连接，再检查工具列表、服务状态和错误信息。没有真实连接响应时，只能视为配置完成，不能视为 MCP 能力已经验收。
 
-建议在项目目录底下先创建一个独立文件夹保存本地MCP，避免把文件散落到用户根目录。
+## Playwright MCP 示例
 
-### 1.1 创建目录并进入
+以下命令只用于创建一个独立的本地实验目录：
 
 ```powershell
-mkdir ~\PFSDataAnalysisAgent\MCP（填写实际的项目目录）
-cd ~\PFSDataAnalysisAgent\MCP
-```
-
-### 1.2 初始化 npm 项目
-
-```powershell
+mkdir C:\pfs-mcp
+cd C:\pfs-mcp
 npm init -y
-```
-
-这一步会生成 `package.json`，用于管理项目依赖与脚本。
-
-### 1.3 安装 Playwright 测试包
-
-```powershell
-npm install @playwright/test
-```
-
-这一步才是真正安装 Playwright 相关依赖。
-
-### 1.4 下载浏览器
-
-```powershell
+npm install @playwright/test @playwright/mcp
 npx playwright install
 ```
 
-这会下载 Playwright 所需的浏览器，包括：
+安装完成后，根据本机包版本确认 MCP 的实际启动入口，再将命令、参数和工作目录填入 PFS。不要直接复制未经确认的绝对路径。
 
-- Chromium
-- Firefox
-- WebKit
+## 远程 MCP
 
----
+远程 MCP 需要服务方提供明确的 URL、认证方式、证书要求和权限范围。连接前先用目标环境提供的健康检查验证；不要把远程地址、令牌或响应内容写入公开日志。
 
-## 2. 安装 MCP 包
+## 安全边界
 
-进入项目目录后，安装 `@playwright/mcp`：
-
-```powershell
-cd ~\PFSDataAnalysisAgent\MCP
-npm i -D @playwright/mcp
-```
-
-安装完成后，检查包内容：
-
-```powershell
-dir C:\playwright-test\node_modules\@playwright\mcp
-```
-
-你应该能看到类似这些文件：
-
-- `cli.js`
-- `index.js`
-- `package.json`
-- `README.md`
-
-例如你当前目录结构中已经确认存在：
-
-```text
-C:\playwright-test\node_modules\@playwright\mcp\cli.js
-```
-
-这说明入口文件已经找到了。
-
----
-
-## 3. MCP 的配置方式
-如图，在配置栏书写下面的内容，点击连接：
-
-![MCP](assets/MCP0.png)
-
-
-
-## FAQ
-
-Q：远程MCP如何配置？
-
-A：如下图，按照远程服务器的要求进行填写
-![MCP](assets/MCP3.png)
+- MCP 返回内容按不可信输入处理；
+- 任何写入、发送消息、上传或删除操作都应先确认目标和范围；
+- 服务器异常、权限不足或配置不完整时，PFS 应安全失败，不自动切换到未知服务；
+- 本地 MCP 配置存在不等于真实外部服务已经可用。

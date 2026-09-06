@@ -54,11 +54,11 @@ def export_to_report(
     abort_check=None,
 ) -> Tuple[str, str]:
     """
-    Generate a Word (.docx) report and optionally bundle charts as a ZIP.
+    Generate a Word (.docx) analysis document and optionally bundle charts as a ZIP.
 
     Parameters
     ----------
-    title       : Report title shown at the top of the document.
+    title       : Analysis title shown at the top of the document.
     sections    : Ordered list of {heading: str, content: str | list[dict]}.
                   str content → paragraph; list[dict] content → table.
     filepath    : Absolute path for the .docx file (directory must exist).
