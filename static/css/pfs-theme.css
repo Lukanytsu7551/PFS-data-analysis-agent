@@ -2490,3 +2490,275 @@ body.pfs-sidebar-rail-collapsed .sb-footer-actions .pfs-icon-slot,
   .composer-toolbar { min-height: 50px; padding: 6px 7px 8px 8px; }
   .composer-group-context .composer-model { min-width: 0; width: min(230px, 100%); }
 }
+
+/* ── PFS blue-white visual system ───────────────────────────────────────
+   One final token layer keeps the light product surface white, the working
+   canvas blue-tinted, and every neutral icon on the same blue semantic rail.
+   Status colours remain reserved for status meaning (success, warning, error).
+   ─────────────────────────────────────────────────────────────────────── */
+:root {
+  --color-primary: #002fa7;
+  --color-primary-hover: #001f7a;
+  --color-primary-soft: #eaf2ff;
+  --color-primary-tint: #bfd4f4;
+  --color-accent: #145dcc;
+  --color-accent-soft: #eef5ff;
+  --color-accent-tint: #bfd4f4;
+  --color-accent-text: #0848a6;
+  --color-icon: #145dcc;
+  --color-icon-muted: #55729c;
+  --color-bg: #f4f8fd;
+  --color-surface: #ffffff;
+  --color-surface-2: #f6f9fe;
+  --color-surface-3: #eaf2fb;
+  --color-border: #d6e2f0;
+  --color-border-soft: #e5edf6;
+  --color-border-strong: #b7cbe3;
+  --color-text: #12213b;
+  --color-text-soft: #3a5372;
+  --color-text-mute: #617895;
+  --color-text-dim: #8aa0ba;
+  --color-sidebar-bg: #ffffff;
+  --color-sidebar-bg-2: #f4f8fd;
+  --color-sidebar-hover: #edf4ff;
+  --color-sidebar-fg: #152641;
+  --color-sidebar-fg-mute: #486585;
+  --color-sidebar-fg-dim: #6f88a7;
+  --color-sidebar-fg-faint: #8da3bd;
+  --color-sidebar-divider: #d7e4f2;
+  --color-user-bubble-bg: #0b5bd3;
+  --color-user-bubble-fg: #ffffff;
+  --send-btn-grad-from: #0b5bd3;
+  --send-btn-grad-to: #0b5bd3;
+  --send-btn-grad-hover-from: #0848a6;
+  --send-btn-grad-hover-to: #0848a6;
+  --send-btn-dark-from: #0b5bd3;
+  --send-btn-dark-to: #0b5bd3;
+  --send-btn-dark-hover-from: #0848a6;
+  --send-btn-dark-hover-to: #0848a6;
+  --send-btn-glow: transparent;
+  --send-btn-ring: rgba(11, 91, 211, .18);
+  --pfs-paper-rule: #d6e2f0;
+}
+
+[data-theme="dark"] {
+  --color-primary: #8db2ff;
+  --color-primary-hover: #b0c9ff;
+  --color-primary-soft: #1b3158;
+  --color-primary-tint: #456aa8;
+  --color-accent: #8db2ff;
+  --color-accent-soft: #1b3158;
+  --color-accent-tint: #456aa8;
+  --color-accent-text: #b0c9ff;
+  --color-icon: #8db2ff;
+  --color-icon-muted: #a6bee8;
+  --color-bg: #0f1a2d;
+  --color-surface: #15243b;
+  --color-surface-2: #1a2d48;
+  --color-surface-3: #223b5f;
+  --color-border: #30496d;
+  --color-border-soft: #263e61;
+  --color-border-strong: #4b6b99;
+  --color-text: #eff5ff;
+  --color-text-soft: #c6d5ec;
+  --color-text-mute: #9fb3d0;
+  --color-text-dim: #7f96b6;
+  --color-sidebar-bg: #0b172b;
+  --color-sidebar-bg-2: #10213b;
+  --color-sidebar-hover: #1a3764;
+  --color-sidebar-fg: #eff5ff;
+  --color-sidebar-fg-mute: #c5d5ee;
+  --color-sidebar-fg-dim: #9fb4d2;
+  --color-sidebar-fg-faint: #7f96b6;
+  --color-sidebar-divider: #2c456b;
+  --color-user-bubble-bg: #2f6ed0;
+  --color-user-bubble-fg: #ffffff;
+  --send-btn-grad-from: #3e79df;
+  --send-btn-grad-to: #3e79df;
+  --send-btn-grad-hover-from: #5d91ee;
+  --send-btn-grad-hover-to: #5d91ee;
+  --send-btn-dark-from: #3e79df;
+  --send-btn-dark-to: #3e79df;
+  --send-btn-dark-hover-from: #5d91ee;
+  --send-btn-dark-hover-to: #5d91ee;
+  --send-btn-ring: rgba(141, 178, 255, .22);
+  --pfs-paper-rule: #30496d;
+}
+
+/* Neutral interface icons use one outline family and one blue semantic colour. */
+.pfs-icon,
+.pfs-icon-slot,
+.pfs-icon-box,
+.source-item-icon-box,
+.db-icon {
+  color: var(--color-icon);
+}
+.pfs-icon,
+.pfs-icon-slot > .pfs-icon,
+.pfs-icon-box > .pfs-icon,
+.db-icon {
+  stroke: currentColor !important;
+}
+.sb-nav-item:not(.active) .sb-nav-icon,
+.sb-iconbtn,
+.sb-status-iconbtn,
+.sb-status-chev,
+.hdr-btn-icon,
+.composer-tool .pfs-icon,
+.composer-model .pfs-icon,
+.composer-expand-btn .pfs-icon,
+.job-history-close .pfs-icon,
+.modal-title-icon,
+.kb-tab .pfs-icon-slot,
+.kb-toolbar .pfs-icon-slot,
+.skill-picker-view .pfs-icon {
+  color: var(--color-icon);
+}
+.sb-nav-item:hover .sb-nav-icon,
+.sb-iconbtn:hover,
+.sb-status-iconbtn:hover,
+.hdr-btn:hover .hdr-btn-icon,
+.composer-tool:hover .pfs-icon,
+.composer-model:hover .pfs-icon,
+.composer-expand-btn:hover .pfs-icon {
+  color: var(--color-primary);
+}
+.send-btn,
+.send-btn .pfs-icon,
+.send-btn .pfs-icon-box,
+.sb-btn-primary,
+.sb-btn-primary .pfs-icon,
+.btn-sm-primary,
+.btn-sm-primary .pfs-icon {
+  color: #ffffff !important;
+}
+
+/* The permanent rail is part of the light product surface, not a dark overlay. */
+.sidebar-hub,
+#app-sidebar,
+.sb-main {
+  background: var(--color-sidebar-bg) !important;
+  color: var(--color-sidebar-fg);
+}
+.sb-status {
+  background: var(--color-sidebar-bg-2) !important;
+  border-color: var(--color-sidebar-divider) !important;
+}
+.sb-status-row,
+.sb-status-value,
+.sb-status-model-btn,
+.sb-status-select {
+  color: var(--color-sidebar-fg);
+}
+.sb-status-model-btn,
+.sb-status-select {
+  background: var(--color-surface) !important;
+  border-color: var(--color-border) !important;
+}
+.sb-status-model-btn:hover,
+.sb-status-model-btn[aria-expanded="true"],
+.sb-status-select:hover {
+  background: var(--color-primary-soft) !important;
+  border-color: var(--color-primary-tint) !important;
+}
+.sb-nav-item.active {
+  background: var(--color-primary-soft) !important;
+  color: var(--color-primary) !important;
+}
+.sb-nav-item:hover,
+.sb-status-row:hover,
+.sb-iconbtn:hover {
+  background: var(--color-sidebar-hover) !important;
+}
+.sb-rail-toggle {
+  background: var(--color-surface-2) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-icon) !important;
+}
+.sb-footer,
+.sb-brand { border-color: var(--color-sidebar-divider) !important; }
+.sb-iconbtn {
+  background: var(--color-surface) !important;
+  border-color: var(--color-border) !important;
+}
+
+/* Opened side surfaces remain bright and readable beside the white rail. */
+.pfs-side-surface,
+.sb-drawer,
+.sb-panel,
+.skill-drawer,
+.skill-drawer-card {
+  background: var(--color-surface) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text);
+}
+.pfs-side-surface > .sb-drawer-head,
+.pfs-side-surface > .sb-drawer-tabs,
+.pfs-side-surface > .sb-panel-search,
+.pfs-side-surface > .sb-drawer-body,
+.skill-drawer-head,
+.skill-drawer-foot {
+  background: var(--color-surface) !important;
+  border-color: var(--color-border) !important;
+}
+.sb-drawer-collapse,
+.skill-drawer-close,
+.skill-picker-close,
+.sb-panel-search-btn {
+  background: var(--color-surface-2) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-icon) !important;
+}
+.sb-drawer-collapse:hover,
+.skill-drawer-close:hover,
+.skill-picker-close:hover,
+.sb-panel-search-btn:hover {
+  background: var(--color-primary-soft) !important;
+  color: var(--color-primary) !important;
+}
+.sb-panel-search-input,
+.skill-form-input,
+.skill-form-textarea,
+.skill-tools-trigger,
+.skill-tools-search {
+  background: var(--color-surface-2) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-text) !important;
+}
+.sb-panel-search-input::placeholder,
+.skill-form-input::placeholder,
+.skill-form-textarea::placeholder,
+.skill-tools-search::placeholder {
+  color: var(--color-text-dim) !important;
+}
+.skill-form-label,
+.skill-form-section-title,
+.skill-drawer-head strong,
+.skill-form-counter,
+.skill-form-hint,
+.skill-picker-copy strong,
+.skill-picker-copy small,
+.skill-picker-source {
+  color: var(--color-text-soft) !important;
+}
+.skill-form-section,
+.skill-tools-search-wrap { border-color: var(--color-border) !important; }
+.skill-tools-dropdown,
+.skill-tools-options { background: var(--color-surface) !important; }
+.skill-tool-option { color: var(--color-text-soft) !important; }
+.skill-tool-option:hover,
+.skill-tool-option.checked { background: var(--color-primary-soft) !important; }
+.skill-tool-checkbox { border-color: var(--color-border-strong) !important; }
+.skill-tool-cat,
+.skill-form-section-badge { background: var(--color-surface-3) !important; color: var(--color-text-mute) !important; }
+
+/* No dark wash over a readable surface when a rail panel is open. */
+.pfs-mobile-nav-backdrop { background: rgba(45, 86, 145, .10) !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-hub,
+  .sb-nav-item,
+  .sb-iconbtn,
+  .pfs-side-surface,
+  .skill-drawer { transition: none !important; }
+}

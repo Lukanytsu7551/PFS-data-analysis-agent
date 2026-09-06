@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title desc">
   <title id="title">PFS</title>
   <desc id="desc">A PFS analytical mark made of a rising line and data columns.</desc>
-  <rect width="96" height="96" rx="24" fill="#203d35"/>
-  <path d="M20 69h10V51H20v18Zm16 0h10V38H36v31Zm16 0h10V28H52v41Zm16 0h10V18H68v51Z" fill="#c89b4a" opacity=".95"/>
-  <path d="m19 55 16-13 14 7 27-27" fill="none" stroke="#f6edda" stroke-linecap="round" stroke-linejoin="round" stroke-width="6"/>
-  <circle cx="76" cy="22" r="5" fill="#f6edda"/>
+  <rect width="96" height="96" rx="24" fill="#0b5bd3"/>
+  <path d="M20 69h10V51H20v18Zm16 0h10V38H36v31Zm16 0h10V28H52v41Zm16 0h10V18H68v51Z" fill="#dbeafe"/>
+  <path d="m19 55 16-13 14 7 27-27" fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round" stroke-width="6"/>
+  <circle cx="76" cy="22" r="5" fill="#ffffff"/>
 </svg>

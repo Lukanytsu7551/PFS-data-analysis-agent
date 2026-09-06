@@ -1259,7 +1259,7 @@ function _finishStep(s) {
     const iconEl = s.querySelector(".compaction-spin");
     if (iconEl) {
       iconEl.classList.remove("compaction-spin");
-      iconEl.textContent = "✦";
+      iconEl.innerHTML = iconSpan("spark", { className: "pfs-icon", size: 16 });
     }
   } else {
     s.classList.add("done");
@@ -1570,7 +1570,7 @@ function _onToolEnd(ev, ctx) {
     const iconEl = step.querySelector(".compaction-spin");
     if (iconEl) {
       iconEl.classList.remove("compaction-spin");
-      iconEl.textContent = "✦";
+      iconEl.innerHTML = iconSpan("spark", { className: "pfs-icon", size: 16 });
     }
   }
   _scheduleTailActivity(ctx);
