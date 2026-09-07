@@ -215,7 +215,7 @@ const pfs = () => globalThis.PFS;
 
   function clearCmd() {
     state.activeCommand = "";
-    $("cmd-badge").classList.remove("show");
+    $("cmd-badge")?.classList.remove("show");
     pfs()?.chatStream?.syncComposerPlaceholder?.();
   }
 

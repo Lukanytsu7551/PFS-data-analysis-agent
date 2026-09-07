@@ -2762,3 +2762,183 @@ body.pfs-sidebar-rail-collapsed .sb-footer-actions .pfs-icon-slot,
   .pfs-side-surface,
   .skill-drawer { transition: none !important; }
 }
+
+/* ── Final interaction repairs ───────────────────────────────────────────
+   Keep labels readable, keep command state in its own row, and keep the
+   composer skill selector independent from the sidebar catalog.             */
+.sb-nav-item {
+  line-height: 1.45;
+  overflow: visible;
+}
+.sb-nav-label {
+  display: inline-block;
+  line-height: 1.45;
+  padding-block: 1px;
+  overflow: visible;
+}
+.sb-nav-icon { overflow: visible; }
+
+#sb-panel-skills .skill-catalog-section {
+  padding: 4px 0 8px;
+}
+#sb-panel-skills .skill-catalog-section + .skill-catalog-section {
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+}
+.skill-catalog-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 10px 6px;
+}
+.skill-catalog-section-head strong {
+  color: var(--color-text);
+  font-size: var(--fs-xs);
+  letter-spacing: .02em;
+}
+.skill-catalog-section-head span {
+  color: var(--color-text-mute);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+}
+#sb-panel-skills .skill-catalog-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.skill-catalog-empty {
+  padding: 12px 10px 14px;
+  color: var(--color-text-mute);
+  font-size: var(--fs-xs);
+}
+#sb-panel-skills .skill-catalog-item {
+  cursor: default;
+}
+#sb-panel-skills .skill-catalog-item:hover {
+  background: var(--color-surface-2) !important;
+  color: var(--color-text) !important;
+  box-shadow: none !important;
+}
+#sb-panel-skills .skill-catalog-item .skill-picker-view {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface-2);
+  color: var(--color-icon);
+  opacity: .9;
+}
+#sb-panel-skills .skill-catalog-item .skill-picker-view:hover {
+  border-color: var(--color-primary-tint);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+.skill-picker-view {
+  border: 0;
+  font: inherit;
+}
+
+.composer-skill-picker {
+  position: fixed;
+  left: 12px;
+  top: auto;
+  bottom: auto;
+  width: min(390px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 24px));
+  overflow: hidden;
+  z-index: 160;
+}
+.composer-skill-picker .skill-picker-list {
+  max-height: min(300px, calc(100vh - 180px));
+  overflow-y: auto;
+}
+.composer-skill {
+  min-width: 106px;
+  max-width: 190px;
+}
+.composer-skill .composer-label {
+  max-width: 126px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-skill.has-value {
+  color: var(--color-primary);
+  border-color: var(--color-primary-tint);
+  background: var(--color-primary-soft);
+}
+.composer-skill-item.selected {
+  background: var(--color-primary-soft);
+}
+.composer-skill-item .skill-picker-view { display: none; }
+.composer-skill-check {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-primary);
+}
+.composer-skill-item.selected .composer-skill-check { display: inline-flex; }
+
+.composer-shell .input-meta {
+  order: 1;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 12px 18px 0;
+  position: relative;
+  z-index: 3;
+}
+.composer-shell .input-card:has(.cmd-badge.show, .skill-badge.show) .input-meta {
+  display: flex;
+}
+.composer-shell .input-card:has(.cmd-badge.show, .skill-badge.show) .prompt-suggestion-ghost {
+  visibility: hidden;
+}
+.composer-shell .cmd-badge {
+  min-width: 0;
+  max-width: min(100%, 520px);
+  box-sizing: border-box;
+  line-height: 1.35;
+}
+.composer-shell .cmd-badge > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.input-area { isolation: isolate; }
+.slash-popup {
+  z-index: 150;
+  max-height: min(390px, calc(100vh - 180px));
+}
+.slash-popup-scroll {
+  max-height: min(320px, calc(100vh - 240px));
+}
+
+@media (max-width: 760px) {
+  .composer-group-context {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .composer-group-context .composer-model {
+    min-width: 0;
+    flex: 1 1 auto;
+    width: auto;
+  }
+  .composer-skill {
+    width: 40px;
+    min-width: 40px;
+    padding-inline: 0;
+    justify-content: center;
+  }
+  .composer-skill .composer-label,
+  .composer-skill .composer-chev { display: none; }
+}

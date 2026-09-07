@@ -166,9 +166,13 @@ const pfs = () => globalThis.PFS;
   }
 
   async function loadSavedSession(filename, name) {
-    if (!await pfs()?.ui?.confirm?.({
-      title: t('confirm.title'), message: t('confirm.load', { name }),
-    })) return;
+    const ui = pfs()?.ui;
+    const confirmed = ui?.isVue && typeof ui.confirm === "function"
+      ? await ui.confirm({
+        title: t('confirm.title'), message: t('confirm.load', { name }),
+      })
+      : window.confirm(t('confirm.load', { name }) || `确定加载“${name}”吗？`);
+    if (!confirmed) return;
     if (activeLoad) {
       toast(t('toast.load_busy'), "err");
       return;
@@ -186,7 +190,11 @@ const pfs = () => globalThis.PFS;
         signal: controller.signal,
       });
       d = await r.json();
-      if (d.error) { toast(d.error, "err"); return; }
+      if (!r.ok || !d || d.ok === false || d.error) {
+        toast(d?.error || `加载失败（${r.status}）`, "err");
+        return false;
+      }
+      if (!Array.isArray(d.history)) throw new Error("历史对话格式无效");
 
       clearMessages();
       hideWelcome();
@@ -268,6 +276,7 @@ const pfs = () => globalThis.PFS;
 
       // Tell autosave to overwrite this exact file (not create a new one)
       setLoadedName(d.name || name, filename);
+      return true;
     } catch (err) {
       if (err && err.name === "AbortError") {
         if (activeLoad && activeLoad.controller === controller) toast(t('toast.load_cancelled'));

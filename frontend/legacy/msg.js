@@ -120,6 +120,9 @@ import { renderMd } from "./markdown.js";
     const wrap  = $("token-bar-wrap");
     const fill  = $("token-bar-fill");
     const label = $("token-bar-label");
+    // The token bar is not part of the current composer. Keep this legacy
+    // updater optional so reset/new-chat flows do not depend on it.
+    if (!wrap || !fill || !label) return;
     const { promptTokens, totalInput, totalOutput, contextWindow } = state.tokenState;
 
     if (!promptTokens && !totalInput) { wrap.classList.remove("visible"); return; }

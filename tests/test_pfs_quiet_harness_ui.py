@@ -13,6 +13,8 @@ ICONS = (ROOT / "frontend" / "core" / "icons.js").read_text(encoding="utf-8")
 SKILLS = (ROOT / "frontend" / "features" / "skills.js").read_text(encoding="utf-8")
 SLASH = (ROOT / "frontend" / "features" / "slash.js").read_text(encoding="utf-8")
 CHAT_STREAM = (ROOT / "frontend" / "features" / "chat-stream.js").read_text(encoding="utf-8")
+SESSIONS = (ROOT / "frontend" / "legacy" / "sessions.js").read_text(encoding="utf-8")
+MSG = (ROOT / "frontend" / "legacy" / "msg.js").read_text(encoding="utf-8")
 MODELS = (ROOT / "frontend" / "features" / "models.js").read_text(encoding="utf-8")
 SETTINGS_UI = (ROOT / "frontend" / "features" / "ui" / "settings-ui.js").read_text(encoding="utf-8")
 LLM_CONFIG = (ROOT / "LLM" / "llm_config_manager.py").read_text(encoding="utf-8")
@@ -156,7 +158,7 @@ class QuietHarnessUiContractTests(unittest.TestCase):
         self.assertNotIn("DOMContentLoaded, applyQuietHarnessCopy", APP)
         self.assertNotIn('langchange", applyQuietHarnessCopy', APP)
 
-    def test_composer_keeps_only_model_and_execution_controls(self):
+    def test_composer_keeps_model_skill_and_execution_controls(self):
         start = TEMPLATE.index('<div class="composer-toolbar"')
         end = TEMPLATE.index("<!-- ══ MODALS", start)
         toolbar = TEMPLATE[start:end]
@@ -170,6 +172,7 @@ class QuietHarnessUiContractTests(unittest.TestCase):
 
         for action in (
             "openModelPicker",
+            "openComposerSkillPicker",
             "onSendOrStop",
         ):
             self.assertRegex(toolbar, rf'data-action="{action}"')
@@ -180,21 +183,22 @@ class QuietHarnessUiContractTests(unittest.TestCase):
         self.assertNotIn('id="composer-permission-wrap"', toolbar)
         self.assertNotIn('id="token-bar-wrap"', toolbar)
         self.assertEqual(toolbar.count('data-composer-group='), 2)
-        self.assertEqual(toolbar.count('data-composer-tool='), 3)
+        self.assertEqual(toolbar.count('data-composer-tool='), 4)
         self.assertGreaterEqual(toolbar.count("data-pfs-icon="), 5)
         self.assertEqual(TEMPLATE.count("<svg"), 0)
         self.assertNotRegex(toolbar, r'[\U0001F300-\U0001FAFF]')
         self.assertNotRegex(toolbar, r'[▦⤢⤡⌄▾⛶↩☀🌙＋×]')
-        for icon_name in ("cpu", "expand", "collapse", "arrowUp", "stop"):
+        for icon_name in ("cpu", "spark", "expand", "collapse", "arrowUp", "stop"):
             self.assertIn(f'data-pfs-icon="{icon_name}"', toolbar)
             self.assertRegex(ICONS, rf'(?m)^  {icon_name}:')
 
         self.assertNotIn('class="composer-group-label"', toolbar)
-        self.assertIn('aria-label="模型选择"', toolbar)
+        self.assertIn('aria-label="模型和技能选择"', toolbar)
         self.assertIn('aria-label="输入操作"', toolbar)
 
         for selector in (
             "composer-model",
+            "composer-skill",
             "composer-expand-btn",
             "send-btn",
         ):
@@ -214,6 +218,28 @@ class QuietHarnessUiContractTests(unittest.TestCase):
             "@media (min-width: 961px) and (max-width: 1280px)",
         ):
             self.assertIn(token, THEME)
+
+    def test_skills_sidebar_is_catalog_and_composer_owns_selection(self):
+        self.assertIn('id="composer-skill-picker"', TEMPLATE)
+        self.assertIn('id="composer-skill-list"', TEMPLATE)
+        self.assertIn('id="skill-upload-input"', TEMPLATE)
+        self.assertIn("内置技能", SKILLS)
+        self.assertIn("个人技能", SKILLS)
+        self.assertIn("默认全部启用", SKILLS)
+        self.assertIn("renderComposerPicker", SKILLS)
+        self.assertIn("openComposerSkillPicker", APP)
+        self.assertIn("pickSkillUpload", APP)
+        start = SKILLS.index("function onKeyDown(event)")
+        end = SKILLS.index("// ── Skill detail", start)
+        self.assertNotIn("selectSkill", SKILLS[start:end])
+
+    def test_reset_and_saved_session_flows_are_failure_safe(self):
+        self.assertIn("if (!wrap || !fill || !label) return;", MSG)
+        self.assertIn("if (!response.ok || !data?.session_id)", CHAT_STREAM)
+        self.assertIn("Promise.allSettled", CHAT_STREAM)
+        self.assertIn("ui?.isVue", SESSIONS)
+        self.assertIn("window.confirm", SESSIONS)
+        self.assertIn("if (!r.ok || !d || d.ok === false || d.error)", SESSIONS)
 
     def test_navigation_and_model_catalog_match_the_distilled_workbench(self):
         status_start = TEMPLATE.index('<section class="sb-status">')

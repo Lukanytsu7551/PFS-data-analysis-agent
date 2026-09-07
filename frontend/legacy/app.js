@@ -73,6 +73,9 @@ if (globalThis.__pfsAppDelegationRegistered) {
         pfs().skills.open();
       },
       closeSkillPicker: () => sidebar.closePanel("skills"),
+      openComposerSkillPicker: (el) => pfs().skills.openComposerSkillPicker(el),
+      closeComposerSkillPicker: () => pfs().skills.closeComposerSkillPicker(),
+      pickSkillUpload: () => pfs().skills.pickSkillUpload?.(),
       closeSkillModal: () => pfs().skills?.closeSkillModal?.(),
       openModelPicker: (el) => pfs().models.openModelPicker(el),
       closeModelPicker: () => pfs().models.closeModelPicker(),

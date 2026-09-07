@@ -41,52 +41,116 @@ const pfs = () => globalThis.PFS;
     })[ch]);
   }
 
+  const COMPOSER_PICKER = { index: 0 };
+
+  function matchesSkill(skill, term) {
+    if (!term) return true;
+    return String(skill.name || "").toLowerCase().includes(term)
+      || String(skill.display_name || "").toLowerCase().includes(term)
+      || String(skill.description || "").toLowerCase().includes(term);
+  }
+
+  function skillRowMarkup(skill) {
+    const readonly = skill.source === "builtin";
+    return `
+      <span class="skill-picker-icon skill-picker-icon--letter">${esc((skill.display_name || skill.name || "S")[0].toUpperCase())}</span>
+      <span class="skill-picker-copy">
+        <strong title="${esc(displaySkillName(skill))}">${esc(displaySkillName(skill))}</strong>
+        <small>${esc(skill.description || displaySkillName(skill))}</small>
+      </span>
+      <span class="skill-picker-actions">
+        <span class="skill-picker-source">${esc(sourceLabel(skill.source))}</span>
+        <button class="skill-picker-view" type="button" data-skill-view="true"
+                aria-label="${readonly ? "查看 Skill" : "查看或编辑 Skill"}"
+                title="${readonly ? "查看 Skill" : "查看或编辑 Skill"}">
+          ${iconSpan(readonly ? "info" : "edit", { className: "skill-picker-view-icon", size: 14 })}
+        </button>
+      </span>`;
+  }
+
   function render(filter = "") {
     const list = $("skill-picker-list");
     if (!list) return;
     const term = String(filter || "").trim().toLowerCase();
-    const matched = SKILLS.filter(skill => !term
-      || skill.name.toLowerCase().includes(term)
-      || String(skill.description || "").toLowerCase().includes(term));
+    const matched = SKILLS.filter(skill => matchesSkill(skill, term));
     list.innerHTML = "";
     if (!matched.length) {
       list.innerHTML = `<div class="skill-picker-empty">${esc(t("skills.empty"))}</div>`;
       return;
     }
-    matched.forEach((skill, index) => {
+    const groups = [
+      {
+        key: "builtin",
+        title: "内置技能",
+        hint: "默认全部启用",
+        skills: matched.filter(skill => skill.source === "builtin"),
+      },
+      {
+        key: "personal",
+        title: "个人技能",
+        hint: "在对话框中按需启用",
+        skills: matched.filter(skill => skill.source !== "builtin"),
+      },
+    ];
+    groups.forEach(group => {
+      const section = document.createElement("section");
+      section.className = `skill-catalog-section skill-catalog-section--${group.key}`;
+      section.innerHTML = `
+        <div class="skill-catalog-section-head">
+          <strong>${group.title}</strong>
+          <span>${group.hint}</span>
+        </div>`;
+      const sectionList = document.createElement("div");
+      sectionList.className = "skill-catalog-items";
+      if (!group.skills.length) {
+        sectionList.innerHTML = `<div class="skill-catalog-empty">${esc(group.key === "personal" ? "暂无个人技能，可新建或上传" : "暂无匹配的内置技能")}</div>`;
+        section.appendChild(sectionList);
+        list.appendChild(section);
+        return;
+      }
+      group.skills.forEach(skill => {
+        const row = document.createElement("div");
+        row.className = "skill-picker-item skill-catalog-item";
+        row.dataset.skill = skill.name;
+        row.innerHTML = skillRowMarkup(skill);
+        row.querySelector("[data-skill-view]")?.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openSkillModal(skill.name);
+        });
+        sectionList.appendChild(row);
+      });
+      section.appendChild(sectionList);
+      list.appendChild(section);
+    });
+  }
+
+  function renderComposerPicker(filter = "") {
+    const list = $("composer-skill-list");
+    if (!list) return;
+    const term = String(filter || "").trim().toLowerCase();
+    const personal = SKILLS.filter(skill => skill.source !== "builtin" && matchesSkill(skill, term));
+    list.innerHTML = "";
+    if (!personal.length) {
+      list.innerHTML = `<div class="skill-picker-empty">${esc("内置技能默认启用；暂无可手动选择的个人技能")}</div>`;
+      return;
+    }
+    personal.forEach((skill, index) => {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = `skill-picker-item${index === state.skillPickerIndex ? " active" : ""}`;
+      button.className = `skill-picker-item composer-skill-item${state.activeSkill === skill.name ? " selected" : ""}`;
       button.dataset.skill = skill.name;
-      button.innerHTML = `
-        <span class="skill-picker-icon skill-picker-icon--letter">${esc((skill.display_name || skill.name || "S")[0].toUpperCase())}</span>
-        <span class="skill-picker-copy">
-          <strong title="${esc(displaySkillName(skill))}">${esc(displaySkillName(skill))}</strong>
-          <small>${esc(skill.description || displaySkillName(skill))}</small>
-        </span>
-        <span class="skill-picker-actions">
-          <span class="skill-picker-source">${esc(sourceLabel(skill.source))}</span>
-          <span class="skill-picker-view" data-skill-view="true" role="button" tabindex="0"
-                aria-label="查看或编辑 Skill">
-            ${iconSpan("edit", { className: "skill-picker-view-icon", size: 14 })}
-          </span>
-        </span>`;
-      button.addEventListener("click", (e) => {
-        if (e.target.closest("[data-skill-view]")) {
-          e.preventDefault();
-          e.stopPropagation();
-          openSkillModal(skill.name);
-          return;
-        }
-        selectSkill(skill.name);
-      });
-      button.querySelector("[data-skill-view]")?.addEventListener("keydown", (e) => {
-        if (e.key !== "Enter" && e.key !== " ") return;
-        e.preventDefault();
-        e.stopPropagation();
-        openSkillModal(skill.name);
-      });
+      button.setAttribute("role", "option");
+      button.setAttribute("aria-selected", String(state.activeSkill === skill.name));
+      button.innerHTML = skillRowMarkup(skill);
+      button.querySelector("[data-skill-view]")?.remove();
+      button.querySelector(".skill-picker-actions")?.insertAdjacentHTML(
+        "beforeend",
+        `<span class="composer-skill-check" aria-hidden="true">${iconSpan("check", { size: 14 })}</span>`,
+      );
+      button.addEventListener("click", () => selectSkill(skill.name));
       list.appendChild(button);
+      if (index === COMPOSER_PICKER.index) button.dataset.keyboardTarget = "true";
     });
   }
 
@@ -98,10 +162,12 @@ const pfs = () => globalThis.PFS;
       const payload = await response.json();
       SKILLS.splice(0, SKILLS.length, ...(payload.skills || []));
       render($("skill-picker-search")?.value || "");
+      renderComposerPicker($("composer-skill-search")?.value || "");
     } catch (error) {
       console.warn("[PFS] skills unavailable:", error);
       SKILLS.splice(0, SKILLS.length);
       render();
+      renderComposerPicker($("composer-skill-search")?.value || "");
     }
   }
 
@@ -127,6 +193,7 @@ const pfs = () => globalThis.PFS;
   }
 
   function close() {
+    closeComposerSkillPicker();
     // Close skill drawer first if open
     const overlay = document.getElementById("skill-modal-overlay");
     if (overlay && !overlay.classList.contains("hidden")) {
@@ -146,16 +213,31 @@ const pfs = () => globalThis.PFS;
     pfs()?.slash?.clearCmd?.();
     pfs()?.slash?.closeSlashPopup?.();
     state.activeSkill = skill.name;
-    $("skill-badge-text").textContent = displaySkillName(skill);
+    $("skill-badge-text")?.replaceChildren(document.createTextNode(displaySkillName(skill)));
     $("skill-badge")?.classList.add("show");
+    const label = $("composer-skill-label");
+    if (label) {
+      label.textContent = displaySkillName(skill);
+      label.title = displaySkillName(skill);
+    }
+    $("composer-skill-trigger")?.classList.add("has-value");
+    closeComposerSkillPicker();
     if (pfs()?.sidebar?.closePanel) pfs().sidebar.closePanel("skills");
     $("msg-input")?.focus();
     pfs()?.chatStream?.syncSendButton?.();
+    renderComposerPicker($("composer-skill-search")?.value || "");
   }
 
   function clearSkill() {
     state.activeSkill = "";
     $("skill-badge")?.classList.remove("show");
+    const label = $("composer-skill-label");
+    if (label) {
+      label.textContent = typeof t === "function" ? t("composer.skills") : "技能";
+      label.title = typeof t === "function" ? t("composer.skill_action") : "选择技能";
+    }
+    $("composer-skill-trigger")?.classList.remove("has-value");
+    renderComposerPicker($("composer-skill-search")?.value || "");
   }
 
   /**
@@ -176,30 +258,111 @@ const pfs = () => globalThis.PFS;
     if (!name) return;
     const skill = getSkill(name) || { name };
     state.activeSkill = skill.name;
-    $("skill-badge-text").textContent = displaySkillName(skill);
+    $("skill-badge-text")?.replaceChildren(document.createTextNode(displaySkillName(skill)));
     $("skill-badge")?.classList.add("show");
+    const label = $("composer-skill-label");
+    if (label) label.textContent = displaySkillName(skill);
+    $("composer-skill-trigger")?.classList.add("has-value");
+    renderComposerPicker($("composer-skill-search")?.value || "");
   }
 
   function onSearch(event) {
-    state.skillPickerIndex = 0;
     render(event.target.value);
   }
 
   function onKeyDown(event) {
-    const items = [...document.querySelectorAll("#skill-picker-list .skill-picker-item")];
     if (event.key === "Escape") { event.preventDefault(); close(); return; }
+  }
+
+  function openComposerSkillPicker(trigger) {
+    const picker = $("composer-skill-picker");
+    if (!picker) return;
+    pfs()?.slash?.closeSlashPopup?.();
+    pfs()?.sidebar?.closePanel?.("skills");
+    const search = $("composer-skill-search");
+    COMPOSER_PICKER.index = 0;
+    if (search) search.value = "";
+    renderComposerPicker();
+    picker.classList.add("open");
+    if (trigger) trigger.setAttribute("aria-expanded", "true");
+    const anchor = trigger || $("composer-skill-trigger");
+    if (anchor) {
+      picker.style.visibility = "hidden";
+      const rect = anchor.getBoundingClientRect();
+      const viewportWidth = Math.max(280, window.innerWidth || document.documentElement.clientWidth);
+      const width = Math.min(390, viewportWidth - 24, Math.max(280, rect.width + 150));
+      picker.style.width = `${width}px`;
+      const height = Math.min(picker.scrollHeight, Math.max(180, window.innerHeight - 24));
+      const left = Math.max(12, Math.min(rect.left, viewportWidth - width - 12));
+      let top = rect.top - height - 8;
+      if (top < 12) top = Math.min(window.innerHeight - height - 12, rect.bottom + 8);
+      picker.style.left = `${Math.round(left)}px`;
+      picker.style.top = `${Math.max(12, Math.round(top))}px`;
+      picker.style.visibility = "visible";
+    }
+    requestAnimationFrame(() => search?.focus());
+  }
+
+  function closeComposerSkillPicker() {
+    const picker = $("composer-skill-picker");
+    if (!picker) return;
+    picker.classList.remove("open");
+    ["left", "top", "width", "visibility"].forEach(property => picker.style.removeProperty(property));
+    $("composer-skill-trigger")?.setAttribute("aria-expanded", "false");
+  }
+
+  function isComposerSkillPickerOpen() {
+    return $("composer-skill-picker")?.classList.contains("open") || false;
+  }
+
+  function onComposerSearch(event) {
+    COMPOSER_PICKER.index = 0;
+    renderComposerPicker(event.target.value);
+  }
+
+  function onComposerKeyDown(event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeComposerSkillPicker();
+      $("composer-skill-trigger")?.focus();
+      return;
+    }
+    const items = [...document.querySelectorAll("#composer-skill-list .composer-skill-item")];
+    if (!items.length) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const delta = event.key === "ArrowDown" ? 1 : -1;
-      state.skillPickerIndex = Math.max(0, Math.min(items.length - 1, state.skillPickerIndex + delta));
-      render(event.currentTarget.value);
-      document.querySelectorAll("#skill-picker-list .skill-picker-item")[state.skillPickerIndex]
-        ?.scrollIntoView({ block: "nearest" });
+      COMPOSER_PICKER.index = Math.max(0, Math.min(items.length - 1, COMPOSER_PICKER.index + delta));
+      renderComposerPicker(event.currentTarget.value);
+      items[COMPOSER_PICKER.index]?.scrollIntoView({ block: "nearest" });
       return;
     }
-    if (event.key === "Enter" && items[state.skillPickerIndex]) {
+    if (event.key === "Enter") {
       event.preventDefault();
-      selectSkill(items[state.skillPickerIndex].dataset.skill);
+      items[COMPOSER_PICKER.index]?.click();
+    }
+  }
+
+  function pickSkillUpload() {
+    $("skill-upload-input")?.click();
+  }
+
+  async function onSkillUploadChange(event) {
+    const input = event?.target || $("skill-upload-input");
+    const file = input?.files?.[0];
+    if (!file) return;
+    const form = new FormData();
+    form.append("file", file, file.name);
+    try {
+      const response = await fetch("/api/skills/upload", { method: "POST", body: form });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.error || `上传失败（${response.status}）`);
+      pfs()?.ui?.toast?.(`已上传 Skill：${displaySkillName({ name: payload.name })}`, "ok");
+      await loadSkills();
+    } catch (error) {
+      pfs()?.ui?.toast?.(`上传 Skill 失败：${error?.message || error}`, "err");
+    } finally {
+      input.value = "";
     }
   }
 
@@ -539,6 +702,7 @@ const pfs = () => globalThis.PFS;
   // Wire up buttons after DOM ready
   function _wireButtons() {
     $("skill-new-btn")?.addEventListener("click", () => openSkillModal(null));
+    $("skill-upload-input")?.addEventListener("change", onSkillUploadChange);
     $("skill-save-btn")?.addEventListener("click", saveSkill);
     $("skill-delete-btn")?.addEventListener("click", deleteSkill);
     _wireCounters();
@@ -546,7 +710,7 @@ const pfs = () => globalThis.PFS;
     _loadTools(); // pre-fetch tool list for instant dropdown rendering
     // ESC to close skill drawer
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && !$("skill-modal-overlay").classList.contains("hidden")) {
+      if (e.key === "Escape" && !$("skill-modal-overlay")?.classList.contains("hidden")) {
         closeSkillModal();
       }
     });
@@ -560,9 +724,15 @@ const pfs = () => globalThis.PFS;
   const search = $("skill-picker-search");
   search?.addEventListener("input", onSearch);
   search?.addEventListener("keydown", onKeyDown);
+  const composerSearch = $("composer-skill-search");
+  composerSearch?.addEventListener("input", onComposerSearch);
+  composerSearch?.addEventListener("keydown", onComposerKeyDown);
 
 export const skills = Object.freeze({
     SKILLS, open, close, isOpen, render, loadSkills, getSkill, selectSkill, clearSkill,
     showMatchedSkills, activateSkill, sourceLabel,
     onSearch, onKeyDown, openSkillModal, closeSkillModal, saveSkill, deleteSkill,
+    renderComposerPicker, openComposerSkillPicker, closeComposerSkillPicker,
+    isComposerSkillPickerOpen, onComposerSearch, onComposerKeyDown,
+    pickSkillUpload, onSkillUploadChange,
 });

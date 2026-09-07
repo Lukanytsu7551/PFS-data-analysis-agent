@@ -267,7 +267,7 @@
         </button>
         <div class="sb-drawer-title">
           <strong><span class="pfs-icon-slot" data-pfs-icon="spark" data-icon-size="18"></span> Skills</strong>
-          <span>选择技能后发送消息</span>
+          <span>内置技能默认启用，个人技能可按需选择</span>
         </div>
       </header>
       <div class="sb-panel-search">
@@ -275,6 +275,8 @@
                data-i18n-ph="skills.search" placeholder="搜索技能名称或描述"
                autocomplete="off">
         <button class="sb-panel-search-btn" id="skill-new-btn" type="button" title="新建自定义 Skill" aria-label="新建自定义 Skill"><span class="pfs-icon-slot" data-pfs-icon="plus" data-icon-size="16"></span></button>
+        <button class="sb-panel-search-btn" id="skill-upload-btn" type="button" data-action="pickSkillUpload" title="上传个人 Skill" aria-label="上传个人 Skill"><span class="pfs-icon-slot" data-pfs-icon="upload" data-icon-size="16"></span></button>
+        <input id="skill-upload-input" type="file" accept=".md,text/markdown" hidden>
       </div>
       <div class="sb-drawer-body">
         <div class="skill-picker-list" id="skill-picker-list"></div>
@@ -692,6 +694,21 @@
         <div class="skill-picker-list model-picker-list" id="model-picker-list" role="listbox"></div>
       </div>
 
+      <!-- Personal skills are enabled from the composer, not the sidebar catalog. -->
+      <div class="skill-picker composer-skill-picker" id="composer-skill-picker" role="dialog" aria-label="选择技能">
+        <div class="skill-picker-head">
+          <strong data-i18n="composer.skill_action">选择技能</strong>
+          <button type="button" class="skill-picker-close" data-action="closeComposerSkillPicker"
+                  data-i18n-title="modal.close" title="关闭" aria-label="关闭">
+            <span class="pfs-icon-slot" data-pfs-icon="close" data-icon-size="16"></span>
+          </button>
+        </div>
+        <input id="composer-skill-search" class="skill-picker-search" type="search"
+               data-i18n-ph="skills.search" placeholder="搜索个人技能"
+               autocomplete="off">
+        <div class="skill-picker-list composer-skill-list" id="composer-skill-list" role="listbox"></div>
+      </div>
+
       <!-- Slash command popup (above input, absolute) -->
       <div class="slash-popup" id="slash-popup">
         <div class="slash-pop-header" data-i18n="slash.header">斜杠命令  ·  输入字母快速筛选</div>
@@ -726,13 +743,20 @@
 
           <div class="composer-toolbar" aria-label="对话输入操作">
             <div class="composer-toolbar-main">
-              <div class="composer-group composer-group-context" data-composer-group="context" role="group" aria-label="模型选择">
+              <div class="composer-group composer-group-context" data-composer-group="context" role="group" aria-label="模型和技能选择">
                 <button class="composer-model" id="model-picker-trigger" type="button" data-composer-tool="model"
                         data-action="openModelPicker" data-i18n-title="composer.model"
                         title="选择模型" aria-label="选择模型" aria-haspopup="listbox" aria-expanded="false">
                   <span class="composer-model-mark pfs-icon-slot" data-pfs-icon="cpu" data-icon-size="16"></span>
                   <span class="composer-model-text" id="model-picker-label">— 选择模型 —</span>
                   <span class="composer-chev pfs-icon-slot" data-pfs-icon="chevronDown" data-icon-size="14"></span>
+                </button>
+                <button class="composer-skill composer-tool" id="composer-skill-trigger" type="button" data-composer-tool="skill"
+                        data-action="openComposerSkillPicker" data-i18n-title="composer.skill_action"
+                        title="选择技能" aria-label="选择技能" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="composer-icon-box pfs-icon-slot" data-pfs-icon="spark" data-icon-size="15"></span>
+                  <span class="composer-label" id="composer-skill-label" data-i18n="composer.skills">技能</span>
+                  <span class="composer-chev pfs-icon-slot" data-pfs-icon="chevronDown" data-icon-size="13"></span>
                 </button>
                 <select id="model-sel" class="native-model-select" aria-label="Model" hidden>
                   <option value="" data-i18n="sidebar.model_placeholder">— 选择模型 —</option>

@@ -32,6 +32,7 @@ const pfs = () => globalThis.PFS;
 import { loadSavedList } from "../legacy/sessions.js";
 
 const clearSkill = () => pfs()?.skills?.clearSkill?.();
+let newChatInFlight = null;
 
 // ── Send / Stop ────────────────────────────────────────────────────
 function onSendOrStop() {
@@ -2410,43 +2411,42 @@ async function handleEvent(ev, stepsEl, bubbleEl, typing) {
 }
 
 // ── New chat ───────────────────────────────────────────────────────
-async function newChat() {
+async function createNewChat() {
   _invalidatePromptSuggestion();
   state.pendingMessages.length = 0;
   state.editingQueuedId = "";
   _refreshQueuePositions();
+
+  let response;
+  let data;
   try {
-    const r = await fetch("/api/session/new", {
+    response = await fetch("/api/session/new", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ memory_enabled: state.memoryEnabled !== false }),
     });
-    const data = await r.json();
-    state.SID = data.session_id;
-    state.sessionName = "新会话";
-    state.loadedSessionFilename = "";
-    globalThis.PFS.storage.set("session_id", state.SID);
-    globalThis.PFS.storage.sessionSet("session_id", state.SID);
-    await switchJobHistorySession(state.SID);
-    await _loadFeishuConversationStatus();
-  } catch (_) {
-    // Front-end resets either way; backend will rebuild on next send.
+    data = await response.json();
+  } catch (error) {
+    pfs()?.ui?.toast?.(`创建新对话失败：${error?.message || "网络连接失败"}`, "err");
+    return false;
   }
+  if (!response.ok || !data?.session_id) {
+    pfs()?.ui?.toast?.(data?.error || `创建新对话失败（${response.status}）`, "err");
+    return false;
+  }
+
+  const nextSid = String(data.session_id);
+  state.SID = nextSid;
+  state.sessionName = "新会话";
+  state.loadedSessionFilename = "";
+  globalThis.PFS.storage.set("session_id", state.SID);
+  globalThis.PFS.storage.sessionSet("session_id", state.SID);
 
   // 新 session 创建后立即将前端当前选中的模型同步给后端，
   // 否则后端 session 会用默认模型（deepseek）响应第一条消息。
   const currentProvider = $("model-sel")?.value;
-  if (currentProvider && state.SID) {
-    fetch(`/api/session/${state.SID}/model`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: currentProvider }),
-    }).catch(() => {});
-  }
-
   clearCmd();
   clearSkill();
-  await Promise.all([pfs()?.slash?.loadCommands?.(), pfs()?.skills?.loadSkills?.()]);
   resetSourceState();
   setLoadedName("", "");
   pfs()?.sidebar?.setSessionName?.("新会话", "");
@@ -2454,6 +2454,32 @@ async function newChat() {
   state.tokenState = { promptTokens: 0, totalInput: 0, totalOutput: 0, contextWindow: null };
   updateTokenBar();
   showWelcome();
+
+  const backgroundTasks = [
+    switchJobHistorySession(nextSid),
+    _loadFeishuConversationStatus(),
+    pfs()?.slash?.loadCommands?.(),
+    pfs()?.skills?.loadSkills?.(),
+  ];
+  if (currentProvider) {
+    backgroundTasks.unshift(fetch(`/api/session/${nextSid}/model`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: currentProvider }),
+    }));
+  }
+  await Promise.allSettled(backgroundTasks);
+  return true;
+}
+
+async function newChat() {
+  if (newChatInFlight) return newChatInFlight;
+  newChatInFlight = createNewChat();
+  try {
+    return await newChatInFlight;
+  } finally {
+    newChatInFlight = null;
+  }
 }
 
 function retryLast() {

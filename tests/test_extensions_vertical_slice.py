@@ -1,3 +1,4 @@
+import io
 import os
 import tempfile
 import unittest
@@ -150,6 +151,18 @@ class ExtensionVerticalSliceTests(unittest.TestCase):
                             "prompt": "请按月汇总销售额。",
                         },
                     )
+                    uploaded = client.post(
+                        "/api/skills/upload",
+                        data={
+                            "file": (
+                                io.BytesIO(
+                                    "---\nname: uploaded-skill\ndescription: UTF-8 汉字 skill\n---\n请按月度汇总。\n".encode("utf-8")
+                                ),
+                                "SKILL.md",
+                            ),
+                        },
+                        content_type="multipart/form-data",
+                    )
                     custom = client.get("/api/skills/demo-skill")
                     denied = client.put(
                         "/api/skills/data",
@@ -167,6 +180,7 @@ class ExtensionVerticalSliceTests(unittest.TestCase):
                         },
                     )
                     deleted = client.delete("/api/skills/demo-skill")
+                    uploaded_deleted = client.delete("/api/skills/uploaded-skill")
 
                 self.assertEqual(200, listing.status_code)
                 self.assertEqual([], listing.get_json()["diagnostics"])
@@ -176,11 +190,14 @@ class ExtensionVerticalSliceTests(unittest.TestCase):
                 self.assertEqual(200, builtin.status_code)
                 self.assertEqual("builtin", builtin.get_json()["skill"]["source"])
                 self.assertEqual(201, created.status_code)
+                self.assertEqual(201, uploaded.status_code)
+                self.assertEqual("uploaded-skill", uploaded.get_json()["name"])
                 self.assertEqual(200, custom.status_code)
                 self.assertEqual("demo-skill", custom.get_json()["skill"]["name"])
                 self.assertEqual(403, denied.status_code)
                 self.assertEqual(200, updated.status_code)
                 self.assertEqual(200, deleted.status_code)
+                self.assertEqual(200, uploaded_deleted.status_code)
 
     def test_team_endpoints_enforce_session_ownership(self):
         """Every session-scoped Teams route must fail closed for another user."""
