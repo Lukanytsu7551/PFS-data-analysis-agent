@@ -5,12 +5,10 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from collections import deque
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from threading import BoundedSemaphore, Lock
-from typing import Callable, Iterable
+from typing import Iterable
 
-from ..errors import AgentRunTimeout
-from ..jobs import JobCanceled
 from .executors import execute_action
 from .models import Hook, HookContext, ToolRejectedError
 
@@ -114,18 +112,9 @@ class HookEngine:
             return []
         return [hook for hook in self.hooks if hook.event == event and hook.should_run(ctx)]
 
-    def run_hooks(
-        self,
-        event: str,
-        ctx: HookContext,
-        *,
-        abort_check: Callable[[], None] | None = None,
-        timeout_provider: Callable[[], float | None] | None = None,
-    ) -> list[HookNotification]:
-        self._check_abort(abort_check)
+    def run_hooks(self, event: str, ctx: HookContext) -> list[HookNotification]:
         matched = self.find_matching_hooks(event, ctx.child(event_name=event))
         for hook in matched:
-            self._check_abort(abort_check)
             hook_ctx = ctx.child(event_name=event)
             reservation = self._once_registry.reserve(hook, hook_ctx)
             if reservation is None:
@@ -133,39 +122,19 @@ class HookEngine:
             if hook.async_exec or self._should_fire_and_forget(event, hook):
                 self._submit_background(hook, hook_ctx, reservation)
             else:
-                self._run_single_safely(
-                    hook,
-                    hook_ctx,
-                    reservation,
-                    abort_check=abort_check,
-                    timeout_provider=timeout_provider,
-                )
+                self._run_single_safely(hook, hook_ctx, reservation)
         return self.drain_notifications()
 
-    def run_pre_tool_hooks(
-        self,
-        ctx: HookContext,
-        *,
-        abort_check: Callable[[], None] | None = None,
-        timeout_provider: Callable[[], float | None] | None = None,
-    ) -> ToolRejectedError | None:
-        self._check_abort(abort_check)
+    def run_pre_tool_hooks(self, ctx: HookContext) -> ToolRejectedError | None:
         event_ctx = ctx.child(event_name="pre_tool_use")
         for hook in self.find_matching_hooks("pre_tool_use", event_ctx):
-            self._check_abort(abort_check)
             reservation = self._once_registry.reserve(hook, event_ctx)
             if reservation is None:
                 continue
             if self._should_fire_and_forget("pre_tool_use", hook):
                 self._submit_background(hook, event_ctx, reservation)
                 continue
-            notification = self._run_single_safely(
-                hook,
-                event_ctx,
-                reservation,
-                abort_check=abort_check,
-                timeout_provider=timeout_provider,
-            )
+            notification = self._run_single_safely(hook, event_ctx, reservation)
             if hook.reject:
                 reason = (notification.output if notification else "") or "tool call rejected by hook"
                 return ToolRejectedError(event_ctx.tool_name, reason, hook.id)
@@ -226,70 +195,24 @@ class HookEngine:
             _BACKGROUND_SLOTS.release()
 
     def _run_single_safely(
-        self,
-        hook: Hook,
-        ctx: HookContext,
-        reservation: tuple[str, str],
-        *,
-        abort_check: Callable[[], None] | None = None,
-        timeout_provider: Callable[[], float | None] | None = None,
+        self, hook: Hook, ctx: HookContext, reservation: tuple[str, str]
     ) -> HookNotification:
-        completed = False
         try:
-            self._check_abort(abort_check)
-            action = self._bounded_action(hook.action, timeout_provider)
-            try:
-                execute_kwargs = {"allow_command": self.allow_command_hooks}
-                # Keep compatibility with lightweight patched executors while
-                # forwarding cancellation to the real command/HTTP executor.
-                if abort_check is not None:
-                    execute_kwargs["abort_check"] = abort_check
-                result = execute_action(action, ctx, **execute_kwargs)
-                output = str(result.output or "")
-                success = bool(result.success)
-            except (JobCanceled, AgentRunTimeout):
-                raise
-            except Exception as exc:
-                log.exception("[hooks] hook failed id=%s event=%s", hook.id, hook.event)
-                output = str(exc)
-                success = False
-            # A hook action can time out or return after the parent turn was
-            # canceled.  Check again before accepting its output as part of
-            # the Agent turn; the callback exception must escape unchanged.
-            self._check_abort(abort_check)
-            completed = True
-        finally:
-            if completed:
-                hook.mark_executed()
-                self._once_registry.complete(reservation)
-            else:
-                self._once_registry.release(reservation)
+            result = execute_action(hook.action, ctx, allow_command=self.allow_command_hooks)
+            output = str(result.output or "")
+            success = bool(result.success)
+        except Exception as exc:
+            log.exception("[hooks] hook failed id=%s event=%s", hook.id, hook.event)
+            output = str(exc)
+            success = False
+        hook.mark_executed()
+        self._once_registry.complete(reservation)
         if hook.action.type == "prompt" and success and output.strip():
             self._prompt_messages.append(output.strip())
         notification = HookNotification(hook.id, hook.event, output, success)
         self._notifications.append(notification)
         self._record_trigger(hook, notification, ctx, hook.action.type)
         return notification
-
-    @staticmethod
-    def _check_abort(abort_check: Callable[[], None] | None) -> None:
-        if abort_check is not None:
-            abort_check()
-
-    @staticmethod
-    def _bounded_action(
-        action,
-        timeout_provider: Callable[[], float | None] | None,
-    ):
-        if timeout_provider is None:
-            return action
-        remaining = timeout_provider()
-        if remaining is None:
-            return action
-        return replace(
-            action,
-            timeout=max(0.001, min(float(action.timeout), float(remaining))),
-        )
 
     @staticmethod
     def _record_trigger(hook: Hook, notification: HookNotification, ctx: HookContext, action_type: str) -> None:

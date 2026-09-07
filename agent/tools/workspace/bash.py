@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
-from typing import Any, Callable
+from typing import Any
 
 from .files import WorkspaceToolError, WorkspaceToolService
 
@@ -46,18 +46,9 @@ class WorkspaceBashService:
     def _result(command: str, output: Any) -> dict:
         return {"command": command, "exit_code": 0, "output": output}
 
-    def execute(
-        self,
-        command: str,
-        timeout: float = 30,
-        *,
-        confirm: bool = False,
-        abort_check: Callable[[], None] | None = None,
-    ) -> dict:
-        if abort_check is not None:
-            abort_check()
+    def execute(self, command: str, timeout: int = 30, *, confirm: bool = False) -> dict:
         tokens = self._tokens(command)
-        timeout = max(0.001, min(float(timeout), MAX_BASH_TIMEOUT))
+        timeout = max(1, min(int(timeout), MAX_BASH_TIMEOUT))
         executable = os.path.basename(tokens[0]).lower()
         if executable.endswith(".exe"):
             executable = executable[:-4]
@@ -77,35 +68,23 @@ class WorkspaceBashService:
             return self._result(command, self.files.grep(args[0], args[1] if len(args) == 2 else "."))
 
         if executable in {"sha256sum", "shasum"} and len(args) == 1:
-            return self._result(command, self.files.command(
-                "checksum", args[0], timeout=timeout, abort_check=abort_check,
-            ))
+            return self._result(command, self.files.command("checksum", args[0], timeout=timeout))
 
         if executable == "git" and args:
             subcommand = args[0].lower()
             if subcommand == "status" and len(args) == 1:
-                return self._result(command, self.files.command(
-                    "git_status", timeout=timeout, abort_check=abort_check,
-                ))
+                return self._result(command, self.files.command("git_status", timeout=timeout))
             if subcommand == "log" and len(args) == 1:
-                return self._result(command, self.files.command(
-                    "git_log", timeout=timeout, abort_check=abort_check,
-                ))
+                return self._result(command, self.files.command("git_log", timeout=timeout))
             if subcommand == "diff" and len(args) <= 2:
                 return self._result(
-                    command, self.files.command(
-                        "git_diff", args[1] if len(args) == 2 else ".",
-                        timeout=timeout, abort_check=abort_check,
-                    ),
+                    command, self.files.command("git_diff", args[1] if len(args) == 2 else ".", timeout=timeout),
                 )
             raise WorkspaceToolError("only read-only git status, git log, and git diff [path] are supported")
 
         if executable in {"python", "python3"} and len(args) in {2, 3} and args[:2] == ["-m", "compileall"]:
             return self._result(
-                command, self.files.command(
-                    "python_compile", args[2] if len(args) == 3 else ".",
-                    timeout=timeout, abort_check=abort_check,
-                ),
+                command, self.files.command("python_compile", args[2] if len(args) == 3 else ".", timeout=timeout),
             )
 
         if executable in {"rm", "del"} and len(args) == 1:

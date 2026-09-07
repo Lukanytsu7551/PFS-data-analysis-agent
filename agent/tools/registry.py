@@ -22,10 +22,6 @@ ExecutionMode = Literal["sync", "auto", "job"]
 class ToolSpec:
     name: str
     category: ToolCategory
-    # Whether replaying this tool after a worker loss is safe.  This is a
-    # deliberately opt-in flag: unknown, external, mutating, and output tools
-    # remain fail-closed during durable chat recovery.
-    replay_safe: bool = False
     default_exposed: bool = True
     discoverable: bool = False
     discovery_keywords: frozenset[str] = frozenset()
@@ -119,7 +115,6 @@ def _spec(
     name: str,
     category: ToolCategory,
     *,
-    replay_safe: bool = False,
     commands: tuple[str, ...] = (),
     skills: tuple[str, ...] = (),
     default_exposed: bool = True,
@@ -136,7 +131,6 @@ def _spec(
     return ToolSpec(
         name=name,
         category=category,
-        replay_safe=replay_safe,
         default_exposed=default_exposed,
         discoverable=discoverable,
         discovery_keywords=frozenset(discovery_keywords),
@@ -153,7 +147,7 @@ def _spec(
 
 
 BUILTIN_TOOL_REGISTRY = ToolRegistry([
-    _spec("workspace_status", "read", replay_safe=True, requires_runtime=True),
+    _spec("workspace_status", "read", requires_runtime=True),
     _spec(
         "browse_webpage", "read", default_exposed=False, discoverable=True,
         discovery_keywords=(
@@ -203,11 +197,11 @@ BUILTIN_TOOL_REGISTRY = ToolRegistry([
         discovery_keywords=("更新飞书表格", "编辑飞书表格", "修改多维表格", "update bitable"),
         discovery_summary="Update one explicitly identified Feishu Bitable record using a record ID returned by a read.",
     ),
-    _spec("read_tool_result", "read", replay_safe=True),
-    _spec("search_mcp_tools", "read", replay_safe=True),
-    _spec("query_knowledge", "read", replay_safe=True, concurrency_safe=True),
-    _spec("get_schema", "read", replay_safe=True, requires_data_source=True),
-    _spec("get_table_detail", "read", replay_safe=True, requires_data_source=True, concurrency_safe=True),
+    _spec("read_tool_result", "read"),
+    _spec("search_mcp_tools", "read"),
+    _spec("query_knowledge", "read", concurrency_safe=True),
+    _spec("get_schema", "read", requires_data_source=True),
+    _spec("get_table_detail", "read", requires_data_source=True, concurrency_safe=True),
     _spec(
         "create_analysis_table", "write", requires_data_source=True,
         execution_mode="auto", job_threshold="workspace_persistent_ctas",
@@ -221,7 +215,7 @@ BUILTIN_TOOL_REGISTRY = ToolRegistry([
         requires_data_source=True, requires_runtime=True,
     ),
     _spec(
-        "query_data", "read", replay_safe=True, requires_data_source=True,
+        "query_data", "read", requires_data_source=True,
         execution_mode="auto", job_threshold="workspace_query_rows_gte_100000",
         requires_runtime=True,
     ),
@@ -229,7 +223,7 @@ BUILTIN_TOOL_REGISTRY = ToolRegistry([
         "run_analysis", "analysis", requires_data_source=True,
         execution_mode="auto", job_threshold="time_series_rows_gte_1000", requires_runtime=True,
     ),
-    _spec("select_chart", "analysis", replay_safe=True, requires_data_source=True, concurrency_safe=True),
+    _spec("select_chart", "analysis", requires_data_source=True, concurrency_safe=True),
     _spec(
         "generate_chart", "output", requires_data_source=True,
         execution_mode="auto", job_threshold="chart_rows_gte_50000",
@@ -296,19 +290,19 @@ BUILTIN_TOOL_REGISTRY = ToolRegistry([
     ),
     _spec("ask_user", "interaction"),
     _spec(
-        "workspace_glob", "read", replay_safe=True, default_exposed=False, discoverable=True,
+        "workspace_glob", "read", default_exposed=False, discoverable=True,
         discovery_keywords=("workspace", "文件", "目录", "列文件", "list files", "glob", "查找文件"),
         discovery_summary="List files in mounted/system workspace roots.",
         requires_runtime=True,
     ),
     _spec(
-        "workspace_grep", "read", replay_safe=True, default_exposed=False, discoverable=True,
+        "workspace_grep", "read", default_exposed=False, discoverable=True,
         discovery_keywords=("grep", "搜索", "搜索文件", "查找文本", "全文搜索", "search files", "regex"),
         discovery_summary="Search text files in workspace roots.",
         requires_runtime=True,
     ),
     _spec(
-        "workspace_read_file", "read", replay_safe=True, default_exposed=False, discoverable=True,
+        "workspace_read_file", "read", default_exposed=False, discoverable=True,
         discovery_keywords=(
             "读取", "读取文件", "打开", "打开文件", "查看文件", "说明文件", "说明文档",
             "文档内容", "文件内容", "读一下", "看一下", "看下",
@@ -366,13 +360,13 @@ BUILTIN_TOOL_REGISTRY = ToolRegistry([
         requires_runtime=True, requires_workspace=True,
     ),
     _spec(
-        "task_get", "read", replay_safe=True, default_exposed=False, discoverable=True,
+        "task_get", "read", default_exposed=False, discoverable=True,
         discovery_keywords=("任务", "task", "查看任务", "任务详情"),
         discovery_summary="Read one workspace task.",
         requires_runtime=True, requires_workspace=True,
     ),
     _spec(
-        "task_list", "read", replay_safe=True, default_exposed=False, discoverable=True,
+        "task_list", "read", default_exposed=False, discoverable=True,
         discovery_keywords=("任务", "待办", "task", "todo", "任务列表"),
         discovery_summary="List persistent workspace tasks.",
         requires_runtime=True, requires_workspace=True,
@@ -450,7 +444,7 @@ BUILTIN_TOOL_REGISTRY = ToolRegistry([
         requires_runtime=True, requires_workspace=True,
     ),
     _spec(
-        "workflow_list", "read", replay_safe=True, default_exposed=False, discoverable=True,
+        "workflow_list", "read", default_exposed=False, discoverable=True,
         discovery_keywords=("workflow", "工作流", "流程", "场景", "可用流程"),
         discovery_summary="List published Workflows in the mounted workspace.",
         requires_runtime=True, requires_workspace=True,
@@ -474,7 +468,7 @@ BUILTIN_TOOL_REGISTRY = ToolRegistry([
         requires_runtime=True, requires_workspace=True,
     ),
     _spec(
-        "memory_read", "read", replay_safe=True, default_exposed=False, discoverable=True,
+        "memory_read", "read", default_exposed=False, discoverable=True,
         discovery_keywords=(
             "memory", "记忆", "长期记忆", "偏好", "反馈", "preference", "remember",
             "previous preference", "之前说的", "上次提到",

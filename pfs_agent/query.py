@@ -16,9 +16,6 @@ from .reporting import AnalysisRequest, MetricContract, ReportingContractError
 class QueryInterpretationError(ReportingContractError):
     """Raised when a report question cannot be mapped safely."""
 
-    def __init__(self, message: str, *, code: str = "pfs_query_failed") -> None:
-        super().__init__(message, code=code)
-
 
 @dataclass(frozen=True)
 class ParsedReportQuestion:
@@ -47,10 +44,7 @@ def _find_column(columns: Iterable[str], aliases: tuple[str, ...], label: str) -
     matches = [column for column in available if any(alias.lower() in column.lower() for alias in aliases)]
     if len(matches) != 1:
         if not matches:
-            raise QueryInterpretationError(
-                f"问题需要{label}字段，但数据源中没有明确匹配的列",
-                code="source_columns_missing",
-            )
+            raise QueryInterpretationError(f"问题需要{label}字段，但数据源中没有明确匹配的列")
         raise QueryInterpretationError(f"问题匹配到多个{label}字段，请明确列名：" + ", ".join(matches))
     return matches[0]
 
@@ -68,16 +62,6 @@ def _date_bounds(question: str) -> tuple[str, str]:
     if len(dates) == 1:
         return dates[0], dates[0]
     return "", ""
-
-
-def _aggregation_for_question(question: str) -> str:
-    """Recognize only explicit average wording; default to the legacy SUM path."""
-    lowered = question.lower()
-    if any(token in question for token in ("平均", "均值")) or any(
-        token in lowered for token in ("average", "avg")
-    ):
-        return "AVG"
-    return "SUM"
 
 
 def parse_report_question(
@@ -108,21 +92,19 @@ def parse_report_question(
     date_column = _find_column(available, ("month", "月份", "日期", "date", "时间"), "日期")
     dimension = _find_column(available, ("region", "地区", "区域", "省份", "城市", "channel", "渠道"), "分组")
     mentions_metric = any(
-        token in lowered
-        for token in ("销售", "收入", "金额", "利润", "毛利", "净利", "revenue", "sales", "profit")
+        token in lowered for token in ("销售", "收入", "金额", "利润", "毛利", "净利", "revenue", "sales", "profit")
     )
     mentions_dimension = any(
         token in lowered for token in ("地区", "区域", "省份", "城市", "渠道", "region", "channel")
     )
     if not mentions_metric or not mentions_dimension:
-        raise QueryInterpretationError("目前只支持“按地区/渠道统计销售额、收入或利润汇总”的明确问题")
+        raise QueryInterpretationError("目前只支持“按地区/渠道统计销售额、收入或利润”的明确问题")
     date_from, date_to = _date_bounds(text)
     metric_id = value_column
-    aggregation = _aggregation_for_question(text)
     metric = MetricContract(
         metric_id=metric_id,
         label=metric_label,
-        formula=f"{aggregation}({value_column})",
+        formula=f"SUM({value_column})",
         value_column=value_column,
         date_column=date_column,
         dimension=dimension,
@@ -133,8 +115,5 @@ def parse_report_question(
     return ParsedReportQuestion(
         request=request,
         metric=metric,
-        interpretation=(
-            f"按 {dimension} 分组，对 {value_column} 做 {aggregation}；"
-            f"时间范围 {date_from or '全部'} 至 {date_to or '全部'}。"
-        ),
+        interpretation=f"按 {dimension} 分组，对 {value_column} 做 SUM；时间范围 {date_from or '全部'} 至 {date_to or '全部'}。",
     )

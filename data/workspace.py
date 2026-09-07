@@ -725,38 +725,6 @@ class WorkspaceManager:
         root = Path(metadata.root_path)
         return root.resolve() if root.is_dir() else None
 
-    def ensure_for_job(
-        self,
-        session_id: str,
-        workspace_id: str,
-    ) -> Optional[WorkspaceRuntime]:
-        """Rebind a persisted user workspace for a worker in a fresh process.
-
-        The queue stores only the stable workspace identity.  The worker must
-        resolve that identity through the authoritative metadata before it can
-        open the directory or its persistent DuckDB source.  Workflow-only
-        runtimes are resolved by ``workflow_runtime_for_session`` and are not
-        treated as user-mounted folders here.
-        """
-        workspace_id = str(workspace_id or "").strip()
-        if not workspace_id:
-            return None
-        current = self.get_by_workspace(workspace_id)
-        if current is not None:
-            return current
-        metadata = self.metadata_store.find(workspace_id)
-        if metadata is None:
-            return None
-        ok, _message, runtime = self.mount(
-            session_id,
-            metadata.root_path,
-            permission=metadata.permission,
-            remember=False,
-        )
-        if not ok or runtime is None or runtime.workspace_id != workspace_id:
-            return None
-        return runtime
-
     def list_known(self, session_id: str = "") -> list[dict]:
         """Return known Workspaces enriched with current Runtime/Session state."""
         current_id = self.workspace_id_for_session(session_id) if session_id else None

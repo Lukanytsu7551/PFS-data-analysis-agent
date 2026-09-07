@@ -15,7 +15,7 @@
 
 - macOS startup, core chat, CSV/XLSX analysis, charts, deliverables, jobs, and workspace basics have local evidence.
 - Code, frontend formatting, static checks, and offline regression tests follow the development gates.
-- The latest successful CI run, `34029259331`, validated commit `b2a6393` for Windows x64, macOS Apple Silicon, a clean Windows source install, and both desktop packages. The current `main` commit is `1cc49c9` and has not yet run CI at the same SHA.
+- The historical CI run `34029259331` validated commit `b2a6393` for Windows x64, macOS Apple Silicon, a clean Windows source install, and both desktop packages. The worktree is now being realigned to the runtime baseline; a new commit and same-SHA CI result are still pending.
 
 ### Current boundary
 

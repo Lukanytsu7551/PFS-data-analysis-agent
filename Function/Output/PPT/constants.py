@@ -1,6 +1,6 @@
 # Copyright 2026 Zafer-Liu
-# PFS 数据分析 Agent · 数据分析演示文稿生成框架
-# Licensed under CC BY-NC 4.0 — see NOTICE.md and the applicable component terms.
+# 自然语言交互式经营数据分析软件 V1.0
+# Licensed under CC BY-NC 4.0 — see LICENSE.
 #
 """McKinsey Design System — Color palette, typography, and layout constants."""
 from pptx.util import Inches, Pt, Emu
@@ -79,8 +79,6 @@ FOOTNOTE_SIZE      = Pt(9)
 
 FONT_HEADER = 'Georgia'
 FONT_BODY   = 'Arial'
-# KaiTi is not available in the supported macOS runtime and caused CJK text
-# to render as tofu in LibreOffice.  Keep Latin typography unchanged while
-# declaring an installed macOS CJK face for East Asian runs; Office on other
-# platforms may still apply its normal font fallback when this face is absent.
+# Use an installed macOS CJK face for readable local exports.  Office on
+# other platforms can apply its normal fallback when this face is absent.
 FONT_EA     = 'Hiragino Sans'

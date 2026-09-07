@@ -950,69 +950,6 @@
         <select id="pfs-report-dimension-column" aria-label="分组列"></select>
       </label>
     </div>
-    <section class="pfs-business-entry" aria-labelledby="pfs-business-entry-title">
-      <div>
-        <h3 id="pfs-business-entry-title">真实业务验收</h3>
-        <p>先核对粒度、期间和业务勾稽，再输出绑定证据的管理结论；不把贡献余量冒充利润。</p>
-      </div>
-      <div class="pfs-business-entry-actions">
-        <label class="pfs-business-scenario-control">
-          <span>验收场景</span>
-          <select id="pfs-business-scenario-select" aria-label="验收场景">
-            <option value="auto">自动识别</option>
-            <option value="city_portfolio_v1">城市经营组合</option>
-            <option value="city_monthly_pnl_v1">城市月度损益</option>
-            <option value="city_user_supply_v1">用户—供给效率</option>
-            <option value="demand_forecast_v1">经营需求预测</option>
-          </select>
-        </label>
-        <div class="pfs-business-forecast-controls" id="pfs-business-forecast-controls" hidden>
-          <label class="pfs-business-forecast-control">
-            <span>预测模型</span>
-            <select id="pfs-business-forecast-model" aria-label="预测模型">
-              <option value="Time_Series_Prophet">Prophet</option>
-              <option value="Time_Series_ARIMA">ARIMA</option>
-              <option value="Time_Series_SARIMA">SARIMA</option>
-              <option value="Time_Series_VAR">VAR</option>
-              <option value="Time_Series_GRU">GRU</option>
-            </select>
-          </label>
-          <label class="pfs-business-forecast-control">
-            <span>Holdout（月）</span>
-            <input id="pfs-business-forecast-holdout" type="number" min="1" max="12" step="1" value="3" inputmode="numeric" aria-label="Holdout 月数">
-          </label>
-          <label class="pfs-business-forecast-control">
-            <span>滚动窗口（个）</span>
-            <input id="pfs-business-forecast-rolling" type="number" min="0" max="4" step="1" value="2" inputmode="numeric" aria-label="滚动回测窗口数">
-          </label>
-          <label class="pfs-business-forecast-control">
-            <span>总量偏差上限（%）</span>
-            <input id="pfs-business-forecast-delta-limit" type="number" min="0" step="0.1" placeholder="留空=待确认" inputmode="decimal" aria-label="预测总量偏差上限">
-          </label>
-          <label class="pfs-business-forecast-control">
-            <span>训练→Holdout 均值漂移上限（%）</span>
-            <input id="pfs-business-forecast-shift-limit" type="number" min="0" step="0.1" placeholder="留空=仅提示" inputmode="decimal" aria-label="训练到 Holdout 均值漂移上限">
-          </label>
-          <label class="pfs-business-forecast-control">
-            <span>订单分布 KS 上限（0–1）</span>
-            <input id="pfs-business-forecast-ks-limit" type="number" min="0" max="1" step="0.01" placeholder="留空=仅提示" inputmode="decimal" aria-label="订单分布 KS 距离上限">
-          </label>
-          <label class="pfs-business-forecast-control">
-            <span>GMV 分布 KS 上限（0–1）</span>
-            <input id="pfs-business-forecast-gmv-ks-limit" type="number" min="0" max="1" step="0.01" placeholder="留空=仅提示" inputmode="decimal" aria-label="GMV 分布 KS 距离上限">
-          </label>
-          <label class="pfs-business-forecast-control">
-            <span>WAPE 上限（%）</span>
-            <input id="pfs-business-forecast-wape-limit" type="number" min="0" step="0.1" placeholder="留空=待确认" inputmode="decimal" aria-label="WAPE 上限">
-          </label>
-          <label class="pfs-business-forecast-control">
-            <span>相对朴素基线 WAPE 改善下限（%）</span>
-            <input id="pfs-business-forecast-baseline-limit" type="number" min="0" max="100" step="0.1" placeholder="留空=待确认" inputmode="decimal" aria-label="相对朴素基线 WAPE 改善下限">
-          </label>
-        </div>
-        <button class="btn-sm btn-sm-primary" id="pfs-business-run" type="button">运行经营验收</button>
-      </div>
-    </section>
     <section class="pfs-report-question" aria-labelledby="pfs-report-question-title">
       <div class="pfs-report-question-head">
         <div>

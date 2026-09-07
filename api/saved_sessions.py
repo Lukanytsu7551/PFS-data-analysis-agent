@@ -1,6 +1,7 @@
 """Blueprint: save / load / delete persistent sessions."""
 import json
 import logging
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +13,6 @@ from data.connector import ExcelDataSource, CSVDataSource
 from agent.reasoning import split_reasoning_tags
 from infrastructure.artifact_lifecycle import register_session_file, soft_delete_session_group
 from infrastructure.paths import data_path
-from infrastructure.compat import cloud_login_enabled
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _is_cloud() -> bool:
-    return cloud_login_enabled()
+    return bool(os.environ.get("RAILWAY_PROJECT_ID")) or os.environ.get("VERCEL") == "1"
 
 
 def _scoped_save_dir() -> Path:
@@ -150,9 +150,6 @@ def _recovery_state(sess) -> dict:
     return {
         "recent_sql": list(getattr(sess, "recent_sql", []))[-5:],
         "recent_artifacts": list(getattr(sess, "recent_artifacts", []))[-20:],
-        "analysis_delete_operations": list(
-            getattr(sess, "analysis_delete_operations", [])
-        )[-100:],
         "active_sources": [
             item for item in sess.list_sources() if item.get("active")
         ],
@@ -451,10 +448,6 @@ def load_session(sid: str):
         if item.get("artifact_id"):
             item["url"] = f"/api/session/{sid}/tool-results/{item['artifact_id']}"
         sess.recent_artifacts.append(item)
-    sess.analysis_delete_operations = [
-        dict(item) for item in recovery.get("analysis_delete_operations", [])[-100:]
-        if isinstance(item, dict)
-    ]
     sess.turn_activations = [
         dict(item) for item in recovery.get("turn_activations", [])[-100:]
         if isinstance(item, dict)

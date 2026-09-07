@@ -13,11 +13,6 @@ import logging
 from flask import Blueprint, request, jsonify
 
 from .state import session_manager, require_session_ownership
-from data.jobs_store import (
-    RESTART_RECOVERY_ACTION,
-    RESTART_RECOVERY_CODE,
-    RESTART_RECOVERY_ERROR,
-)
 
 log = logging.getLogger(__name__)
 
@@ -36,18 +31,6 @@ def _job_to_dict(job) -> dict:
             "name": root.name if root else workspace_id[:8],
             "path": str(root) if root else "",
         }
-    error_code = str(job.get("error_code") or "")
-    recovery_action = str(job.get("recovery_action") or "")
-    # Rows recovered by an older build predate the explicit metadata columns.
-    # Preserve a stable API contract for those rows too.
-    if not error_code and str(job.get("error") or "") == RESTART_RECOVERY_ERROR:
-        error_code = RESTART_RECOVERY_CODE
-        recovery_action = RESTART_RECOVERY_ACTION
-    resume_available = bool(
-        job.get("type") == "conversation_analysis"
-        and error_code == RESTART_RECOVERY_CODE
-        and job.get("request_json")
-    )
     return {
         "id": job["id"],
         "session_id": job["session_id"],
@@ -61,9 +44,6 @@ def _job_to_dict(job) -> dict:
         "message": job.get("message", ""),
         "result": job.get("result"),
         "error": job.get("error"),
-        "error_code": error_code,
-        "recovery_action": recovery_action,
-        "resume_available": resume_available,
         "created_at": job.get("created_at"),
         "updated_at": job.get("updated_at"),
         "started_at": job.get("started_at"),

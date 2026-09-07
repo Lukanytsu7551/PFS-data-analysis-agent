@@ -4,15 +4,14 @@ import logging
 import uuid
 from pathlib import Path
 
-from flask import Blueprint, g, has_request_context, request, jsonify, send_from_directory
+from flask import Blueprint, request, jsonify, send_from_directory
 
 from .state import session_manager, config_manager, require_session_ownership
-from infrastructure.compat import cloud_login_enabled, request_user_id
+from infrastructure.compat import request_user_id
 from infrastructure.paths import data_path
 
 log = logging.getLogger(__name__)
 bp = Blueprint("knowledge", __name__)
-_REQUEST_KB_KEY = "_pfs_knowledge_base"
 
 # Source mode: <project>/uploads/knowledge; packaged mode: <data-root>/uploads/knowledge.
 # This file lives at <root>/api/knowledge.py → parent = api/ → parent = root
@@ -39,7 +38,8 @@ def _scope_context() -> tuple[str, str]:
     )
     # Cloud mode: fall back to authenticated user
     if not user_id:
-        if cloud_login_enabled():
+        import os as _os
+        if bool(_os.environ.get("RAILWAY_PROJECT_ID")) or _os.environ.get("VERCEL") == "1":
             from .auth import current_user
             auth_user = current_user()
             if auth_user:
@@ -53,40 +53,14 @@ def _scope_context() -> tuple[str, str]:
 
 def _kb_dir() -> Path:
     from Function.Knowledge.knowledge_base import knowledge_scope_dir
-    workspace_id, user_id = _scope_context()
-    return knowledge_scope_dir(workspace_id=workspace_id, user_id=user_id)
+    _wid, user_id = _scope_context()
+    return knowledge_scope_dir(workspace_id="", user_id=user_id)
 
 
 def _kb():
     from Function.Knowledge.knowledge_base import KnowledgeBase
-    workspace_id, user_id = _scope_context()
-    # A request can perform several reads/writes (for example confirm first
-    # inserts structured records and then indexes the source document). Reuse
-    # one connection inside that request and close it from teardown so short-
-    # lived API calls cannot accumulate SQLite handles or locks.
-    if has_request_context():
-        existing = getattr(g, _REQUEST_KB_KEY, None)
-        if existing is not None:
-            return existing
-    kb = KnowledgeBase(workspace_id=workspace_id, user_id=user_id)
-    if has_request_context():
-        setattr(g, _REQUEST_KB_KEY, kb)
-    return kb
-
-
-@bp.teardown_request
-def _close_request_kb(_error=None):
-    """Close the request-scoped knowledge connection on every exit path."""
-    if not has_request_context():
-        return
-    kb = getattr(g, _REQUEST_KB_KEY, None)
-    if kb is None:
-        return
-    delattr(g, _REQUEST_KB_KEY)
-    try:
-        kb.close()
-    except Exception:
-        log.exception("[knowledge] failed to close request-scoped database")
+    _wid, user_id = _scope_context()
+    return KnowledgeBase(workspace_id="", user_id=user_id)
 
 
 def _category_id(default: int = 1):
@@ -195,20 +169,9 @@ def parse_file():
     f.save(str(save_path))
 
     try:
-        from Function.Knowledge.file_parser import (
-            LLMRequiredError,
-            parse_file as _parse,
-        )
-
-        # A fully structured workbook is a deterministic column mapping and
-        # must remain usable when no LLM is configured. Mixed/unstructured
-        # workbooks take the lazy fallback below and request a model only when
-        # the parser proves it needs one.
-        try:
-            result = _parse(str(save_path), None, "")
-        except LLMRequiredError:
-            client, model = _get_client(sid, provider=provider)
-            result = _parse(str(save_path), client, model)
+        client, model = _get_client(sid, provider=provider)
+        from Function.Knowledge.file_parser import parse_file as _parse
+        result = _parse(str(save_path), client, model)
         result["filename"] = filename          # let frontend reference the file
         return jsonify(result)
     except Exception as e:

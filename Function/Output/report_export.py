@@ -11,12 +11,7 @@ _CJK_FONT = "Hiragino Sans"
 
 
 def _set_cjk_font(run, font_name: str = _CJK_FONT) -> None:
-    """Declare the same CJK face for all Word font slots.
-
-    ``python-docx``'s ``run.font.name`` only sets the Latin font slots.  Word
-    and LibreOffice use ``w:eastAsia`` for Chinese text, so leaving that slot
-    unset can produce tofu even when the requested Latin font is installed.
-    """
+    """Set all Word font slots so CJK text remains readable across platforms."""
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
@@ -31,7 +26,7 @@ def _set_cjk_font(run, font_name: str = _CJK_FONT) -> None:
 
 
 def _set_style_cjk_font(style, font_name: str = _CJK_FONT) -> None:
-    """Set CJK font slots on a Word style used by generated paragraphs."""
+    """Set the same CJK face on a generated Word style."""
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
@@ -50,15 +45,13 @@ def export_to_report(
     sections: List[Dict[str, Any]],
     filepath: str,
     chart_htmls: Optional[List[str]] = None,
-    *,
-    abort_check=None,
 ) -> Tuple[str, str]:
     """
-    Generate a Word (.docx) analysis document and optionally bundle charts as a ZIP.
+    Generate a Word (.docx) report and optionally bundle charts as a ZIP.
 
     Parameters
     ----------
-    title       : Analysis title shown at the top of the document.
+    title       : Report title shown at the top of the document.
     sections    : Ordered list of {heading: str, content: str | list[dict]}.
                   str content → paragraph; list[dict] content → table.
     filepath    : Absolute path for the .docx file (directory must exist).
@@ -77,8 +70,6 @@ def export_to_report(
     except ImportError as exc:
         raise ImportError("python-docx 未安装，请运行: pip install python-docx") from exc
 
-    if abort_check is not None:
-        abort_check()
     doc = Document()
     for style_name in ("Normal", "Title", "Heading 1", "Heading 2", "Subtitle"):
         try:
@@ -109,8 +100,6 @@ def export_to_report(
 
     # ── Sections ───────────────────────────────────────────────────────
     for section in sections:
-        if abort_check is not None:
-            abort_check()
         heading = section.get("heading", "")
         content = section.get("content", "")
 
@@ -123,8 +112,6 @@ def export_to_report(
                 para = para.strip()
                 if para:
                     add_paragraph(para)
-            if abort_check is not None:
-                abort_check()
 
         elif isinstance(content, list) and content:
             cols = list(content[0].keys())
@@ -143,13 +130,9 @@ def export_to_report(
                     for run in row_cells[i].paragraphs[0].runs:
                         _set_cjk_font(run)
             add_paragraph()  # spacer after table
-            if abort_check is not None:
-                abort_check()
 
     # ── Chart reference section ─────────────────────────────────────────
     if chart_htmls:
-        if abort_check is not None:
-            abort_check()
         add_heading("图表附件", level=1)
         add_paragraph(
             f"本报告共包含 {len(chart_htmls)} 张交互式图表，"
@@ -159,11 +142,7 @@ def export_to_report(
             add_paragraph(f"• chart_{i + 1:02d}.html")
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    if abort_check is not None:
-        abort_check()
     doc.save(filepath)
-    if abort_check is not None:
-        abort_check()
 
     # ── Bundle into ZIP when charts are present ─────────────────────────
     if chart_htmls:
@@ -172,8 +151,6 @@ def export_to_report(
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             zf.write(filepath, os.path.basename(filepath))
             for i, html in enumerate(chart_htmls):
-                if abort_check is not None:
-                    abort_check()
                 zf.writestr(f"chart_{i + 1:02d}.html", html)
         return zip_path, zip_name
 

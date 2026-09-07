@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import logging
-import math
 import os
 import threading
 import uuid
@@ -111,11 +109,7 @@ def _session_owned_artifacts(session_id: str, exclude_files: set[Path]) -> list[
     for item in _active_registry_items(items):
         if str(item.get("session_id") or "") != session_id:
             continue
-        # Workspace artifacts remain user-owned project files. Archiving a
-        # chat session must not move files out of the mounted project.
-        if str(item.get("storage_scope") or "data") == "workspace":
-            continue
-        if str(item.get("type") or "") not in {"chart", "export", "report", "upload", "xlsx", "docx", "pptx", "dashboard"}:
+        if str(item.get("type") or "") not in {"chart", "export", "report", "upload"}:
             continue
         relative = str(item.get("path") or "")
         if not relative or not (data_root / relative).is_file():
@@ -431,48 +425,13 @@ def _save_registry(items: dict[str, dict[str, Any]]) -> None:
     os.replace(temp, path)
 
 
-def _artifact_root(item: dict[str, Any]) -> Path | None:
-    """Resolve an artifact's private storage root without exposing it to APIs."""
-    if str(item.get("storage_scope") or "data") != "workspace":
-        return data_path().resolve(strict=False)
-    workspace_id = str(item.get("workspace_id") or "")
-    if not workspace_id:
-        return None
-    try:
-        from data.workspace import workspace_manager
-
-        return workspace_manager.root_for_workspace(workspace_id)
-    except (OSError, RuntimeError, ValueError):
-        return None
-
-
-def _artifact_path(item: dict[str, Any]) -> Path | None:
-    """Resolve one registry entry inside its declared storage boundary."""
-    root = _artifact_root(item)
-    if root is None:
-        return None
-    try:
-        relative = _safe_relative_path(str(item.get("path") or ""))
-    except ValueError:
-        return None
-    target = (root / relative).resolve(strict=False)
-    if not _within(target, root):
-        return None
-    if str(item.get("storage_scope") or "data") == "workspace":
-        artifacts_root = (root / "artifacts").resolve(strict=False)
-        if not _within(target, artifacts_root):
-            return None
-    return target
-
-
 def prune_registry_for_paths(relative_paths: set[str]) -> int:
     """Drop ACTIVE registry entries whose files were physically removed by the
     cleanup sweeper, so they do not linger as "registered but missing".
 
     `relative_paths` are paths relative to the managed data root (separator
-    normalized to `/`). Only data-scope entries whose file is gone AND whose
-    status is active are removed; workspace and archived/recycled entries are
-    never touched.
+    normalized to `/`). Only entries whose file is gone AND whose status is
+    active are removed; archived/recycled entries are never touched.
     """
     normalized = {str(value).replace("\\", "/") for value in (relative_paths or ()) if str(value or "")}
     if not normalized:
@@ -482,8 +441,6 @@ def prune_registry_for_paths(relative_paths: set[str]) -> int:
         removed = 0
         for key, item in list(items.items()):
             if str(item.get("status") or "active") != "active":
-                continue
-            if str(item.get("storage_scope") or "data") != "data":
                 continue
             if str(item.get("path") or "").replace("\\", "/") in normalized:
                 items.pop(key, None)
@@ -501,14 +458,15 @@ def prune_missing_registered() -> dict[str, int]:
     Used to reconcile historical "registered but missing" entries (e.g. files
     removed by earlier cleanup sweeps before registry sync existed).
     """
+    root = data_path().resolve(strict=False)
     with _LOCK:
         items = _load_registry()
         removed: list[str] = []
         for key, item in list(items.items()):
             if str(item.get("status") or "active") != "active":
                 continue
-            target = _artifact_path(item)
-            if target is None or not target.is_file():
+            relative = str(item.get("path") or "")
+            if not relative or not (root / relative).is_file():
                 removed.append(key)
                 items.pop(key, None)
         if removed:
@@ -529,229 +487,31 @@ def register_artifact(
     session_id: str = "",
     workspace_id: str = "",
     artifact_id: str = "",
-    metadata: dict[str, Any] | None = None,
 ) -> str:
     """Register an owned artifact under a lifecycle-managed root.
 
     Unknown or out-of-root files are never registered, so later scans remain
     conservative and cannot be used to delete arbitrary paths.
     """
+    root = data_path().resolve(strict=False)
     resolved = path.resolve(strict=False)
-    data_root = data_path().resolve(strict=False)
-    storage_root = data_root
-    storage_scope = "data"
-    if not path.is_file():
-        raise ValueError("产物文件不存在")
-    if not _within(resolved, data_root):
-        if not workspace_id:
-            raise ValueError("工作区产物缺少 workspace_id")
-        try:
-            from data.workspace import workspace_manager
-
-            workspace_root = workspace_manager.root_for_workspace(workspace_id)
-        except (OSError, RuntimeError, ValueError):
-            workspace_root = None
-        artifacts_root = (workspace_root / "artifacts").resolve(strict=False) if workspace_root else None
-        if workspace_root is None or artifacts_root is None or not _within(resolved, artifacts_root):
-            raise ValueError("产物路径不在受控数据目录或已知工作区 artifacts 目录内")
-        storage_root = workspace_root.resolve(strict=False)
-        storage_scope = "workspace"
+    if not path.is_file() or not _within(resolved, root):
+        raise ValueError("产物路径不在受控数据目录内")
     key = artifact_id or uuid.uuid4().hex
-    metadata = dict(metadata or {})
-    digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
     with _LOCK:
         items = _load_registry()
-        existing = items.get(key)
-        if existing is not None:
-            same_identity = (
-                str(existing.get("path") or "") == str(resolved.relative_to(storage_root))
-                and str(existing.get("storage_scope") or "data") == storage_scope
-                and str(existing.get("session_id") or "") == str(session_id)
-                and str(existing.get("workspace_id") or "") == str(workspace_id)
-                and str(existing.get("sha256") or "") == digest
-            )
-            if same_identity:
-                return key
-            raise ValueError("artifact_id 已被其他产物占用")
         items[key] = {
             "id": key,
             "type": artifact_type,
-            "path": str(resolved.relative_to(storage_root)),
-            "storage_scope": storage_scope,
+            "path": str(resolved.relative_to(root)),
             "session_id": session_id,
             "workspace_id": workspace_id,
             "created_at": _now(),
             "size_bytes": resolved.stat().st_size,
-            "sha256": digest,
-            **{
-                k: v for k, v in metadata.items()
-                if k not in {
-                    "id", "type", "path", "storage_scope", "session_id",
-                    "workspace_id", "created_at", "size_bytes", "sha256",
-                }
-            },
         }
         _save_registry(items)
-    _record("artifact_registered", {"artifact_id": key, "type": artifact_type, "session_id": session_id, "sha256": digest})
+    _record("artifact_registered", {"artifact_id": key, "type": artifact_type, "session_id": session_id})
     return key
-
-
-def update_artifact_run_usage(
-    *, session_id: str, run_id: str, cost: dict[str, Any],
-) -> int:
-    """Persist one Agent run's measured usage on its active artifacts.
-
-    Both the session owner and run identity must match.  Only the structured
-    usage contract is mutable; artifact identity, path, digest and lineage are
-    deliberately left untouched.  A missing provider price remains ``None``
-    rather than being rewritten as a zero-dollar run.
-    """
-    owner = str(session_id or "").strip()
-    run = str(run_id or "").strip()
-    if not owner or not run:
-        raise ValueError("更新 Artifact 用量需要 session_id 和 run_id")
-    if not isinstance(cost, dict):
-        raise ValueError("Artifact 用量必须是结构化对象")
-
-    source = str(cost.get("source") or "").strip()
-    if source not in {
-        "provider_usage_configured_pricing",
-        "provider_usage_price_unknown",
-        "provider_usage_unavailable",
-    }:
-        raise ValueError("Artifact 用量来源无效")
-
-    normalized: dict[str, Any] = {
-        "amount": None,
-        "currency": str(cost.get("currency") or "USD")[:12],
-        "estimated": cost.get("estimated"),
-        "source": source,
-    }
-    amount = cost.get("amount")
-    if amount is not None:
-        try:
-            amount = float(amount)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("Artifact 费用必须是非负数字或 null") from exc
-        if not math.isfinite(amount) or amount < 0:
-            raise ValueError("Artifact 费用必须是非负有限数字")
-        normalized["amount"] = round(amount, 8)
-    if normalized["estimated"] not in {True, False, None}:
-        raise ValueError("Artifact 费用 estimated 字段无效")
-    if source == "provider_usage_price_unknown" and amount is not None:
-        raise ValueError("模型单价未知时费用必须保持 null")
-    if source == "provider_usage_configured_pricing" and amount is None:
-        raise ValueError("按配置单价计算时费用不能为空")
-
-    for field in ("model_calls", "input_tokens", "output_tokens", "cached_input_tokens"):
-        try:
-            value = int(cost.get(field, 0) or 0)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"Artifact 用量字段 {field} 必须是非负整数") from exc
-        if value < 0:
-            raise ValueError(f"Artifact 用量字段 {field} 必须是非负整数")
-        normalized[field] = value
-    for field in ("providers", "models"):
-        values = cost.get(field) or []
-        if not isinstance(values, (list, tuple, set)):
-            raise ValueError(f"Artifact 用量字段 {field} 必须是列表")
-        normalized[field] = sorted({str(value).strip()[:160] for value in values if str(value).strip()})
-    normalized["status"] = str(cost.get("status") or "running")[:40]
-    normalized["billing_verified"] = False
-
-    with _LOCK:
-        items = _load_registry()
-        updated = 0
-        for item in items.values():
-            if str(item.get("status") or "active") != "active":
-                continue
-            if str(item.get("session_id") or "") != owner:
-                continue
-            if str(item.get("run_id") or "") != run:
-                continue
-            item["cost"] = dict(normalized)
-            updated += 1
-        if updated:
-            _save_registry(items)
-    if updated:
-        _record("artifact_run_usage_updated", {
-            "session_id": owner, "run_id": run,
-            "artifact_count": updated, "source": source,
-        })
-    return updated
-
-
-def list_registered_artifacts(*, session_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
-    """Return safe metadata for active registered artifacts, never local paths."""
-    limit = max(1, min(int(limit), 200))
-    with _LOCK:
-        items = list(_load_registry().values())
-    items = [
-        item for item in items
-        if str(item.get("status") or "active") == "active"
-        and (not session_id or str(item.get("session_id") or "") == session_id)
-    ]
-    items.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
-    safe_fields = (
-        "id", "type", "session_id", "workspace_id", "created_at", "size_bytes",
-        "sha256", "run_id", "source_id", "source_sha256", "worksheet",
-        "included_rows", "metric_contract",
-        "analysis_parameters", "sql", "chart_specs", "final_claims", "warnings",
-        "cost",
-        "download_count", "download_history",
-    )
-    result = [{key: item[key] for key in safe_fields if key in item} for item in items[:limit]]
-    try:
-        from data.workspace import workspace_manager
-
-        for artifact in result:
-            workspace_id = str(artifact.get("workspace_id") or "")
-            if not workspace_id:
-                continue
-            metadata = workspace_manager.metadata_store.find(workspace_id)
-            artifact["workspace"] = {
-                "workspace_id": workspace_id,
-                "name": metadata.name if metadata is not None else "",
-                "available": workspace_manager.root_for_workspace(workspace_id) is not None,
-            }
-    except (OSError, RuntimeError, ValueError):
-        pass
-    return result
-
-
-def resolve_registered_artifact_path(artifact_id: str, *, session_id: str = "") -> tuple[dict[str, Any], Path] | None:
-    """Resolve an active registered artifact for internal serving only.
-
-    The registry path never crosses the API boundary. Both the artifact ID and
-    session owner must match before returning a path inside the managed root.
-    """
-    key = str(artifact_id or "")
-    with _LOCK:
-        item = dict(_load_registry().get(key) or {})
-    if not item or str(item.get("status") or "active") != "active":
-        return None
-    if session_id and str(item.get("session_id") or "") != str(session_id):
-        return None
-    target = _artifact_path(item)
-    if target is None or not target.is_file():
-        return None
-    return item, target
-
-
-def record_artifact_download(artifact_id: str) -> bool:
-    """Increment download telemetry for an existing active artifact."""
-    with _LOCK:
-        items = _load_registry()
-        item = items.get(str(artifact_id or ""))
-        if not item or str(item.get("status") or "active") != "active":
-            return False
-        history = list(item.get("download_history") or [])[-49:]
-        history.append(_now())
-        item["download_history"] = history
-        item["download_count"] = len(history)
-        _save_registry(items)
-    _record("artifact_downloaded", {"artifact_id": str(artifact_id), "download_count": len(history)})
-    return True
 
 
 def _managed_artifact_dirs() -> dict[str, Path]:
@@ -776,11 +536,7 @@ def artifact_cleanup_preview() -> dict[str, Any]:
         items = _load_registry()
     active_items = _active_registry_items(items)
     registered_paths = {str(item.get("path") or "") for item in active_items}
-    missing = []
-    for item in active_items:
-        target = _artifact_path(item)
-        if target is None or not target.is_file():
-            missing.append(item["id"])
+    missing = [item["id"] for item in active_items if not (root / str(item.get("path") or "")).is_file()]
     unknown: list[dict[str, Any]] = []
     for kind, directory in managed.items():
         if not directory.exists():
@@ -1070,6 +826,7 @@ def registered_artifact_reference_preview() -> dict[str, Any]:
     This is a preview only. A missing token in saved-session metadata is not
     proof that an artifact is safe to delete; it is only a candidate signal.
     """
+    root = data_path().resolve(strict=False)
     with _LOCK:
         items = _load_registry()
     active_items = _active_registry_items(items)
@@ -1080,7 +837,7 @@ def registered_artifact_reference_preview() -> dict[str, Any]:
     for item in active_items:
         artifact_id = str(item.get("id") or "")
         relative = str(item.get("path") or "")
-        resolved = _artifact_path(item)
+        resolved = root / relative
         base = {
             "id": artifact_id,
             "type": str(item.get("type") or ""),
@@ -1089,7 +846,7 @@ def registered_artifact_reference_preview() -> dict[str, Any]:
             "session_id": str(item.get("session_id") or ""),
             "workspace_id": str(item.get("workspace_id") or ""),
         }
-        if resolved is None or not resolved.is_file():
+        if not resolved.is_file():
             missing.append(base)
             continue
         tokens = _artifact_reference_tokens(item)
@@ -1160,17 +917,18 @@ def recycle_registered_artifact(artifact_id: str) -> dict[str, Any]:
     candidate_ids = {str(item) for item in preview.get("unreferenced_ids") or []}
     if artifact_id not in candidate_ids:
         raise ValueError("该产物仍有引用或未进入可回收候选")
+    root = data_path().resolve(strict=False)
     with _LOCK:
         items = _load_registry()
         item = items.get(artifact_id)
         if not item or str(item.get("status") or "active") != "active":
             raise FileNotFoundError(artifact_id)
         artifact_type = str(item.get("type") or "")
-        if artifact_type not in {"chart", "export", "report", "xlsx", "docx", "pptx", "dashboard"}:
-            raise ValueError("仅支持回收已登记的分析产物")
+        if artifact_type not in {"chart", "export", "report"}:
+            raise ValueError("仅支持回收 chart/export/report 已登记产物")
         relative = _safe_relative_path(str(item.get("path") or ""))
-        target = _artifact_path(item)
-        if target is None or not target.is_file():
+        target = (root / relative).resolve(strict=False)
+        if not target.is_file() or not _within(target, root):
             raise FileNotFoundError(artifact_id)
         trash_id = f"{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex}"
         trash = _artifact_trash_root() / trash_id
@@ -1188,8 +946,6 @@ def recycle_registered_artifact(artifact_id: str) -> dict[str, Any]:
             "registry_id": artifact_id,
             "type": artifact_type,
             "relative_path": str(relative).replace("\\", "/"),
-            "storage_scope": str(item.get("storage_scope") or "data"),
-            "workspace_id": str(item.get("workspace_id") or ""),
             "filename": target.name,
             "size_bytes": size,
         }
@@ -1262,28 +1018,13 @@ def restore_artifact_trash(trash_id: str) -> dict[str, Any]:
         destination = (base / relative).resolve(strict=False)
         boundary = base
     else:
-        storage_scope = str(manifest.get("storage_scope") or "data")
-        workspace_id = str(manifest.get("workspace_id") or "")
-        if storage_scope == "workspace":
-            try:
-                from data.workspace import workspace_manager
-
-                base = workspace_manager.root_for_workspace(workspace_id)
-            except (OSError, RuntimeError, ValueError):
-                base = None
-            if base is None:
-                raise ValueError("原工作区当前不可用，无法恢复产物")
-            base = base.resolve(strict=False)
-            boundary = (base / "artifacts").resolve(strict=False)
-        else:
-            base = data_path().resolve(strict=False)
-            boundary = base
+        base = data_path().resolve(strict=False)
         destination = (base / relative).resolve(strict=False)
+        boundary = base
     if not source.is_file() or not _within(source, group) or not _within(destination, boundary):
         raise ValueError("产物回收站项目包含无效文件")
     if destination.exists():
         raise ValueError(f"无法恢复：{destination.name} 已存在")
-    registry_id = ""
     with _LOCK:
         destination.parent.mkdir(parents=True, exist_ok=True)
         os.replace(source, destination)
@@ -1297,12 +1038,7 @@ def restore_artifact_trash(trash_id: str) -> dict[str, Any]:
                 _save_registry(items)
         (group / "manifest.json").unlink(missing_ok=True)
         group.rmdir()
-    summary = {
-        "restored": [destination.name],
-        "trash_id": trash_id,
-        "type": kind,
-        "artifact_id": registry_id,
-    }
+    summary = {"restored": [destination.name], "trash_id": trash_id, "type": kind}
     _record("artifact_trash_restored", summary)
     return summary
 

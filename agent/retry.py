@@ -82,53 +82,16 @@ def is_provider_switchable(exc: Exception) -> bool:
     ))
 
 
-def _retry_reason(exc: Exception) -> str:
-    message = str(exc).lower()
-    if "429" in message or "rate limit" in message or "too many requests" in message:
-        return "rate_limit"
-    if any(code in message for code in ("500", "502", "503", "504")):
-        return "provider_unavailable"
-    return "transport_error"
-
-
-def _sleep_with_abort(seconds: float, abort_check=None) -> None:
-    """Sleep with bounded cancellation checks when a caller supplies one."""
-    if abort_check is None:
-        time.sleep(seconds)
-        return
-    deadline = time.monotonic() + max(0.0, float(seconds))
-    while True:
-        abort_check()
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return
-        time.sleep(min(0.1, remaining))
-
-
-def call_with_retry(
-    fn,
-    *args,
-    max_retries: int = 3,
-    on_retry=None,
-    abort_check=None,
-    **kwargs,
-):
+def call_with_retry(fn, *args, max_retries: int = 3, **kwargs):
     """Call fn(*args, **kwargs) with exponential backoff on transient errors.
 
     Schedule (base_wait × 2**(attempt-1)):
       - rate limit (429):     5s → 10s → 20s
       - server error (5xx):   3s →  6s → 12s
       - network/timeout:      2s →  4s →  8s
-
-    ``abort_check`` is an optional callback owned by the caller.  It is
-    invoked before every attempt and during backoff; it may raise the caller's
-    cancellation exception so a stopped Agent does not remain asleep through
-    all retry delays.
     """
     attempt = 0
     while True:
-        if abort_check is not None:
-            abort_check()
         try:
             return fn(*args, **kwargs)
         except Exception as exc:
@@ -136,20 +99,7 @@ def call_with_retry(
             attempt += 1
             if not retryable or attempt > max_retries:
                 raise
-            if abort_check is not None:
-                abort_check()
             wait = base_wait * (2 ** (attempt - 1))
             log.warning("[retry] attempt %d/%d failed (%s), waiting %.1fs",
                         attempt, max_retries, exc, wait)
-            if on_retry is not None:
-                try:
-                    on_retry({
-                        "attempt": attempt,
-                        "max_retries": max_retries,
-                        "wait_seconds": wait,
-                        "reason": _retry_reason(exc),
-                        "error_type": type(exc).__name__,
-                    })
-                except Exception:
-                    log.exception("[retry] observer failed")
-            _sleep_with_abort(wait, abort_check)
+            time.sleep(wait)

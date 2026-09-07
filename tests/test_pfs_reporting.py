@@ -2,14 +2,7 @@ import unittest
 import tempfile
 from pathlib import Path
 
-from pfs_agent.reporting import (
-    AnalysisRequest,
-    MetricContract,
-    ReportingContractError,
-    analyze_csv,
-    analyze_file,
-    list_xlsx_worksheets,
-)
+from pfs_agent.reporting import AnalysisRequest, MetricContract, analyze_csv, analyze_file
 
 
 FIXTURE = Path(__file__).resolve().parents[1] / "data" / "fixtures" / "pfs_sales.csv"
@@ -24,30 +17,6 @@ METRIC = MetricContract(
 
 
 class PfsReportingTests(unittest.TestCase):
-    def test_empty_csv_and_header_only_csv_have_distinct_contract_errors(self):
-        with tempfile.TemporaryDirectory() as directory:
-            empty = Path(directory) / "empty.csv"
-            header_only = Path(directory) / "header-only.csv"
-            empty.write_text("", encoding="utf-8")
-            header_only.write_text("month,region,sales_amount\n", encoding="utf-8")
-
-            with self.assertRaisesRegex(ReportingContractError, "non-empty header") as empty_error:
-                analyze_file(empty, metric=METRIC, request=self._request("empty"))
-            with self.assertRaisesRegex(ReportingContractError, "at least one data row") as row_error:
-                analyze_file(header_only, metric=METRIC, request=self._request("header-only"))
-
-        self.assertEqual("source_header_missing", empty_error.exception.code)
-        self.assertEqual("source_has_no_rows", row_error.exception.code)
-
-    def _request(self, run_id, **overrides):
-        values = {
-            "run_id": run_id,
-            "metric_id": METRIC.metric_id,
-            "dimension": METRIC.dimension,
-            **overrides,
-        }
-        return AnalysisRequest(**values)
-
     def test_fixture_produces_stable_grouped_result_and_evidence(self):
         result = analyze_csv(
             FIXTURE,
@@ -93,81 +62,6 @@ class PfsReportingTests(unittest.TestCase):
         self.assertEqual("华东", result.groups[0]["dimension"])
         self.assertEqual(14000, result.groups[0]["value"])
 
-    def test_duplicate_rows_are_reported_without_automatic_deduplication(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "duplicate-sales.csv"
-            path.write_text(
-                "month,region,sales_amount\n2026-01,华东,1200\n2026-01,华东,1200\n2026-02,华南,800\n",
-                encoding="utf-8",
-            )
-            result = analyze_file(path, metric=METRIC, request=self._request("duplicate-rows"))
-
-        self.assertEqual(1, result.snapshot.duplicate_rows)
-        self.assertEqual(3200, result.total)
-        self.assertTrue(any("检测到 1 条完全重复记录" in warning for warning in result.warnings))
-        self.assertTrue(any("系统未自动去重" in warning for warning in result.warnings))
-
-    def test_metric_formula_executes_only_supported_deterministic_aggregates(self):
-        average_metric = MetricContract(
-            metric_id="sales_amount_avg",
-            label="平均销售额",
-            formula="AVG(sales_amount)",
-            value_column="sales_amount",
-            date_column="month",
-            dimension="region",
-        )
-        average = analyze_csv(
-            FIXTURE,
-            metric=average_metric,
-            request=AnalysisRequest(
-                run_id="run-average",
-                metric_id="sales_amount_avg",
-                dimension="region",
-            ),
-        )
-        self.assertAlmostEqual(100000 / 9, average.total)
-        self.assertEqual(14000, average.groups[0]["value"])
-
-        distinct_metric = MetricContract(
-            metric_id="product_count",
-            label="商品数",
-            formula="COUNT_DISTINCT(product)",
-            value_column="product",
-            date_column="month",
-            dimension="region",
-        )
-        distinct = analyze_csv(
-            FIXTURE,
-            metric=distinct_metric,
-            request=AnalysisRequest(
-                run_id="run-distinct",
-                metric_id="product_count",
-                dimension="region",
-            ),
-        )
-        self.assertEqual(3, distinct.total)
-        self.assertEqual(2, distinct.groups[0]["value"])
-
-        unsupported = MetricContract(
-            metric_id="ratio",
-            label="比率",
-            formula="SUM(sales_amount) / SUM(product)",
-            value_column="sales_amount",
-            date_column="month",
-            dimension="region",
-        )
-        with self.assertRaisesRegex(ReportingContractError, "metric formula") as error:
-            analyze_csv(
-                FIXTURE,
-                metric=unsupported,
-                request=AnalysisRequest(
-                    run_id="run-unsupported-formula",
-                    metric_id="ratio",
-                    dimension="region",
-                ),
-            )
-        self.assertEqual("metric_formula_unsupported", error.exception.code)
-
     @unittest.skipUnless(__import__("importlib.util").util.find_spec("openpyxl"), "openpyxl is not installed")
     def test_xlsx_uses_the_same_metric_and_evidence_contract(self):
         from openpyxl import Workbook
@@ -196,79 +90,6 @@ class PfsReportingTests(unittest.TestCase):
         self.assertEqual("xlsx-sales", result.snapshot.source_id)
         self.assertEqual("xlsx", result.snapshot.file_name.rsplit(".", 1)[-1])
         self.assertEqual(result.evidence[0].content_sha256, result.snapshot.content_sha256)
-
-    @unittest.skipUnless(__import__("importlib.util").util.find_spec("openpyxl"), "openpyxl is not installed")
-    def test_multi_sheet_xlsx_requires_and_records_explicit_worksheet(self):
-        from openpyxl import Workbook
-
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "multi-sheet.xlsx"
-            workbook = Workbook()
-            first = workbook.active
-            first.title = "说明"
-            first.append(["note"])
-            first.append(["这不是分析数据"])
-            sales = workbook.create_sheet("销售明细")
-            sales.append(["month", "region", "sales_amount"])
-            sales.append(["2026-01", "华东", 1200])
-            workbook.save(path)
-
-            self.assertEqual(["说明", "销售明细"], list_xlsx_worksheets(path))
-            with self.assertRaisesRegex(ReportingContractError, "choose a worksheet") as error:
-                analyze_file(path, metric=METRIC, request=self._request("sheet-required"))
-            result = analyze_file(
-                path,
-                metric=METRIC,
-                request=self._request("sheet-selected"),
-                worksheet="销售明细",
-            )
-
-        self.assertEqual("worksheet_required", error.exception.code)
-        self.assertEqual("销售明细", result.snapshot.worksheet)
-        self.assertEqual(1200, result.total)
-
-    def test_non_numeric_value_and_no_matching_date_are_explicit(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "sales.csv"
-            path.write_text(
-                "month,region,sales_amount\n2026-01,华东,not-a-number\n",
-                encoding="utf-8",
-            )
-            with self.assertRaisesRegex(ReportingContractError, "not numeric") as error:
-                analyze_file(path, metric=METRIC, request=self._request("invalid-number"))
-
-            path.write_text(
-                "month,region,sales_amount\n2026-01,华东,1200\n",
-                encoding="utf-8",
-            )
-            result = analyze_file(
-                path,
-                metric=METRIC,
-                request=self._request("no-match", date_from="2027-01", date_to="2027-12"),
-            )
-
-        self.assertEqual("metric_value_not_numeric", error.exception.code)
-        self.assertEqual("unverified", result.status)
-        self.assertIn("筛选条件下没有匹配的数据行。", result.warnings)
-
-    def test_invalid_dates_and_reversed_date_filters_have_explicit_codes(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "bad-date.csv"
-            path.write_text("month,region,sales_amount\n2026-02-30,华东,1200\n", encoding="utf-8")
-            with self.assertRaises(ReportingContractError) as source_error:
-                analyze_file(path, metric=METRIC, request=self._request("bad-date"))
-        self.assertEqual("source_date_invalid", source_error.exception.code)
-        with self.assertRaises(ReportingContractError) as filter_error:
-            self._request("reversed", date_from="2026-03", date_to="2026-01")
-        self.assertEqual("date_range_invalid", filter_error.exception.code)
-
-    def test_missing_metric_columns_have_explicit_code(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "missing-column.csv"
-            path.write_text("month,region\n2026-01,华东\n", encoding="utf-8")
-            with self.assertRaises(ReportingContractError) as error:
-                analyze_file(path, metric=METRIC, request=self._request("missing-column"))
-        self.assertEqual("source_columns_missing", error.exception.code)
 
 
 if __name__ == "__main__":

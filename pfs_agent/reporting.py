@@ -11,7 +11,6 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
-import re
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -20,69 +19,6 @@ from typing import Any, Mapping, Optional
 
 class ReportingContractError(ValueError):
     """Raised when a reporting request or source violates its contract."""
-
-    def __init__(self, message: str, *, code: str = "reporting_contract_invalid") -> None:
-        super().__init__(message)
-        self.code = code
-
-
-_DATE_PATTERNS = (re.compile(r"^\d{4}-\d{2}$"), re.compile(r"^\d{4}-\d{2}-\d{2}(?:[ T].*)?$"))
-_METRIC_FORMULA_PATTERN = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)\s*$", re.DOTALL)
-SUPPORTED_METRIC_AGGREGATIONS = frozenset({"SUM", "AVG", "COUNT", "COUNT_DISTINCT"})
-
-
-def parse_metric_formula(metric: "MetricContract") -> tuple[str, str]:
-    """Parse the intentionally small executable formula grammar.
-
-    Formula text is never evaluated as Python or SQL.  Only one aggregate
-    over the contract's declared value column is accepted, so the display
-    formula and the deterministic calculation cannot silently diverge.
-    """
-    match = _METRIC_FORMULA_PATTERN.fullmatch(str(metric.formula or ""))
-    if not match:
-        raise ReportingContractError(
-            "metric formula must be AGGREGATE(value_column)",
-            code="metric_formula_unsupported",
-        )
-    aggregation = match.group(1).upper()
-    operand = match.group(2).strip()
-    if aggregation not in SUPPORTED_METRIC_AGGREGATIONS:
-        raise ReportingContractError(
-            "metric formula aggregate must be one of SUM, AVG, COUNT, COUNT_DISTINCT",
-            code="metric_formula_unsupported",
-        )
-    if not operand or "(" in operand or ")" in operand:
-        raise ReportingContractError(
-            "metric formula must contain one aggregate over one column",
-            code="metric_formula_unsupported",
-        )
-    if operand != metric.value_column:
-        raise ReportingContractError(
-            "metric formula column must match value_column",
-            code="metric_formula_column_mismatch",
-        )
-    return aggregation, operand
-
-
-def _date_key(value: str, *, code: str) -> tuple[int, int, int]:
-    """Return a comparable date key and reject ambiguous source/filter values."""
-    text = str(value or "").strip()
-    if not any(pattern.fullmatch(text) for pattern in _DATE_PATTERNS):
-        raise ReportingContractError(f"date value must use YYYY-MM or YYYY-MM-DD: {text!r}", code=code)
-    date_text = text[:10] if len(text) >= 10 else text
-    parts = [int(item) for item in date_text.split("-")]
-    year, month = parts[:2]
-    day = parts[2] if len(parts) == 3 else 1
-    if not 1 <= month <= 12:
-        raise ReportingContractError(f"date value has invalid month: {text!r}", code=code)
-    if day < 1 or day > 31:
-        raise ReportingContractError(f"date value has invalid day: {text!r}", code=code)
-    # Calendar validation without adding a heavyweight dependency.
-    import calendar
-
-    if year < 1 or (len(parts) == 3 and day > calendar.monthrange(year, month)[1]):
-        raise ReportingContractError(f"date value is not a real calendar date: {text!r}", code=code)
-    return year, month, day
 
 
 @dataclass(frozen=True)
@@ -140,10 +76,8 @@ class AnalysisRequest:
             raise ReportingContractError("metric_id must not be empty")
         if not self.dimension.strip():
             raise ReportingContractError("dimension must not be empty")
-        from_key = _date_key(self.date_from, code="date_filter_invalid") if self.date_from else None
-        to_key = _date_key(self.date_to, code="date_filter_invalid") if self.date_to else None
-        if from_key and to_key and from_key > to_key:
-            raise ReportingContractError("date_from must not be after date_to", code="date_range_invalid")
+        if self.date_from and self.date_to and self.date_from > self.date_to:
+            raise ReportingContractError("date_from must not be after date_to")
 
 
 @dataclass(frozen=True)
@@ -157,7 +91,6 @@ class DataSnapshot:
     duplicate_rows: int
     min_date: str = ""
     max_date: str = ""
-    worksheet: str = ""
     rows: tuple[Mapping[str, str], ...] = field(default_factory=tuple, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
@@ -171,7 +104,6 @@ class DataSnapshot:
             "duplicate_rows": self.duplicate_rows,
             "min_date": self.min_date,
             "max_date": self.max_date,
-            "worksheet": self.worksheet,
         }
 
 
@@ -183,14 +115,8 @@ class EvidenceRecord:
     locator: str
     excerpt: str
     content_sha256: str
-    file_name: str = ""
-    worksheet: str = ""
-    included_rows: int = 0
-    date_from: str = ""
-    date_to: str = ""
-    columns: tuple[str, ...] = ()
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, str]:
         return {
             "evidence_id": self.evidence_id,
             "source_id": self.source_id,
@@ -198,12 +124,6 @@ class EvidenceRecord:
             "locator": self.locator,
             "excerpt": self.excerpt,
             "content_sha256": self.content_sha256,
-            "file_name": self.file_name,
-            "worksheet": self.worksheet,
-            "included_rows": self.included_rows,
-            "date_from": self.date_from,
-            "date_to": self.date_to,
-            "columns": list(self.columns),
         }
 
 
@@ -246,7 +166,6 @@ def load_csv_snapshot(
     *,
     source_id: str,
     date_column: str,
-    file_name: str = "",
 ) -> DataSnapshot:
     """Read a bounded UTF-8 CSV and record its stable content identity."""
     csv_path = Path(path).resolve()
@@ -262,7 +181,7 @@ def load_csv_snapshot(
     reader = csv.DictReader(text.splitlines())
     columns = tuple(str(column or "").strip() for column in (reader.fieldnames or ()))
     if not columns or any(not column for column in columns):
-        raise ReportingContractError("CSV source must have a non-empty header", code="source_header_missing")
+        raise ReportingContractError("CSV source must have a non-empty header")
     rows: list[dict[str, str]] = []
     null_counts = {column: 0 for column in columns}
     row_fingerprints: set[str] = set()
@@ -279,16 +198,11 @@ def load_csv_snapshot(
             duplicate_rows += 1
         row_fingerprints.add(fingerprint)
         if row.get(date_column):
-            _date_key(row[date_column], code="source_date_invalid")
             dates.append(row[date_column])
 
-    if not rows:
-        raise ReportingContractError(
-            "CSV source must contain at least one data row", code="source_has_no_rows"
-        )
     return DataSnapshot(
         source_id=source_id.strip() or csv_path.stem,
-        file_name=str(file_name or csv_path.name).strip(),
+        file_name=csv_path.name,
         content_sha256=digest,
         row_count=len(rows),
         columns=columns,
@@ -300,38 +214,18 @@ def load_csv_snapshot(
     )
 
 
-def list_xlsx_worksheets(path: str | Path) -> list[str]:
-    """Return workbook-order worksheet names without guessing which one to analyze."""
-    xlsx_path = Path(path).resolve()
-    if not xlsx_path.is_file():
-        raise ReportingContractError(f"XLSX source does not exist: {xlsx_path}", code="source_not_found")
-    try:
-        from openpyxl import load_workbook
-    except ImportError as exc:
-        raise ReportingContractError(
-            "XLSX analysis requires the openpyxl dependency", code="xlsx_dependency_missing"
-        ) from exc
-    try:
-        workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
-        return list(workbook.sheetnames)
-    except Exception as exc:
-        raise ReportingContractError("XLSX source could not be read", code="source_unreadable") from exc
-    finally:
-        try:
-            workbook.close()
-        except UnboundLocalError:
-            pass
-
-
 def load_xlsx_snapshot(
     path: str | Path,
     *,
     source_id: str,
     date_column: str,
-    worksheet: str = "",
-    file_name: str = "",
 ) -> DataSnapshot:
-    """Read one explicit worksheet and preserve it in the snapshot contract."""
+    """Read the first worksheet of an XLSX without changing cell values.
+
+    XLSX support is deliberately limited to the first worksheet in this first
+    vertical slice. The workbook bytes still form the source identity, so the
+    resulting evidence can be reproduced later.
+    """
     xlsx_path = Path(path).resolve()
     if not xlsx_path.is_file():
         raise ReportingContractError(f"XLSX source does not exist: {xlsx_path}")
@@ -343,38 +237,20 @@ def load_xlsx_snapshot(
         raise ReportingContractError("XLSX analysis requires the openpyxl dependency") from exc
     try:
         workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
-        names = list(workbook.sheetnames)
-        if not names:
-            raise ReportingContractError("XLSX source has no worksheets", code="worksheet_missing")
-        if worksheet:
-            if worksheet not in names:
-                raise ReportingContractError(
-                    f"worksheet does not exist: {worksheet}", code="worksheet_not_found"
-                )
-            selected_worksheet = worksheet
-        elif len(names) == 1:
-            selected_worksheet = names[0]
-        else:
-            raise ReportingContractError(
-                "XLSX source contains multiple worksheets; choose a worksheet",
-                code="worksheet_required",
-            )
-        sheet = workbook[selected_worksheet]
+        sheet = workbook.active
         values = list(sheet.iter_rows(values_only=True))
-    except ReportingContractError:
-        raise
     except Exception as exc:
-        raise ReportingContractError("XLSX source could not be read", code="source_unreadable") from exc
+        raise ReportingContractError("XLSX source could not be read") from exc
     finally:
         try:
             workbook.close()
         except UnboundLocalError:
             pass
     if not values:
-        raise ReportingContractError("XLSX source must have a non-empty header", code="source_header_missing")
+        raise ReportingContractError("XLSX source must have a non-empty header")
     columns = tuple(str(value or "").strip() for value in values[0])
     if not columns or any(not column for column in columns):
-        raise ReportingContractError("XLSX source must have a non-empty header", code="source_header_missing")
+        raise ReportingContractError("XLSX source must have a non-empty header")
     rows: list[dict[str, str]] = []
     null_counts = {column: 0 for column in columns}
     row_fingerprints: set[str] = set()
@@ -382,9 +258,7 @@ def load_xlsx_snapshot(
     dates: list[str] = []
     for values_row in values[1:]:
         row = {
-            column: str(
-                values_row[index] if index < len(values_row) and values_row[index] is not None else ""
-            ).strip()
+            column: str(values_row[index] if index < len(values_row) and values_row[index] is not None else "").strip()
             for index, column in enumerate(columns)
         }
         if not any(row.values()):
@@ -398,15 +272,10 @@ def load_xlsx_snapshot(
             duplicate_rows += 1
         row_fingerprints.add(fingerprint)
         if row.get(date_column):
-            _date_key(row[date_column], code="source_date_invalid")
             dates.append(row[date_column])
-    if not rows:
-        raise ReportingContractError(
-            "XLSX source must contain at least one data row", code="source_has_no_rows"
-        )
     return DataSnapshot(
         source_id=source_id.strip() or xlsx_path.stem,
-        file_name=str(file_name or xlsx_path.name).strip(),
+        file_name=xlsx_path.name,
         content_sha256=digest,
         row_count=len(rows),
         columns=columns,
@@ -414,30 +283,16 @@ def load_xlsx_snapshot(
         duplicate_rows=duplicate_rows,
         min_date=min(dates) if dates else "",
         max_date=max(dates) if dates else "",
-        worksheet=selected_worksheet,
         rows=tuple(rows),
     )
 
 
-def load_tabular_snapshot(
-    path: str | Path,
-    *,
-    source_id: str,
-    date_column: str,
-    worksheet: str = "",
-    file_name: str = "",
-) -> DataSnapshot:
+def load_tabular_snapshot(path: str | Path, *, source_id: str, date_column: str) -> DataSnapshot:
     suffix = Path(path).suffix.lower()
     if suffix == ".csv":
-        return load_csv_snapshot(path, source_id=source_id, date_column=date_column, file_name=file_name)
+        return load_csv_snapshot(path, source_id=source_id, date_column=date_column)
     if suffix == ".xlsx":
-        return load_xlsx_snapshot(
-            path,
-            source_id=source_id,
-            date_column=date_column,
-            worksheet=worksheet,
-            file_name=file_name,
-        )
+        return load_xlsx_snapshot(path, source_id=source_id, date_column=date_column)
     raise ReportingContractError("PFS deterministic analysis accepts CSV or XLSX files only")
 
 
@@ -447,7 +302,7 @@ def analyze_snapshot(
     metric: MetricContract,
     request: AnalysisRequest,
 ) -> AnalysisResult:
-    """Apply the deterministic single-column aggregate contract to a snapshot."""
+    """Apply the deterministic grouped SUM contract to a loaded snapshot."""
     return _analyze_snapshot(snapshot, metric=metric, request=request)
 
 
@@ -457,9 +312,8 @@ def analyze_csv(
     metric: MetricContract,
     request: AnalysisRequest,
     source_id: str = "fixture",
-    file_name: str = "",
 ) -> AnalysisResult:
-    """Run a deterministic PFS report analysis over a CSV source."""
+    """Run the first deterministic PFS report analysis: grouped SUM."""
     if request.metric_id != metric.metric_id:
         raise ReportingContractError("request metric_id does not match metric contract")
     if request.dimension != metric.dimension:
@@ -468,7 +322,6 @@ def analyze_csv(
         path,
         source_id=source_id,
         date_column=metric.date_column,
-        file_name=file_name,
     )
     return _analyze_snapshot(snapshot, metric=metric, request=request)
 
@@ -479,17 +332,9 @@ def analyze_file(
     metric: MetricContract,
     request: AnalysisRequest,
     source_id: str = "fixture",
-    worksheet: str = "",
-    file_name: str = "",
 ) -> AnalysisResult:
     """Analyze a supported CSV or XLSX source with one shared contract."""
-    snapshot = load_tabular_snapshot(
-        path,
-        source_id=source_id,
-        date_column=metric.date_column,
-        worksheet=worksheet,
-        file_name=file_name,
-    )
+    snapshot = load_tabular_snapshot(path, source_id=source_id, date_column=metric.date_column)
     return _analyze_snapshot(snapshot, metric=metric, request=request)
 
 
@@ -503,7 +348,6 @@ def _analyze_snapshot(
         raise ReportingContractError("request metric_id does not match metric contract")
     if request.dimension != metric.dimension:
         raise ReportingContractError("request dimension does not match metric contract")
-    aggregation, _value_column = parse_metric_formula(metric)
     missing_columns = {
         metric.value_column,
         metric.date_column,
@@ -511,95 +355,43 @@ def _analyze_snapshot(
     } - set(snapshot.columns)
     if missing_columns:
         raise ReportingContractError(
-            "metric columns missing from snapshot: " + ", ".join(sorted(missing_columns)),
-            code="source_columns_missing",
+            "metric columns missing from snapshot: " + ", ".join(sorted(missing_columns))
         )
 
     buckets: dict[str, Decimal] = {}
-    bucket_counts: dict[str, int] = {}
-    bucket_distinct: dict[str, set[str]] = {}
-    total_sum = Decimal("0")
-    total_count = 0
-    total_distinct: set[str] = set()
+    total = Decimal("0")
     warnings: list[str] = []
-    if snapshot.duplicate_rows:
-        warnings.append(
-            f"检测到 {snapshot.duplicate_rows} 条完全重复记录，系统未自动去重，汇总结果可能被放大。"
-        )
     included_rows = 0
     for row in snapshot.rows:
         date_value = row.get(metric.date_column, "")
-        if not date_value:
-            warnings.append("存在缺少日期的行，无法纳入本次时间范围汇总。")
+        if request.date_from and date_value < request.date_from:
             continue
-        date_key = _date_key(date_value, code="source_date_invalid")
-        if request.date_from and date_key < _date_key(request.date_from, code="date_filter_invalid"):
-            continue
-        if request.date_to and date_key > _date_key(request.date_to, code="date_filter_invalid"):
+        if request.date_to and date_value > request.date_to:
             continue
         dimension_value = row.get(request.dimension, "")
         raw_value = row.get(metric.value_column, "")
         if not dimension_value or not raw_value:
             warnings.append("存在缺少分组字段或指标值的行，已从本次汇总排除。")
             continue
-        if aggregation in {"SUM", "AVG"}:
-            try:
-                amount = Decimal(raw_value)
-            except InvalidOperation as exc:
-                raise ReportingContractError(
-                    f"metric value is not numeric: {raw_value!r}",
-                    code="metric_value_not_numeric",
-                ) from exc
-            if not amount.is_finite():
-                raise ReportingContractError(
-                    f"metric value is not finite: {raw_value!r}",
-                    code="metric_value_not_finite",
-                )
-            buckets[dimension_value] = buckets.get(dimension_value, Decimal("0")) + amount
-            total_sum += amount
-            if aggregation == "AVG":
-                bucket_counts[dimension_value] = bucket_counts.get(dimension_value, 0) + 1
-                total_count += 1
-        elif aggregation == "COUNT":
-            bucket_counts[dimension_value] = bucket_counts.get(dimension_value, 0) + 1
-            total_count += 1
-        else:
-            bucket_distinct.setdefault(dimension_value, set()).add(raw_value)
-            total_distinct.add(raw_value)
+        try:
+            amount = Decimal(raw_value)
+        except InvalidOperation as exc:
+            raise ReportingContractError(f"metric value is not numeric: {raw_value!r}") from exc
+        buckets[dimension_value] = buckets.get(dimension_value, Decimal("0")) + amount
+        total += amount
         included_rows += 1
 
     def _number(value: Decimal) -> int | float:
         return int(value) if value == value.to_integral_value() else float(value)
 
-    def _aggregate_group(name: str) -> Decimal | int:
-        if aggregation == "SUM":
-            return buckets.get(name, Decimal("0"))
-        if aggregation == "AVG":
-            count = bucket_counts.get(name, 0)
-            return buckets.get(name, Decimal("0")) / count if count else Decimal("0")
-        if aggregation == "COUNT":
-            return bucket_counts.get(name, 0)
-        return len(bucket_distinct.get(name, set()))
-
-    group_names = set(buckets) | set(bucket_counts) | set(bucket_distinct)
-    group_values = {name: _aggregate_group(name) for name in group_names}
     groups = tuple(
-        {"dimension": name, "value": _number(Decimal(value)), "rank": rank}
+        {"dimension": name, "value": _number(value), "rank": rank}
         for rank, (name, value) in enumerate(
-            sorted(group_values.items(), key=lambda item: (-item[1], item[0])), start=1
+            sorted(buckets.items(), key=lambda item: (-item[1], item[0])), start=1
         )
     )
-    if aggregation == "SUM":
-        total_value: Decimal | int = total_sum
-    elif aggregation == "AVG":
-        total_value = total_sum / total_count if total_count else Decimal("0")
-    elif aggregation == "COUNT":
-        total_value = total_count
-    else:
-        total_value = len(total_distinct)
     evidence_text = (
         f"{snapshot.file_name} · sha256:{snapshot.content_sha256[:16]} · "
-        f"worksheet:{snapshot.worksheet or '-'} · "
         f"included_rows:{included_rows} · date:{request.date_from or snapshot.min_date}"
         f"..{request.date_to or snapshot.max_date}"
     )
@@ -611,19 +403,12 @@ def _analyze_snapshot(
         locator=f"{snapshot.file_name}#sha256={snapshot.content_sha256}",
         excerpt=evidence_text,
         content_sha256=snapshot.content_sha256,
-        file_name=snapshot.file_name,
-        worksheet=snapshot.worksheet,
-        included_rows=included_rows,
-        date_from=request.date_from or snapshot.min_date,
-        date_to=request.date_to or snapshot.max_date,
-        columns=snapshot.columns,
     )
-
     top_group = groups[0] if groups else None
     claims = [
         {
             "claim_id": "cl_" + hashlib.sha256(f"{request.run_id}:total".encode("utf-8")).hexdigest()[:16],
-            "text": f"{metric.label}合计为 {total_value}",
+            "text": f"{metric.label}合计为 {total}",
             "status": "supported" if included_rows else "unverified",
             "confidence": 1.0 if included_rows else 0.0,
             "evidence_ids": [evidence_id],
@@ -639,15 +424,13 @@ def _analyze_snapshot(
                 "evidence_ids": [evidence_id],
             }
         )
-    if not included_rows:
-        warnings.append("筛选条件下没有匹配的数据行。")
     return AnalysisResult(
         run_id=request.run_id,
         status="completed" if included_rows else "unverified",
         metric=metric,
         request=request,
         snapshot=snapshot,
-        total=_number(Decimal(total_value)),
+        total=_number(total),
         groups=groups,
         claims=tuple(claims),
         evidence=(evidence,),

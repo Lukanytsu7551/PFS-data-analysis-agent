@@ -606,7 +606,6 @@ def _call_summarizer(
     summary_model: str,
     conversation_text: str,
     focus: str = "",
-    request_timeout: Optional[float] = None,
 ) -> tuple[str, Any]:
     """Call the LLM and return summary text plus provider usage."""
     prompt = _COMPACT_PROMPT_TEMPLATE.format(conversation_text=conversation_text)
@@ -618,23 +617,16 @@ def _call_summarizer(
             + "\nPreserve this priority when it is supported by the conversation."
         )
 
-    request_kwargs = {
-        "model": summary_model,
-        "messages": [
+    response = client.chat.completions.create(
+        model=summary_model,
+        messages=[
             {"role": "system", "content": _COMPACT_SYSTEM},
             {"role": "user",   "content": prompt},
         ],
-        "temperature": 0.1,
-        "max_tokens": _SUMMARY_MAX_TOKENS,
-        "stream": False,
-    }
-    if request_timeout is not None:
-        request_kwargs["timeout"] = max(0.001, float(request_timeout))
-    # Compaction runs inside the active Agent turn. Do not remove the timeout
-    # for legacy clients: a compatibility retry without it would let a
-    # summarizer outlive the parent run. Such a client must fail closed and be
-    # replaced/configured by the caller.
-    response = client.chat.completions.create(**request_kwargs)
+        temperature=0.1,
+        max_tokens=_SUMMARY_MAX_TOKENS,
+        stream=False,
+    )
     return response.choices[0].message.content or "", getattr(response, "usage", None)
 
 
@@ -645,8 +637,6 @@ def compact_history(
     summary_model: Optional[str] = None,
     usage_callback: Optional[Callable[[Any], None]] = None,
     focus: str = "",
-    abort_check: Optional[Callable[[], None]] = None,
-    request_timeout: Optional[float | Callable[[], float]] = None,
 ) -> Tuple[List[Dict], bool]:
     """
     Summarize the oldest portion of history, keeping the most recent turns verbatim.
@@ -658,21 +648,13 @@ def compact_history(
                        `summary_model` is not given (guarantees a valid model
                        for the active provider/endpoint).
         summary_model: optional explicit model id for the summary call. If the
-            caller does not provide one, `model` is used as-is so we
-            never request a model the provider does not host.
-        abort_check: optional caller-owned cancellation/deadline callback. It
-            is checked before and after each summarizer request and is allowed
-            to raise the caller's terminal exception.
-        request_timeout: optional provider request timeout. A callable is
-            evaluated before each context-length retry so the caller can pass
-            the remaining run budget rather than a stale fixed duration.
+                       caller does not provide one, `model` is used as-is so we
+                       never request a model the provider does not host.
 
     Returns:
         (new_history, did_compact)
         new_history[0] is a system message containing the summary if compacted.
     """
-    if abort_check is not None:
-        abort_check()
     if len(history) < _MIN_TURNS_FOR_COMPACT:
         return history, False
 
@@ -701,32 +683,15 @@ def compact_history(
     summary = ""
     summary_input = stripped
     for attempt in range(3):
-        if abort_check is not None:
-            abort_check()
         conversation_text = _bounded_summary_text(summary_input)
-        attempt_timeout = (
-            request_timeout() if callable(request_timeout) else request_timeout
-        )
         try:
             summary, usage = _call_summarizer(
-                client,
-                use_model,
-                conversation_text,
-                focus=focus,
-                request_timeout=attempt_timeout,
+                client, use_model, conversation_text, focus=focus,
             )
-            if abort_check is not None:
-                abort_check()
             if usage is not None and usage_callback is not None:
                 usage_callback(usage)
             break
         except Exception as exc:
-            # Do not let the compaction fallback swallow a user stop or a
-            # caller-owned run deadline. The callback is deliberately checked
-            # inside this handler because the provider may return an ordinary
-            # error at the same moment cancellation becomes visible.
-            if abort_check is not None:
-                abort_check()
             from agent.retry import is_context_length_error
 
             if not is_context_length_error(exc) or attempt >= 2:

@@ -1,4 +1,4 @@
-"""Persistent storage for SQL and HTTP API connection configs."""
+"""Persistent storage for SQL / Google Sheets / HTTP API connection configs."""
 import logging
 log = logging.getLogger(__name__)
 
@@ -15,10 +15,12 @@ _CONFIG_DIR = _CONFIG_FILE.parent
 
 _SENSITIVE_KEYS = {
     "sql": "connection_string",
-    # Kept only to redact legacy on-disk records from older releases.
     "gsheets": "creds_json",
     "api": "auth_value",
 }
+
+# Google Sheets is retired. Keep the legacy key only as a migration boundary:
+# old credentials are never returned, persisted, or exposed as an active type.
 _RETIRED_TYPES = {"gsheets"}
 
 
@@ -43,7 +45,12 @@ class DataSourceConfigManager:
 
     def save(self, ds_type: str, config: dict):
         if ds_type in _RETIRED_TYPES:
-            raise ValueError(f"retired data source type: {ds_type}")
+            # A retired connector must fail closed at the write boundary.  We
+            # still scrub any legacy entry that was already on disk, but never
+            # acknowledge a new configuration as if it were supported.
+            self._configs.pop(ds_type, None)
+            self._save()
+            raise ValueError(f"data source type is retired: {ds_type}")
         self._configs[ds_type] = config
         self._save()
 

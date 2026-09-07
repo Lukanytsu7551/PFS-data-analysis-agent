@@ -23,8 +23,7 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
-from concurrent.futures import TimeoutError as FutureTimeoutError
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from config.product_identity import PRODUCT_VERSION, SERVICE_ID
 
@@ -163,9 +162,7 @@ class BaseTransport(ABC):
     async def connect(self) -> None: ...
 
     @abstractmethod
-    async def send_request(
-        self, method: str, params: dict, timeout: Optional[float] = None,
-    ) -> Any: ...
+    async def send_request(self, method: str, params: dict) -> Any: ...
 
     @abstractmethod
     async def close(self) -> None: ...
@@ -221,10 +218,7 @@ class StdioTransport(BaseTransport):
         self._proc.stdin.write(notif.encode())
         await self._proc.stdin.drain()
 
-    async def send_request(
-        self, method: str, params: dict, timeout: Optional[float] = None,
-    ) -> Any:
-        request_timeout = 30.0 if timeout is None else max(0.001, float(timeout))
+    async def send_request(self, method: str, params: dict) -> Any:
         async with self._lock:
             self._req_id += 1
             req = json.dumps({
@@ -238,7 +232,7 @@ class StdioTransport(BaseTransport):
 
             while True:
                 line = await asyncio.wait_for(
-                    self._proc.stdout.readline(), timeout=request_timeout
+                    self._proc.stdout.readline(), timeout=30
                 )
                 if not line:
                     raise ConnectionError("MCP stdio process closed stdout")
@@ -325,11 +319,8 @@ class SSETransport(BaseTransport):
         notif = {"jsonrpc": "2.0", "method": method, "params": params}
         await self._client.post(self._endpoint, json=notif)
 
-    async def send_request(
-        self, method: str, params: dict, timeout: Optional[float] = None,
-    ) -> Any:
+    async def send_request(self, method: str, params: dict) -> Any:
         import httpx
-        request_timeout = 60.0 if timeout is None else max(0.001, float(timeout))
         async with self._lock:
             self._req_id += 1
             payload = {
@@ -339,9 +330,7 @@ class SSETransport(BaseTransport):
                 "params": params,
             }
             try:
-                resp = await self._client.post(
-                    self._endpoint, json=payload, timeout=request_timeout,
-                )
+                resp = await self._client.post(self._endpoint, json=payload, timeout=60)
                 resp.raise_for_status()
                 data = resp.json()
             except httpx.HTTPStatusError as e:
@@ -447,45 +436,12 @@ class MCPServerConnection:
         else:
             raise ValueError(f"未知 transport: {cfg.transport}")
 
-    async def call_tool(
-        self, tool_name: str, args: dict, timeout: float = 60,
-    ) -> str:
-        deadline = time.monotonic() + max(0.001, float(timeout or 60))
-
-        def remaining_timeout() -> float:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError(
-                    f"MCP 工具 {self.server_id}/{tool_name} 超过调用时间上限"
-                )
-            return remaining
-
-        async def call_transport() -> Any:
-            request_timeout = remaining_timeout()
-            return await asyncio.wait_for(
-                self._transport.send_request("tools/call", {
-                    "name": tool_name,
-                    "arguments": args,
-                }, timeout=request_timeout),
-                timeout=request_timeout,
-            )
-
-        async def reconnect_with_budget() -> bool:
-            reconnect_timeout = remaining_timeout()
-            return await asyncio.wait_for(
-                self._reconnect(), timeout=reconnect_timeout,
-            )
-
+    async def call_tool(self, tool_name: str, args: dict) -> str:
         # Auto-reconnect if not connected
         if self.status != STATUS_CONNECTED or not self._transport:
             log.info("[mcp] %s not connected (status=%s), attempting reconnect before call",
                      self.server_id, self.status)
-            try:
-                reconnected = await reconnect_with_budget()
-            except TimeoutError:
-                return format_mcp_error(
-                    self.server_id, tool_name, "调用前重连超过时间上限"
-                )
+            reconnected = await self._reconnect()
             if not reconnected:
                 return format_mcp_error(self.server_id, tool_name,
                                         f"服务器未连接且重连失败: {self.last_error}")
@@ -500,7 +456,10 @@ class MCPServerConnection:
             return format_mcp_error(self.server_id, tool_name, f"参数校验失败: {err_msg}")
 
         try:
-            result = await call_transport()
+            result = await self._transport.send_request("tools/call", {
+                "name": tool_name,
+                "arguments": args,
+            })
             # MCP tools/call returns {content: [{type: "text", text: "..."}], isError: bool}
             if isinstance(result, dict):
                 if result.get("isError"):
@@ -513,8 +472,6 @@ class MCPServerConnection:
                 parts = [c.get("text", "") for c in content if c.get("type") == "text"]
                 return "\n".join(parts) if parts else str(result)
             return str(result)
-        except TimeoutError as e:
-            return format_mcp_error(self.server_id, tool_name, str(e))
         except (ConnectionError, RuntimeError, OSError) as e:
             # Transport-level failure — mark disconnected and try once more
             log.warning("[mcp] %s transport error during call: %s — attempting reconnect",
@@ -528,18 +485,16 @@ class MCPServerConnection:
                     pass
                 self._transport = None
 
-            try:
-                reconnected = await reconnect_with_budget()
-            except TimeoutError:
-                return format_mcp_error(
-                    self.server_id, tool_name, "连接断开后的重连超过时间上限"
-                )
+            reconnected = await self._reconnect()
             if not reconnected:
                 return format_mcp_error(self.server_id, tool_name,
                                         f"调用时连接断开且重连失败: {self.last_error}")
             # Single retry after successful reconnect
             try:
-                result = await call_transport()
+                result = await self._transport.send_request("tools/call", {
+                    "name": tool_name,
+                    "arguments": args,
+                })
                 if isinstance(result, dict):
                     if result.get("isError"):
                         content = result.get("content", [])
@@ -551,10 +506,6 @@ class MCPServerConnection:
                     parts = [c.get("text", "") for c in content if c.get("type") == "text"]
                     return "\n".join(parts) if parts else str(result)
                 return str(result)
-            except TimeoutError as retry_exc:
-                return format_mcp_error(
-                    self.server_id, tool_name, f"重连后重试超过时间上限: {retry_exc}"
-                )
             except Exception as retry_exc:
                 return format_mcp_error(self.server_id, tool_name,
                                         f"重连后重试仍失败: {retry_exc}")
@@ -609,50 +560,11 @@ class MCPManager:
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
-    def _submit(
-        self,
-        coro,
-        timeout: Optional[float] = 60,
-        abort_check: Optional[Callable[[], None]] = None,
-    ) -> Any:
+    def _submit(self, coro, timeout: int = 60) -> Any:
         if not self._loop or not self._loop.is_running():
-            close = getattr(coro, "close", None)
-            if close is not None:
-                close()
             raise RuntimeError("MCPManager event loop not running")
-        try:
-            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        except BaseException:
-            close = getattr(coro, "close", None)
-            if close is not None:
-                close()
-            raise
-        deadline = (
-            None if timeout is None
-            else time.monotonic() + max(0.001, float(timeout))
-        )
-        try:
-            while True:
-                if abort_check is not None:
-                    abort_check()
-                wait_timeout = 0.1
-                if deadline is not None:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise TimeoutError("MCP 调用超过时间上限")
-                    wait_timeout = min(wait_timeout, remaining)
-                try:
-                    return future.result(timeout=wait_timeout)
-                except FutureTimeoutError:
-                    # Polling keeps cooperative cancellation responsive while
-                    # the asyncio transport remains awaitable in its own loop.
-                    continue
-        except BaseException:
-            # Cancel the coroutine submitted to the MCP loop. This does not
-            # force-kill a third-party process, but it closes the client-side
-            # wait and lets stdio/HTTP transports unwind at their next await.
-            future.cancel()
-            raise
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result(timeout=timeout)
 
     def load_from_config(self, mcp_config_manager) -> None:
         """Register all enabled servers from MCPConfigManager (no connections yet)."""
@@ -716,14 +628,7 @@ class MCPManager:
             return []
         return conn._tools_cache
 
-    def call_tool(
-        self,
-        tool_name: str,
-        args: dict,
-        *,
-        timeout: Optional[float] = 60,
-        abort_check: Optional[Callable[[], None]] = None,
-    ) -> str:
+    def call_tool(self, tool_name: str, args: dict) -> str:
         """
         tool_name format: mcp__<server_id>__<original_tool_name>
         Fully exception-safe, always returns str.
@@ -739,20 +644,8 @@ class MCPManager:
             if not conn:
                 return format_mcp_error(server_id, original_name, "服务器未注册")
 
-            return self._submit(
-                conn.call_tool(
-                    original_name,
-                    args,
-                    timeout=timeout if timeout is not None else 60,
-                ),
-                timeout=timeout,
-                abort_check=abort_check,
-            )
+            return self._submit(conn.call_tool(original_name, args), timeout=60)
         except Exception as e:
-            # The Agent's cancellation/deadline callback is authoritative. Do
-            # not turn JobCanceled/AgentRunTimeout into an ordinary MCP error.
-            if abort_check is not None:
-                abort_check()
             log.error("[MCPManager] call_tool %s failed: %s", tool_name, e)
             return format_mcp_error("unknown", tool_name, str(e))
 

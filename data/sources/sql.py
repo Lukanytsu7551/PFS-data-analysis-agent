@@ -19,7 +19,6 @@ This gives the best of both worlds:
 import logging
 import os
 import re
-import threading
 from typing import List, Optional, Set, Tuple
 
 import duckdb
@@ -55,8 +54,6 @@ class SQLDataSource(DataSource):
         self._engine = create_engine(connection_string, **engine_options)
         with self._engine.connect() as conn:
             conn.execute(text("SELECT 1"))
-        self._active_remote_lock = threading.RLock()
-        self._active_remote_connection = None
 
         if display_name:
             self.name = display_name
@@ -81,34 +78,6 @@ class SQLDataSource(DataSource):
         # exposes metadata to the preview UI, but exposes no source table to the
         # agent until the user explicitly selects an analysis scope.
         self._analysis_tables: Set[str] = set()
-
-    def _with_remote_connection(self, callback):
-        """Run a remote operation while exposing its connection to cancellation."""
-        conn = self._engine.connect()
-        with self._active_remote_lock:
-            self._active_remote_connection = conn
-        try:
-            return callback(conn)
-        finally:
-            with self._active_remote_lock:
-                if self._active_remote_connection is conn:
-                    self._active_remote_connection = None
-            try:
-                conn.close()
-            except Exception:
-                pass
-
-    def interrupt_query(self) -> bool:
-        """Interrupt the active SQLAlchemy query, or the local DuckDB query."""
-        with self._active_remote_lock:
-            conn = self._active_remote_connection
-        if conn is not None:
-            try:
-                conn.close()
-                return True
-            except Exception:
-                log.warning("[SQLDataSource] remote query close failed", exc_info=True)
-        return super().interrupt_query()
 
     # ── Schema helpers ────────────────────────────────────────────────────────
 
@@ -179,9 +148,8 @@ class SQLDataSource(DataSource):
         try:
             from sqlalchemy import MetaData, Table, select
             remote = Table(table, MetaData(), autoload_with=self._engine)
-            df = self._with_remote_connection(
-                lambda conn: pd.read_sql(select(remote).limit(2), conn)
-            )
+            with self._engine.connect() as conn:
+                df = pd.read_sql(select(remote).limit(2), conn)
             if not df.empty:
                 lines.append("  -- sample data (first 2 rows) --")
                 for row in df.itertuples(index=False, name=None):
@@ -215,9 +183,8 @@ class SQLDataSource(DataSource):
         row_count: Optional[int] = None
         try:
             from sqlalchemy import text as _text
-            row_count = self._with_remote_connection(
-                lambda conn: conn.execute(_text(f"SELECT COUNT(*) FROM {q}")).scalar()
-            )
+            with self._engine.connect() as _c:
+                row_count = _c.execute(_text(f"SELECT COUNT(*) FROM {q}")).scalar()
         except Exception as exc:
             log.warning("[SQLDataSource] row count check failed for %r: %s", table_name, exc)
 
@@ -234,9 +201,8 @@ class SQLDataSource(DataSource):
         log.info("[SQLDataSource] loading table %r into DuckDB …", table_name)
         try:
             from sqlalchemy import text as _text
-            df = self._with_remote_connection(
-                lambda conn: pd.read_sql(_text(f"SELECT * FROM {q}"), conn)
-            )
+            with self._engine.connect() as conn:
+                df = pd.read_sql(_text(f"SELECT * FROM {q}"), conn)
             # Register directly without _sanitize_df — SQL types are already correct
             # and _sanitize_df's float→datetime heuristic is for Excel files only.
             self._duck.register("_tmp_sql_", df)
@@ -386,11 +352,8 @@ class SQLDataSource(DataSource):
             try:
                 from sqlalchemy import text as _text
                 q = self._quote(table_name)
-                total = self._with_remote_connection(
-                    lambda conn: conn.execute(
-                        _text(f"SELECT COUNT(*) FROM {q}")
-                    ).scalar()
-                )
+                with self._engine.connect() as _c:
+                    total = _c.execute(_text(f"SELECT COUNT(*) FROM {q}")).scalar()
                 row_hint = f"  ({total:,} rows)"
             except Exception:
                 pass
@@ -429,9 +392,8 @@ class SQLDataSource(DataSource):
             )
             try:
                 from sqlalchemy import text as _text
-                df = self._with_remote_connection(
-                    lambda conn: pd.read_sql(_text(sql), conn)
-                )
+                with self._engine.connect() as conn:
+                    df = pd.read_sql(_text(sql), conn)
                 # Register result as a temporary view so downstream analysis can use it
                 _view_name = "_large_query_result_"
                 self._duck.register(_view_name, df)
@@ -448,9 +410,8 @@ class SQLDataSource(DataSource):
         log.warning("[SQLDataSource] DuckDB query failed (%s), trying remote DB", err)
         try:
             from sqlalchemy import text as _text
-            df = self._with_remote_connection(
-                lambda conn: pd.read_sql(_text(sql), conn)
-            )
+            with self._engine.connect() as conn:
+                df = pd.read_sql(_text(sql), conn)
             return df, ""
         except Exception as exc:
             return pd.DataFrame(), str(exc)
@@ -533,9 +494,8 @@ class SQLDataSource(DataSource):
             from sqlalchemy import MetaData, Table, select
             remote_table = Table(table_name, MetaData(), autoload_with=self._engine)
             stmt = select(remote_table).limit(max_rows)
-            df = self._with_remote_connection(
-                lambda conn: pd.read_sql(stmt, conn)
-            )
+            with self._engine.connect() as conn:
+                df = pd.read_sql(stmt, conn)
         except Exception as exc:
             return {"name": table_name, "columns": [], "rows": [], "total_rows": None,
                     "error": str(exc)}
@@ -543,31 +503,6 @@ class SQLDataSource(DataSource):
         rows = [["" if v is None else str(v) for v in row] for row in df.itertuples(index=False)]
         return {"name": table_name, "columns": list(df.columns),
                 "rows": rows, "total_rows": None}
-
-    def close(self) -> None:
-        """Close active remote and local connections owned by this source."""
-        with self._active_remote_lock:
-            remote = self._active_remote_connection
-            self._active_remote_connection = None
-        if remote is not None:
-            try:
-                remote.close()
-            except Exception:
-                log.debug("[SQLDataSource] active remote connection close failed", exc_info=True)
-        duck = getattr(self, "_duck", None)
-        self._duck = None
-        if duck is not None:
-            try:
-                duck.close()
-            except Exception:
-                log.debug("[SQLDataSource] DuckDB connection close failed", exc_info=True)
-        engine = getattr(self, "_engine", None)
-        self._engine = None
-        if engine is not None:
-            try:
-                engine.dispose()
-            except Exception:
-                log.debug("[SQLDataSource] SQLAlchemy engine dispose failed", exc_info=True)
 
     # ── Cache inspection ──────────────────────────────────────────────────────
 

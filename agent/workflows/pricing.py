@@ -1,5 +1,4 @@
 """Optional, operator-supplied Workflow model pricing."""
-
 from __future__ import annotations
 
 import json
@@ -33,7 +32,6 @@ def workflow_model_prices() -> dict[str, dict[str, float]]:
             result[str(key)] = {"input": input_rate, "output": output_rate}
     try:
         from LLM.llm_config_manager import get_config_manager
-
         configs = get_config_manager().configs
         for provider, config in configs.items():
             input_rate = getattr(config, "input_price_per_million", None)
@@ -56,36 +54,8 @@ def workflow_model_prices() -> dict[str, dict[str, float]]:
     return result
 
 
-def lookup_model_price(provider: str, model: str) -> dict[str, float] | None:
-    """Return a complete configured price pair for one effective model.
-
-    Workflow cost budgets must resolve both rates before dispatch.  This
-    helper deliberately returns ``None`` for a missing or partial pair rather
-    than treating an unknown provider price as zero.
-    """
-    provider_key = str(provider or "").strip()
-    model_key = str(model or "").strip()
-    if not model_key:
-        return None
-    rates = workflow_model_prices().get(f"{provider_key}/{model_key}") or workflow_model_prices().get(
-        model_key
-    )
-    if not isinstance(rates, Mapping):
-        return None
-    try:
-        input_rate = float(rates["input"])
-        output_rate = float(rates["output"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    if input_rate < 0 or output_rate < 0:
-        return None
-    return {"input": input_rate, "output": output_rate}
-
-
 def estimate_model_cost(provider: str, model: str, input_tokens: int, output_tokens: int) -> float | None:
-    rates = lookup_model_price(provider, model)
+    rates = workflow_model_prices().get(f"{provider}/{model}") or workflow_model_prices().get(model)
     if rates is None:
         return None
-    return round(
-        (max(0, input_tokens) * rates["input"] + max(0, output_tokens) * rates["output"]) / 1_000_000, 8
-    )
+    return round((max(0, input_tokens) * rates["input"] + max(0, output_tokens) * rates["output"]) / 1_000_000, 8)

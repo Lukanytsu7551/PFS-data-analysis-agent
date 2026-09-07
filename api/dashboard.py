@@ -6,12 +6,9 @@ import os
 import re
 import datetime
 import uuid
-from urllib.parse import quote
 
 from flask import Blueprint, request, jsonify, render_template, abort
 from infrastructure.paths import data_path
-from agent.errors import AgentRunTimeout
-from agent.jobs import JobCanceled
 
 log = logging.getLogger(__name__)
 
@@ -149,24 +146,11 @@ def _render_widget(
 
 
 def prefetch_dashboard_widget_data(
-    data_source,
-    widgets_spec: list,
-    workspace_authorization=None,
-    *,
-    query_runner=None,
-    abort_check=None,
+    data_source, widgets_spec: list, workspace_authorization=None,
 ) -> list[dict]:
-    """Fetch widget SQL results before any worker rendering.
-
-    ``query_runner`` is supplied by the Agent path so each query can inherit
-    the parent turn's remaining deadline and interruption contract. HTTP CRUD
-    callers leave it unset and retain the connector's normal synchronous
-    behavior.
-    """
+    """Fetch widget SQL results on the caller thread before any worker rendering."""
     prefetched = []
     for spec in widgets_spec:
-        if abort_check is not None:
-            abort_check()
         sql = spec.get("sql", "")
         error = ""
         df = None
@@ -178,14 +162,9 @@ def prefetch_dashboard_widget_data(
                 error = guard_error
             else:
                 try:
-                    execute = query_runner or data_source.execute_query
-                    df, err = execute(sql)
-                    if abort_check is not None:
-                        abort_check()
+                    df, err = data_source.execute_query(sql)
                     if err:
                         error = f"SQL error: {err}"
-                except (JobCanceled, AgentRunTimeout):
-                    raise
                 except Exception as exc:
                     log.warning("[dashboard] widget SQL error: %s", exc)
                     error = str(exc)
@@ -205,12 +184,11 @@ def dashboard_page(dashboard_id: str):
 def build_dashboard(
     data_source, chart_store, *, session_id: str, workspace_id: str,
     name: str, widgets_spec: list, color_scheme: str,
-    workspace_authorization=None, query_runner=None, abort_check=None,
+    workspace_authorization=None,
 ) -> dict:
     """Build a dashboard from an already-leased data-source snapshot."""
     prefetched = prefetch_dashboard_widget_data(
         data_source, widgets_spec, workspace_authorization,
-        query_runner=query_runner, abort_check=abort_check,
     )
     return build_dashboard_from_prefetched_widgets(
         chart_store,
@@ -468,17 +446,9 @@ def export_html(dashboard_id: str):
 
     dashboard = _load_dashboard(dashboard_id)
     html = build_export_html(dashboard, chart_store)
-    display_name = re.sub(r"[^\w\-]", "_", dashboard.get("name", "dashboard"))
-    ascii_name = re.sub(r"[^A-Za-z0-9_-]", "_", display_name)
-    ascii_name = re.sub(r"_+", "_", ascii_name).strip("_") or "dashboard"
-    encoded_name = quote(f"{display_name}.html", safe="")
+    safe_name = re.sub(r"[^\w\-]", "_", dashboard.get("name", "dashboard"))
     return Response(
         html,
         mimetype="text/html",
-        headers={
-            "Content-Disposition": (
-                f'attachment; filename="{ascii_name}.html"; '
-                f"filename*=UTF-8''{encoded_name}"
-            )
-        },
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.html"'},
     )

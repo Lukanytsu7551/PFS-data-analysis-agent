@@ -56,34 +56,6 @@ _TOOL_RESULT_POLICIES = {
     "generate_dashboard": ToolResultPolicy(800, 800, 20),
 }
 
-_UNTRUSTED_TOOL_LABELS = {
-    "get_schema": "DATA SOURCE SCHEMA",
-    "get_table_detail": "DATA SOURCE SCHEMA",
-    "query_data": "DATA SOURCE RESULT",
-    "profile_data": "DATA SOURCE RESULT",
-    "run_analysis": "DATA SOURCE RESULT",
-    "clean_data": "DATA SOURCE RESULT",
-    "browse_webpage": "WEB PAGE CONTENT",
-    "query_knowledge": "BUSINESS KNOWLEDGE",
-    "read_memory": "LONG-TERM MEMORY",
-    "memory_read": "LONG-TERM MEMORY",
-    "read_tool_result": "RECOVERED TOOL DATA",
-    "load_feishu_bitable": "FEISHU DATA",
-    "workspace_status": "WORKSPACE METADATA",
-    "workspace_glob": "WORKSPACE FILE METADATA",
-    "workspace_grep": "WORKSPACE FILE CONTENT",
-    "workspace_read_file": "WORKSPACE FILE CONTENT",
-}
-
-
-def _untrusted_tool_label(tool: str) -> str:
-    name = str(tool or "")
-    if name.startswith("mcp__"):
-        return "MCP TOOL OUTPUT"
-    if name in _UNTRUSTED_TOOL_LABELS:
-        return _UNTRUSTED_TOOL_LABELS[name]
-    return ""
-
 
 def tool_result_policy(tool: str) -> ToolResultPolicy:
     return _TOOL_RESULT_POLICIES.get(str(tool or ""), _DEFAULT_RESULT_POLICY)
@@ -91,16 +63,7 @@ def tool_result_policy(tool: str) -> ToolResultPolicy:
 
 def classify_tool_error(raw: Any, tool: str = "") -> str:
     """Best-effort error taxonomy for tool outputs."""
-    # A few tools return ``{"error": ...}`` while the data tools return an
-    # error string.  Classify the explicit error payload without changing the
-    # raw data stored in the envelope.
-    explicit_error = ""
-    if isinstance(raw, dict):
-        if raw.get("ok") is False:
-            explicit_error = str(raw.get("error") or "tool returned ok=false")
-        elif raw.get("error"):
-            explicit_error = str(raw.get("error"))
-    text = str(explicit_error or raw or "").strip()
+    text = str(raw or "").strip()
     lower = text.lower()
     if not text:
         return ""
@@ -110,24 +73,14 @@ def classify_tool_error(raw: Any, tool: str = "") -> str:
         return "sql_validation_error"
     if text.startswith("Chart failed:"):
         return "chart_generation_error"
-    if re.search(r"\bsql error\b", lower):
+    if text.startswith("SQL Error:"):
         if "no such column" in lower or "column" in lower and "not found" in lower:
             return "field_not_found"
-        if (
-            "no such table" in lower
-            or "table" in lower and "not found" in lower
-            or "table with name" in lower and "does not exist" in lower
-        ):
+        if "no such table" in lower or "table" in lower and "not found" in lower:
             return "table_not_found"
         if "syntax" in lower or "parser" in lower:
             return "sql_syntax_error"
         return "sql_execution_error"
-    if lower.startswith("analysis error:"):
-        return "analysis_error"
-    if tool == "get_table_detail" and (
-        "not found" in lower or "does not exist" in lower
-    ):
-        return "table_not_found"
     if "no data source" in lower or "连接已断开" in text:
         return "datasource_disconnected"
     # Do not treat every informational mention of "权限" as a failure.  Skill
@@ -154,13 +107,7 @@ def classify_tool_error(raw: Any, tool: str = "") -> str:
         return "empty_result"
     if text.startswith("[MCP ERROR]"):
         return "mcp_error"
-    if (
-        text.startswith("ERROR:")
-        or lower.startswith("error building analysis table")
-        or lower.startswith("data query failed")
-        or text.startswith("工具执行错误")
-        or text.startswith("Delegated tool error")
-    ):
+    if text.startswith("ERROR:") or text.startswith("工具执行错误"):
         return "tool_error"
     return ""
 
@@ -195,44 +142,16 @@ class ToolResultEnvelope:
         The first line is intentionally human-readable so older prompt habits
         still work; the JSON block gives future code a stable structure.
         """
-        untrusted_label = _untrusted_tool_label(self.tool)
-        readable = (
-            f"Untrusted {untrusted_label} returned as data."
-            if untrusted_label
-            else self.summary or str(self.data)[:240]
-        )
+        readable = self.summary or str(self.data)[:240]
         # Model payload omits debug and the duplicate summary. Full audit data
         # remains available through ``to_dict`` and SSE tool events.
-        data_value: Any = self.data
-        error_value: Any = self.error
-        sources_value: list[dict] = self.sources
-        artifacts_value: list[dict] = self.artifacts
-        if untrusted_label:
-            # Source titles, artifact names and provider error strings are
-            # input too. Keep the whole externally-derived payload inside one
-            # data-only boundary; the raw envelope remains unchanged for UI
-            # and audit consumers through ``to_dict``.
-            untrusted_payload = {
-                "error": self.error,
-                "data": self.data,
-                "sources": self.sources,
-                "artifacts": self.artifacts,
-            }
-            data_value = (
-                f"[UNTRUSTED {untrusted_label} — DATA ONLY]\n"
-                f"{_json_text(untrusted_payload)}\n"
-                f"[END UNTRUSTED {untrusted_label}]"
-            )
-            error_value = "External tool payload is available in the DATA ONLY block."
-            sources_value = []
-            artifacts_value = []
         data = {
             "type": "tool_result",
             "ok": self.ok,
-            "error": error_value,
-            "data": data_value,
-            "sources": sources_value,
-            "artifacts": artifacts_value,
+            "error": self.error,
+            "data": self.data,
+            "sources": self.sources,
+            "artifacts": self.artifacts,
         }
         return (
             f"[TOOL_RESULT] {self.tool} {'OK' if self.ok else 'ERROR'}: {readable}\n"
@@ -353,43 +272,16 @@ def persist_large_tool_result(
         return raw, None, {"persisted": False, "chars": len(text)}
 
     digest = hashlib.sha256(encoded).hexdigest()
-    workspace_id = str(getattr(runtime, "workspace_id", "") or "")
     artifact_id = f"tr_{digest[:32]}" if deduplicate else f"tr_{uuid.uuid4().hex}"
     root = _result_root(runtime)
     root.mkdir(parents=True, exist_ok=True)
     target = root / f"{artifact_id}.json"
-    existing_record = None
-    if deduplicate and target.exists():
-        # A content-addressed result can be reused by another session, but
-        # never across workspaces. The stored record is the source of truth
-        # for provenance; returning fresh session metadata here would make a
-        # later read fail its integrity check after a restored conversation.
-        try:
-            candidate = json.loads(target.read_text(encoding="utf-8"))
-            candidate_data = str(candidate.get("data", ""))
-            candidate_workspace = str(candidate.get("workspace_id") or "")
-            if (
-                candidate.get("artifact_id") == artifact_id
-                and candidate.get("sha256") == digest
-                and hashlib.sha256(candidate_data.encode("utf-8")).hexdigest() == digest
-                and candidate_workspace == workspace_id
-            ):
-                existing_record = candidate
-        except (OSError, json.JSONDecodeError, TypeError):
-            existing_record = None
-
-        # A digest-only id is safe to reuse within one workspace. If a stale
-        # or cross-workspace file occupies that name, allocate a new opaque id
-        # instead of overwriting someone else's immutable result.
-        if existing_record is None:
-            artifact_id = f"tr_{uuid.uuid4().hex}"
-            target = root / f"{artifact_id}.json"
-
-    record = existing_record or {
+    temp = root / f".{artifact_id}.{os.getpid()}.tmp"
+    record = {
         "version": 1,
         "artifact_id": artifact_id,
         "session_id": session_id,
-        "workspace_id": workspace_id,
+        "workspace_id": str(getattr(runtime, "workspace_id", "") or ""),
         "tool": tool,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "size_bytes": len(encoded),
@@ -397,12 +289,9 @@ def persist_large_tool_result(
         "content_type": "text/plain; charset=utf-8",
         "data": text,
     }
-    if existing_record is None and not target.exists():
-        temp = root / f".{artifact_id}.{os.getpid()}.tmp"
+    if not target.exists():
         temp.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
         temp.replace(target)
-    persisted_session_id = str(record.get("session_id") or session_id)
-    persisted_workspace_id = str(record.get("workspace_id") or workspace_id)
     artifact = {
         "type": "tool_result",
         "artifact_id": artifact_id,
@@ -411,15 +300,14 @@ def persist_large_tool_result(
         "url": f"/api/session/{session_id}/tool-results/{artifact_id}",
         "size_bytes": len(encoded),
         "sha256": digest,
-        "workspace_id": persisted_workspace_id,
-        "session_id": persisted_session_id,
+        "workspace_id": str(getattr(runtime, "workspace_id", "") or ""),
+        "session_id": session_id,
     }
     debug = {
         "persisted": True,
         "artifact_id": artifact_id,
         "original_chars": len(text),
         "preview_chars": min(len(text), int(preview_chars)),
-        "deduplicated": existing_record is not None,
     }
     return _preview_text(
         text,
@@ -492,22 +380,11 @@ def read_tool_result_artifact(
     )
     if record is None:
         raise ToolResultAccessError("artifact is missing or failed SHA-256 verification")
-    record_workspace = str(record.get("workspace_id") or "")
-    if expected_workspace and record_workspace and record_workspace != expected_workspace:
+    if str(record.get("workspace_id") or "") != expected_workspace:
         raise ToolResultAccessError("artifact workspace metadata mismatch")
     expected_session = str(artifact.get("session_id") or "")
-    record_session = str(record.get("session_id") or "")
-    if expected_session and record_session and expected_session != record_session:
-        # The allowed_artifacts list is the current session's authorization
-        # boundary. Immutable, content-addressed results may be referenced by
-        # a restored or later session, so provenance session ids are allowed to
-        # differ once membership and workspace checks have passed.
-        log.info(
-            "[tool-result] reusing immutable artifact across sessions artifact=%s source=%s current=%s",
-            artifact_id,
-            record_session,
-            session_id,
-        )
+    if expected_session and expected_session != str(record.get("session_id") or ""):
+        raise ToolResultAccessError("artifact session metadata mismatch")
     expected_sha = str(artifact.get("sha256") or "")
     if expected_sha and expected_sha != str(record.get("sha256") or ""):
         raise ToolResultAccessError("artifact SHA-256 metadata mismatch")

@@ -1,12 +1,8 @@
 """Process-local owner for durable Workflow schedulers and node executors."""
-
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 import re
-import tempfile
 import threading
 from pathlib import Path
 from typing import Any, Mapping
@@ -16,7 +12,6 @@ from data.workflow_store import WorkflowStore, WorkflowStoreError
 from data.workspace import workspace_manager
 
 from .models import WorkflowContractError, WorkflowErrorCode
-from .pricing import lookup_model_price
 from .scheduler import WorkflowScheduler
 
 
@@ -52,32 +47,7 @@ class WorkflowRuntime:
             job_runner=self.session.job_runner,
             executor=self._execute_node,
             preflight=self._preflight_node,
-            graph_preflight=self._preflight_graph,
-            on_run_terminal=self._finalize_workflow_artifact_cost,
         )
-        # A fresh process has a new executor pool. Reconcile durable runs
-        # after the JobsStore has closed callbacks left by the old process;
-        # paused/approval-waiting runs remain untouched by this call.
-        self.recovered_workflow_runs = self.scheduler.recover_interrupted_runs(
-            session_id=self.session_id,
-        )
-
-    def _finalize_workflow_artifact_cost(self, run_id: str, status: str) -> None:
-        """Refresh every export from this Run after its final node settles."""
-        from infrastructure.artifact_lifecycle import update_artifact_run_usage
-
-        try:
-            update_artifact_run_usage(
-                session_id=self.session_id,
-                run_id=run_id,
-                cost=self._workflow_run_cost(run_id, status=status),
-            )
-        except (OSError, RuntimeError, ValueError) as exc:
-            self.run_store.record_event(
-                run_id,
-                "workflow_artifact_cost_update_failed",
-                {"run_id": run_id, "status": status, "error": str(exc)},
-            )
 
     def _preflight_node(self, node: Mapping[str, Any]) -> None:
         """Reject disallowed side effects before a workflow Job is created."""
@@ -86,75 +56,9 @@ class WorkflowRuntime:
         if self.workspace.permission != "read_write" and denied:
             raise WorkflowContractError(
                 WorkflowErrorCode.PERMISSION_DENIED,
-                "read-only workspace cannot execute node side effects: " + ", ".join(sorted(denied)),
+                "read-only workspace cannot execute node side effects: "
+                + ", ".join(sorted(denied)),
             )
-        if self._requires_cost_pricing(node):
-            self._require_known_model_price(node)
-
-    @staticmethod
-    def _node_limits(node: Mapping[str, Any]) -> Mapping[str, Any]:
-        limits = node.get("limits") or {}
-        return limits if isinstance(limits, Mapping) else {}
-
-    def _effective_model(self, node: Mapping[str, Any]) -> tuple[str, str]:
-        from LLM.llm_config_manager import get_config_manager
-
-        manager = get_config_manager()
-        provider = str(getattr(self.session, "model_provider", "") or "").strip()
-        if not provider:
-            provider = str(manager.get_default_provider() or "").strip()
-        selectable = getattr(manager, "is_selectable_provider", None)
-        config = (
-            manager.get_config(provider)
-            if provider and (selectable(provider) if callable(selectable) else True)
-            else None
-        )
-        model = str(getattr(config, "model", "") or "").strip()
-        profile_id = str(node.get("agent_profile_id") or "").strip()
-        profile = self.workflow_store.get_agent_profile(profile_id) if profile_id else None
-        model_policy = str((profile or {}).get("model_policy") or "inherit").strip()
-        if model_policy and model_policy != "inherit":
-            model = model_policy
-        return provider, model
-
-    def _requires_cost_pricing(self, node: Mapping[str, Any]) -> bool:
-        if str(node.get("type") or "").strip() not in {"agent", "verifier"}:
-            return False
-        node_limits = self._node_limits(node)
-        graph_limits = node.get("__pfs_workflow_graph_limits__") or {}
-        if not isinstance(graph_limits, Mapping):
-            graph_limits = {}
-        return (
-            node_limits.get("max_cost_usd") is not None or graph_limits.get("max_total_cost_usd") is not None
-        )
-
-    def _require_known_model_price(self, node: Mapping[str, Any]) -> None:
-        provider, model = self._effective_model(node)
-        if not provider or not model:
-            # The normal model configuration guard owns this error path. Do
-            # not hide a missing model behind a pricing error.
-            return
-        if lookup_model_price(provider, model) is not None:
-            return
-        raise WorkflowContractError(
-            WorkflowErrorCode.UNKNOWN_PRICE,
-            "Workflow 已启用费用上限，但当前模型未配置完整输入/输出单价；"
-            "请在模型设置中补齐价格后再创建 Run。",
-        )
-
-    def _preflight_graph(self, graph: Mapping[str, Any]) -> None:
-        """Fail before Run creation when a hard cost budget is unverifiable."""
-        limits = graph.get("limits") or {}
-        if not isinstance(limits, Mapping):
-            return
-        nodes = graph.get("nodes") or []
-        for raw_node in nodes:
-            if not isinstance(raw_node, Mapping):
-                continue
-            node = dict(raw_node)
-            node["__pfs_workflow_graph_limits__"] = dict(limits)
-            if self._requires_cost_pricing(node):
-                self._require_known_model_price(node)
 
     def _workspace_persistent_source(self):
         """Return this run's durable workspace source, never an in-memory upload.
@@ -177,8 +81,7 @@ class WorkflowRuntime:
     @staticmethod
     def _tool_event_for_cleaning(result: Mapping[str, Any]) -> Mapping[str, Any]:
         events = [
-            event
-            for event in (result.get("tool_events") or [])
+            event for event in (result.get("tool_events") or [])
             if isinstance(event, Mapping) and event.get("tool") == "clean_data"
         ]
         if len(events) != 1:
@@ -226,7 +129,8 @@ class WorkflowRuntime:
             "## cleaning_execution（已核验）\n\n"
             "- 结果表：`cleaned_data`\n"
             f"- 数据库回读行数：{row_count}\n"
-            "- 工具回执：\n\n" + str(event["result"]).strip()
+            "- 工具回执：\n\n"
+            + str(event["result"]).strip()
         )
 
     def _execute_node(self, node: dict, materials: dict, _ctx) -> dict[str, Any]:
@@ -268,7 +172,9 @@ class WorkflowRuntime:
         verifier_config = dict(node.get("verifier") or {})
         verifier_instruction = ""
         if node.get("type") == "verifier":
-            standards = "\n".join(f"- {item}" for item in verifier_config.get("standards", []))
+            standards = "\n".join(
+                f"- {item}" for item in verifier_config.get("standards", [])
+            )
             verifier_instruction = (
                 "You are an independent verifier. Do not rewrite the deliverable. "
                 "Assess only the supplied materials against these acceptance standards:\n"
@@ -346,8 +252,6 @@ class WorkflowRuntime:
             timeout_seconds=int(node_limits.get("max_run_seconds") or 300),
             max_tokens=int(node_limits.get("max_tokens") or 2000),
             max_tool_calls=node_limits.get("max_tool_calls"),
-            max_total_tokens=node_limits.get("max_total_tokens"),
-            max_cost_usd=node_limits.get("max_cost_usd"),
             allowed_tools=frozenset(profile.get("allowed_tools") or ()),
             allow_write_tools="write_data" in set(node.get("side_effects") or ()),
         )
@@ -370,8 +274,10 @@ class WorkflowRuntime:
                 outputs = (
                     {output_names[0]: dict(parsed_verifier)}
                     if len(output_names) == 1
-                    else {output_name: parsed_verifier.get(output_name) for output_name in output_names}
-                    or dict(parsed_verifier)
+                    else {
+                        output_name: parsed_verifier.get(output_name)
+                        for output_name in output_names
+                    } or dict(parsed_verifier)
                 )
             else:
                 outputs = self._parse_agent_outputs(content, output_names)
@@ -460,8 +366,9 @@ class WorkflowRuntime:
             "failed / empty",
         )
         forbidden = [
-            str(item).lower()
-            for item in dict(node.get("output_validation") or {}).get("forbidden_substrings", [])
+            str(item).lower() for item in dict(node.get("output_validation") or {}).get(
+                "forbidden_substrings", []
+            )
         ]
         for name in node.get("output_contract") or []:
             value = outputs.get(name)
@@ -488,9 +395,7 @@ class WorkflowRuntime:
                 "verifier must return a JSON decision",
             ) from exc
         if not isinstance(parsed, Mapping) or parsed.get("decision") not in {
-            "pass",
-            "rework",
-            "escalate",
+            "pass", "rework", "escalate",
         }:
             raise WorkflowContractError(
                 WorkflowErrorCode.OUTPUT_CONTRACT_VIOLATION,
@@ -512,28 +417,25 @@ class WorkflowRuntime:
         config = dict(node.get("validation") or {})
         missing = [key for key in config.get("required", []) if key not in materials]
         empty = [
-            key
-            for key in config.get("non_empty", [])
+            key for key in config.get("non_empty", [])
             if key in materials and materials[key] in (None, "", [], {})
         ]
         wrong_types = [
-            key
-            for key, expected in dict(config.get("field_types") or {}).items()
+            key for key, expected in dict(config.get("field_types") or {}).items()
             if key in materials and type(materials[key]).__name__ != str(expected)
         ]
         too_small = [
-            key
-            for key, minimum in dict(config.get("min_items") or {}).items()
-            if key in materials and hasattr(materials[key], "__len__") and len(materials[key]) < int(minimum)
+            key for key, minimum in dict(config.get("min_items") or {}).items()
+            if key in materials and hasattr(materials[key], "__len__")
+            and len(materials[key]) < int(minimum)
         ]
         too_large = [
-            key
-            for key, maximum in dict(config.get("max_items") or {}).items()
-            if key in materials and hasattr(materials[key], "__len__") and len(materials[key]) > int(maximum)
+            key for key, maximum in dict(config.get("max_items") or {}).items()
+            if key in materials and hasattr(materials[key], "__len__")
+            and len(materials[key]) > int(maximum)
         ]
         unequal = [
-            key
-            for key, expected in dict(config.get("equals") or {}).items()
+            key for key, expected in dict(config.get("equals") or {}).items()
             if key in materials and materials[key] != expected
         ]
         if missing or empty or wrong_types or too_small or too_large or unequal:
@@ -593,7 +495,9 @@ class WorkflowRuntime:
         error = validate_tool_args(
             "query_data",
             {"sql": sql},
-            workspace_authorization=workspace_manager.path_authorization(self.workspace.workspace_id),
+            workspace_authorization=workspace_manager.path_authorization(
+                self.workspace.workspace_id
+            ),
         )
         if error:
             raise WorkflowContractError(WorkflowErrorCode.OUTPUT_CONTRACT_VIOLATION, error)
@@ -608,9 +512,7 @@ class WorkflowRuntime:
         return {name: result for name in output_names} or {"query_result": result}
 
     def _execute_export_node(
-        self,
-        node: Mapping[str, Any],
-        materials: Mapping[str, Any],
+        self, node: Mapping[str, Any], materials: Mapping[str, Any],
     ) -> dict[str, Any]:
         """Export an already-produced material without giving an LLM write access."""
         config = dict(node.get("export") or {})
@@ -624,6 +526,8 @@ class WorkflowRuntime:
         extensions = {"markdown": ".md", "json": ".json", "text": ".txt"}
         filename = re.sub(r"[^A-Za-z0-9._-]+", "_", str(config.get("filename") or source)).strip("._")
         filename = (filename or "workflow_export") + extensions[export_format]
+        target = Path(self.workspace.artifacts_dir) / filename
+        target = target.with_name(target.name[:160])
         value = materials[source]
         if export_format == "json":
             content = json.dumps(value, ensure_ascii=False, indent=2, default=str)
@@ -631,240 +535,19 @@ class WorkflowRuntime:
             content = value
         else:
             content = json.dumps(value, ensure_ascii=False, indent=2, default=str)
-        content_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
-
-        execution_context = node.get("__pfs_workflow_context__") or {}
-        run_id = str(execution_context.get("run_id") or "")
-        node_run_id = str(execution_context.get("node_run_id") or "")
-        node_id = str(execution_context.get("node_id") or node.get("node_id") or "")
-        iteration = str(execution_context.get("iteration") or "1")
-        operation_key = ""
-        side_effect_acquired = False
-        side_effect_store = getattr(self, "run_store", None)
-        claim_side_effect = getattr(side_effect_store, "claim_side_effect", None)
-        complete_side_effect = getattr(side_effect_store, "complete_side_effect", None)
-        fail_side_effect = getattr(side_effect_store, "fail_side_effect", None)
-        if run_id and node_run_id and callable(claim_side_effect):
-            identity = {
-                "effect_type": "export_file",
-                "run_id": run_id,
-                "node_id": node_id,
-                "iteration": iteration,
-                "filename": filename,
-                "format": export_format,
-            }
-            identity_hash = hashlib.sha256(
-                json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            ).hexdigest()
-            request = {
-                **identity,
-                "content_sha256": content_sha256,
-            }
-            request_hash = hashlib.sha256(
-                json.dumps(request, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            ).hexdigest()
-            operation_key = f"workflow-export:{run_id}:{node_id}:{iteration}:{identity_hash}"
-            claim = claim_side_effect(
-                operation_key=operation_key,
-                run_id=run_id,
-                node_id=node_id,
-                node_run_id=node_run_id,
-                effect_type="export_file",
-                request_hash=request_hash,
-            )
-            cached = claim.get("result") if isinstance(claim, Mapping) else None
-            if str(claim.get("status") or "") == "succeeded" and isinstance(cached, Mapping):
-                cached_output = dict(cached)
-                if self._cached_export_output_is_valid(cached_output, content_sha256):
-                    return cached_output
-                raise WorkflowContractError(
-                    WorkflowErrorCode.RESTART_REPLAY_BLOCKED,
-                    "workflow export was marked complete but its artifact is missing or changed; manual review required",
-                )
-            if not bool(claim.get("acquired")):
-                raise WorkflowContractError(
-                    WorkflowErrorCode.RESTART_REPLAY_BLOCKED,
-                    "workflow export side effect is already claimed; manual review required before replay",
-                )
-            side_effect_acquired = True
-
-        artifact_dir = Path(self.workspace.artifacts_dir)
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-        target = artifact_dir / filename
-        target = target.with_name(target.name[:160])
-        if target.exists():
-            try:
-                existing_sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
-            except OSError:
-                existing_sha256 = ""
-            if existing_sha256 != content_sha256:
-                token = re.sub(
-                    r"[^A-Za-z0-9_-]+",
-                    "_",
-                    f"{run_id[-12:]}_{node_id}_{iteration}",
-                ).strip("_")
-                token = token or content_sha256[:12]
-                target = target.with_name(f"{target.stem[:100]}__{token[:40]}{target.suffix}")
-
-        temp_path: Path | None = None
-        try:
-            # A same-directory temporary file plus replace prevents a reader
-            # from observing a half-written report and keeps a retry from
-            # appending to an already visible partial artifact.
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                dir=str(target.parent),
-                prefix=f".{target.name}.",
-                suffix=".tmp",
-                delete=False,
-            ) as handle:
-                handle.write(content)
-                handle.flush()
-                os.fsync(handle.fileno())
-                temp_path = Path(handle.name)
-            os.replace(temp_path, target)
-            temp_path = None
-        except Exception as exc:
-            if temp_path is not None:
-                try:
-                    temp_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
-            if side_effect_acquired and callable(fail_side_effect):
-                fail_side_effect(operation_key, str(exc))
-            raise
-
-        from infrastructure.artifact_lifecycle import (
-            register_artifact,
-            update_artifact_run_usage,
-        )
-
-        metadata = {
-            "workflow_node_run_id": node_run_id,
-            "content_sha256": content_sha256,
-        }
-        if run_id:
-            metadata["run_id"] = run_id
-            metadata["workflow_run_id"] = run_id
-        if operation_key:
-            metadata["workflow_operation_key"] = operation_key
-        artifact_id = register_artifact(
-            target,
-            artifact_type="workflow_export",
-            session_id=self.session_id,
-            workspace_id=self.workspace.workspace_id,
-            metadata=metadata,
-        )
+        target.write_text(content, encoding="utf-8")
+        from infrastructure.artifact_lifecycle import register_artifact
+        register_artifact(target, artifact_type="workflow_export", session_id=self.session_id, workspace_id=self.workspace.workspace_id)
         result = {
-            "artifact_id": artifact_id,
             "path": str(target),
             "filename": target.name,
             "uri": f"workspace://artifacts/{target.name}",
-            "media_type": {"markdown": "text/markdown", "json": "application/json", "text": "text/plain"}[
-                export_format
-            ],
-            "content_sha256": content_sha256,
+            "media_type": {"markdown": "text/markdown", "json": "application/json", "text": "text/plain"}[export_format],
             "evidence": [f"workflow material:{source}"],
             "quality": {"status": "passed", "checks": ["deterministic_export"]},
         }
         output_names = list(node.get("output_contract") or [])
-        output = {name: result for name in output_names} or {"export": result}
-        if side_effect_acquired and callable(complete_side_effect):
-            if not complete_side_effect(operation_key, output):
-                raise WorkflowContractError(
-                    WorkflowErrorCode.RESTART_REPLAY_BLOCKED,
-                    "workflow export result could not be durably committed; manual review required",
-                )
-        if run_id:
-            update_artifact_run_usage(
-                session_id=self.session_id,
-                run_id=run_id,
-                cost=self._workflow_run_cost(run_id, status="running"),
-            )
-        return output
-
-    def _cached_export_output_is_valid(
-        self,
-        output: Mapping[str, Any],
-        content_sha256: str,
-    ) -> bool:
-        """Verify a completed export before reusing it after a restart."""
-        from infrastructure.artifact_lifecycle import resolve_registered_artifact_path
-
-        values = list(output.values())
-        if not values:
-            return False
-        for value in values:
-            if not isinstance(value, Mapping):
-                return False
-            if str(value.get("content_sha256") or "") != content_sha256:
-                return False
-            artifact_id = str(value.get("artifact_id") or "")
-            resolved = resolve_registered_artifact_path(artifact_id, session_id=self.session_id)
-            if resolved is None:
-                return False
-            _metadata, path = resolved
-            try:
-                if hashlib.sha256(path.read_bytes()).hexdigest() != content_sha256:
-                    return False
-            except OSError:
-                return False
-        return True
-
-    def _workflow_run_cost(
-        self,
-        run_id: str,
-        *,
-        status: str,
-    ) -> dict[str, Any]:
-        """Aggregate persisted Workflow model usage without inventing a price."""
-        nodes = self.run_store.list_node_runs(run_id)
-        measured = [
-            node
-            for node in nodes
-            if int(node.get("model_calls") or 0)
-            or int(node.get("input_tokens") or 0)
-            or int(node.get("output_tokens") or 0)
-        ]
-        unknown_price = bool(measured) and any(node.get("cost_usd") is None for node in measured)
-        if not measured:
-            amount = None
-            estimated = None
-            source = "provider_usage_unavailable"
-        elif unknown_price:
-            amount = None
-            estimated = None
-            source = "provider_usage_price_unknown"
-        else:
-            amount = round(sum(float(node["cost_usd"]) for node in measured), 8)
-            estimated = True
-            source = "provider_usage_configured_pricing"
-        return {
-            "amount": amount,
-            "currency": "USD",
-            "estimated": estimated,
-            "source": source,
-            "model_calls": sum(int(node.get("model_calls") or 0) for node in measured),
-            "input_tokens": sum(int(node.get("input_tokens") or 0) for node in measured),
-            "output_tokens": sum(int(node.get("output_tokens") or 0) for node in measured),
-            "cached_input_tokens": sum(int(node.get("cached_input_tokens") or 0) for node in measured),
-            "providers": sorted(
-                {
-                    str(node.get("provider_name") or "").strip()
-                    for node in measured
-                    if str(node.get("provider_name") or "").strip()
-                }
-            ),
-            "models": sorted(
-                {
-                    str(node.get("model_name") or "").strip()
-                    for node in measured
-                    if str(node.get("model_name") or "").strip()
-                }
-            ),
-            "status": status,
-        }
+        return {name: result for name in output_names} or {"export": result}
 
     def delete_run(self, run_id: str) -> dict[str, Any]:
         if self.workspace.permission != "read_write":
@@ -889,12 +572,10 @@ class WorkflowRuntime:
             if str(node.get("job_id") or "")
         ]
         active_jobs = [
-            job_id
-            for job_id in job_ids
-            if (self.session.job_runner.get_status_for_session(str(run["session_id"]), job_id) or {}).get(
-                "status"
-            )
-            not in {None, "succeeded", "failed", "canceled"}
+            job_id for job_id in job_ids
+            if (self.session.job_runner.get_status_for_session(
+                str(run["session_id"]), job_id
+            ) or {}).get("status") not in {None, "succeeded", "failed", "canceled"}
         ]
         if active_jobs:
             raise WorkflowContractError(
@@ -908,8 +589,7 @@ class WorkflowRuntime:
             result = self.run_store.delete_run_cascade(run_id)
         except WorkflowRunStoreError as exc:
             raise WorkflowContractError(
-                WorkflowErrorCode.VERSION_CONFLICT,
-                str(exc),
+                WorkflowErrorCode.VERSION_CONFLICT, str(exc),
             ) from exc
         if result is None:
             raise WorkflowContractError(
@@ -917,8 +597,7 @@ class WorkflowRuntime:
                 f"workflow run not found: {run_id}",
             )
         deleted_jobs = self.session.job_runner.purge_terminal_for_session(
-            result.pop("session_id"),
-            result.pop("job_ids"),
+            result.pop("session_id"), result.pop("job_ids"),
         )
         result["deleted"]["jobs"] = deleted_jobs
         return result
@@ -938,7 +617,8 @@ class WorkflowRuntime:
         if plan["active_run_ids"]:
             raise WorkflowContractError(
                 WorkflowErrorCode.VERSION_CONFLICT,
-                "请先取消仍在运行的 Workflow Run：" + ", ".join(plan["active_run_ids"]),
+                "请先取消仍在运行的 Workflow Run："
+                + ", ".join(plan["active_run_ids"]),
             )
         active_jobs = []
         for session_id, job_ids in plan["jobs_by_session"].items():
@@ -957,8 +637,7 @@ class WorkflowRuntime:
             result = self.workflow_store.delete_workflow_cascade(workflow_id)
         except WorkflowStoreError as exc:
             raise WorkflowContractError(
-                WorkflowErrorCode.VERSION_CONFLICT,
-                str(exc),
+                WorkflowErrorCode.VERSION_CONFLICT, str(exc),
             ) from exc
         if result is None:
             raise WorkflowContractError(
@@ -968,8 +647,7 @@ class WorkflowRuntime:
         deleted_jobs = 0
         for session_id, job_ids in result.pop("jobs_by_session", {}).items():
             deleted_jobs += self.session.job_runner.purge_terminal_for_session(
-                session_id,
-                job_ids,
+                session_id, job_ids,
             )
         result["deleted"]["jobs"] = deleted_jobs
         return result

@@ -151,16 +151,6 @@ class GitAttributesStaticTests(unittest.TestCase):
                 "eol": "lf",
                 "binary": "unspecified",
             },
-            "data/fixtures/pfs_city_monthly_pnl.csv": {
-                "text": "set",
-                "eol": "lf",
-                "binary": "unspecified",
-            },
-            "data/fixtures/pfs_monthly_demand.csv": {
-                "text": "set",
-                "eol": "lf",
-                "binary": "unspecified",
-            },
         }
 
         for relative_path in TRACKED_OPAQUE_PATHS:

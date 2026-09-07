@@ -12,7 +12,7 @@ from agent.commands import (
     availability_provider,
 )
 from .state import config_manager, session_manager, require_session_ownership
-from infrastructure.compat import optional_feature_enabled, workspace_hidden_dir
+from infrastructure.compat import workspace_hidden_dir
 
 bp = Blueprint("commands", __name__)
 log = logging.getLogger(__name__)
@@ -42,11 +42,7 @@ def _availability_context(sid: str) -> CommandAvailabilityContext | None:
     try:
         if not provider:
             provider = config_manager.get_default_provider() or ""
-        model_config = (
-            config_manager.get_config(provider)
-            if provider and config_manager.is_selectable_provider(provider)
-            else None
-        )
+        model_config = config_manager.get_config(provider) if provider else None
         model_available = bool(
             model_config
             and getattr(model_config, "enabled", True)
@@ -132,27 +128,26 @@ def _compact_command(sess, arguments: str = "") -> tuple[dict, int]:
         client = get_llm_client(provider)
         before_messages = len(sess.history)
         before_tokens = _estimate_history_tokens(sess.history)
-        if optional_feature_enabled("HOOKS"):
-            try:
-                from agent.hooks.models import HookContext
-                from data.hooks_store import load_engine
+        try:
+            from agent.hooks.models import HookContext
+            from data.hooks_store import load_engine
 
-                hook_engine = load_engine()
-                hook_context = HookContext(
-                    event_name="pre_compact",
-                    session_id=str(getattr(sess, "session_id", "") or ""),
-                    message=arguments,
-                    model_provider=provider,
-                    model=str(getattr(cfg, "model", "") or ""),
-                    extra={
-                        "manual": True,
-                        "before_messages": before_messages,
-                        "before_tokens": before_tokens,
-                    },
-                )
-                hook_engine.run_hooks("pre_compact", hook_context)
-            except Exception:
-                log.exception("[hooks] manual pre_compact hook failed")
+            hook_engine = load_engine()
+            hook_context = HookContext(
+                event_name="pre_compact",
+                session_id=str(getattr(sess, "session_id", "") or ""),
+                message=arguments,
+                model_provider=provider,
+                model=str(getattr(cfg, "model", "") or ""),
+                extra={
+                    "manual": True,
+                    "before_messages": before_messages,
+                    "before_tokens": before_tokens,
+                },
+            )
+            hook_engine.run_hooks("pre_compact", hook_context)
+        except Exception:
+            log.exception("[hooks] manual pre_compact hook failed")
         usages = []
         compacted, changed = compact_history(
             sess.history,

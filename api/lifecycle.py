@@ -1,8 +1,7 @@
 """API endpoints for local artifact lifecycle visibility and cleanup."""
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, jsonify, request
 
 from data.workspace import workspace_manager
-from .state import require_session_ownership
 
 from data.memory_store import (
     list_memory_trash,
@@ -32,9 +31,6 @@ from infrastructure.artifact_lifecycle import (
     restore_upload_trash,
     workspace_storage_preview,
     restore_session_trash,
-    list_registered_artifacts,
-    record_artifact_download,
-    resolve_registered_artifact_path,
 )
 
 bp = Blueprint("lifecycle", __name__)
@@ -106,63 +102,6 @@ def get_workspace_storage_preview():
 @bp.get("/api/lifecycle/artifacts/preview")
 def get_artifact_cleanup_preview():
     return jsonify({"ok": True, "preview": artifact_cleanup_preview()})
-
-
-@bp.get("/api/lifecycle/artifacts")
-def get_registered_artifacts():
-    sid = str(request.args.get("session_id") or "")[:160]
-    try:
-        limit = int(request.args.get("limit", "50"))
-    except ValueError:
-        return jsonify({"ok": False, "error": "limit 必须是整数"}), 400
-    artifacts = list_registered_artifacts(session_id=sid, limit=limit)
-    return jsonify({"ok": True, "artifacts": artifacts})
-
-
-@bp.get("/api/session/<sid>/lifecycle/artifacts")
-@require_session_ownership
-def get_session_registered_artifacts(sid: str):
-    """List only active artifacts owned by the caller's session."""
-    try:
-        limit = int(request.args.get("limit", "50"))
-    except ValueError:
-        return jsonify({"ok": False, "error": "limit 必须是整数"}), 400
-    # Keep the history list cheap; detail exposes the same safe metadata plus URLs.
-    artifacts = list_registered_artifacts(session_id=str(sid)[:160], limit=limit)
-    for item in artifacts:
-        item["download_url"] = f"/api/session/{sid}/lifecycle/artifacts/{item['id']}/download"
-        item["detail_url"] = f"/api/session/{sid}/lifecycle/artifacts/{item['id']}"
-    return jsonify({"ok": True, "artifacts": artifacts})
-
-
-@bp.get("/api/session/<sid>/lifecycle/artifacts/<artifact_id>")
-@require_session_ownership
-def get_session_registered_artifact(sid: str, artifact_id: str):
-    """Read one active artifact's safe metadata within the owning session."""
-    artifacts = list_registered_artifacts(session_id=str(sid)[:160], limit=200)
-    matches = [item for item in artifacts if str(item.get("id") or "") == str(artifact_id)]
-    if not matches:
-        return jsonify({"ok": False, "error": "产物不存在或不属于此会话", "code": "artifact_not_found"}), 404
-    artifact = matches[0]
-    artifact["download_url"] = f"/api/session/{sid}/lifecycle/artifacts/{artifact['id']}/download"
-    artifact["detail_url"] = f"/api/session/{sid}/lifecycle/artifacts/{artifact['id']}"
-    return jsonify({"ok": True, "artifact": artifact})
-
-
-@bp.get("/api/session/<sid>/lifecycle/artifacts/<artifact_id>/download")
-@require_session_ownership
-def download_session_registered_artifact(sid: str, artifact_id: str):
-    """Download an active registered artifact only from its owning session."""
-    items = list_registered_artifacts(session_id=str(sid)[:160], limit=200)
-    matches = [item for item in items if str(item.get("id") or "") == str(artifact_id)]
-    if not matches:
-        return jsonify({"ok": False, "error": "产物不存在或不属于此会话", "code": "artifact_not_found"}), 404
-    resolved = resolve_registered_artifact_path(str(artifact_id), session_id=str(sid)[:160])
-    if resolved is None:
-        return jsonify({"ok": False, "error": "产物文件已不存在", "code": "artifact_missing"}), 404
-    _, target = resolved
-    record_artifact_download(str(artifact_id))
-    return send_file(target, as_attachment=True, download_name=target.name)
 
 
 @bp.get("/api/lifecycle/uploads/preview")

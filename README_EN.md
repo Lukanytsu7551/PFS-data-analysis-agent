@@ -36,7 +36,7 @@
 |---|---|
 | Data | CSV/XLSX upload, SQLite/MySQL/PostgreSQL/SQL Server entry points, and controlled HTTP sources |
 | Understanding | Table and field preview, coverage, missing/duplicate signals, and source snapshots |
-| Analysis | Read-only SQL, grouped metrics, safe aggregations, anomaly detection, clustering, decision trees, and forecast-evaluation entry points |
+| Analysis | Read-only SQL, grouped metrics, safe aggregations, anomaly detection, clustering, decision trees, and time-series analysis entry points |
 | Visualization | Chart recommendations, interactive charts, and a Dashboard delivery entry point |
 | Agent | SSE chat, tool calls, Skills, knowledge base, workflows, jobs, and context management |
 | Extensions | MCP, Teams, Hooks, Feishu, and cloud-login interfaces are enabled by default; remote GPU is off by default; real external services require configuration and are not accepted in this pass |
@@ -162,7 +162,7 @@ Keep model keys in local configuration or environment variables. Other legacy pr
 
 ## Current boundary
 
-The current delivery focus is a downloadable source repository, desktop local startup, and a core data-analysis loop. macOS startup, core chat, CSV/XLSX, charts, deliverables, jobs, and workspace basics have local evidence. The latest successful GitHub Actions run, `34029259331`, validated commit `b2a6393` for Windows x64/macOS Apple Silicon builds and a clean Windows source install; the current `main` commit is `1cc49c9` and has not yet run CI at the same SHA. The root [`LICENSE`](LICENSE) provides a custom non-commercial license; a formal GitHub Release remains deferred until final feature and business acceptance.
+The current delivery focus is a downloadable source repository, desktop local startup, and a core data-analysis loop. The earlier GitHub Actions run `34029259331` validated only the old commit `b2a6393`; the current worktree is being realigned to the runtime baseline and has not produced a new commit or same-SHA CI result. The root [`LICENSE`](LICENSE) contains the currently applicable license text; a formal GitHub Release remains deferred until the release-candidate slice is verified.
 
 Installation on a physical Windows computer, macOS/Windows install-upgrade-uninstall flows, complex Office rendering in native applications, real business-data acceptance, real models and external services, deployment, and live verification still require their target environments. Real external services are not accepted in this pass and do not block the local first release.
 

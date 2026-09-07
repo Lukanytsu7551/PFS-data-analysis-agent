@@ -61,8 +61,6 @@ PUBLIC_RUNTIME_ASSETS = (
 # Other CSV/TSV files remain blocked so user data cannot enter a package.
 PUBLIC_REPORT_FIXTURES = frozenset({
     ("data", "fixtures", "pfs_sales.csv"),
-    ("data", "fixtures", "pfs_city_monthly_pnl.csv"),
-    ("data", "fixtures", "pfs_monthly_demand.csv"),
 })
 
 

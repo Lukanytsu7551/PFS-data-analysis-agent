@@ -1,10 +1,7 @@
 """Flask application factory."""
-
-import atexit
 import logging
 import os
-from threading import Lock
-from infrastructure.compat import env, optional_feature_enabled
+from infrastructure.compat import env
 from urllib.parse import urlsplit
 
 from flask import Flask, abort, jsonify, render_template, request
@@ -21,8 +18,6 @@ from infrastructure.paths import resource_path
 
 log = logging.getLogger(__name__)
 
-_durable_queue_start_lock = Lock()
-
 
 def _start_background_services() -> None:
     """Start long-lived background services (local only, skipped on Vercel)."""
@@ -30,6 +25,12 @@ def _start_background_services() -> None:
         return
     if not resource_path("MCP").is_dir():
         log.info("[startup] bundled MCP resources are not installed; continuing without them")
+    else:
+        try:
+            from MCP.flowchart_server import ensure_flowchart_server
+            ensure_flowchart_server()
+        except Exception as e:
+            log.warning("[startup] flowchart server: %s", e)
 
 
 def _run_startup_hooks() -> None:
@@ -43,67 +44,6 @@ def _run_startup_hooks() -> None:
         log.warning("[startup] hooks skipped: %s", exc)
 
 
-def _start_durable_queue_worker(app: Flask) -> None:
-    """Start the optional queue sidecar only in the explicit embedded role.
-
-    ``api`` is the pure HTTP producer role used with a separate
-    ``scripts/durable_queue_worker.py`` process.  ``worker`` is reserved for
-    that standalone process and therefore must not start an HTTP-side sidecar.
-    The default remains ``embedded`` for local opt-in backwards compatibility.
-    """
-    role = str(os.environ.get("PFS_DURABLE_QUEUE_ROLE") or "embedded").lower()
-    if not optional_feature_enabled("DURABLE_QUEUE") or os.environ.get("VERCEL") or role in {"api", "worker"}:
-        return
-    if role not in {"embedded", "sidecar"}:
-        log.warning("[startup] durable queue worker skipped: unknown role=%s", role)
-        return
-    with _durable_queue_start_lock:
-        if app.extensions.get("pfs_durable_queue_worker") is not None:
-            log.debug("[startup] durable queue worker already started for app=%s", id(app))
-            return
-        worker = None
-        try:
-            from agent.durable_handlers import build_handlers, completion_hook
-            from data.durable_queue import DurableQueueStore, DurableQueueWorker
-
-            worker = DurableQueueWorker(
-                DurableQueueStore(),
-                build_handlers(app),
-                worker_id=(f"pfs-queue-{os.getpid()}-{os.environ.get('PFS_INSTANCE_ID', '')}"[:40]),
-                on_complete=completion_hook(app),
-            )
-            worker.start()
-            app.extensions["pfs_durable_queue_worker"] = worker
-
-            cleanup_lock = Lock()
-            cleanup_done = False
-
-            def cleanup_worker() -> None:
-                nonlocal cleanup_done
-                with cleanup_lock:
-                    if cleanup_done:
-                        return
-                    try:
-                        worker.stop(wait=True)
-                    except Exception:
-                        log.exception("[shutdown] durable queue worker cleanup failed")
-                        return
-                    cleanup_done = True
-
-            app.extensions["pfs_durable_queue_cleanup"] = cleanup_worker
-            atexit.register(cleanup_worker)
-            log.info("[startup] durable queue worker started")
-        except Exception as exc:
-            # Queue recovery is opt-in. A bad optional queue configuration must not
-            # prevent the ordinary local workbench from opening.
-            if worker is not None:
-                try:
-                    worker.stop(wait=True)
-                except Exception:
-                    log.exception("[startup] durable queue worker cleanup failed")
-            log.exception("[startup] durable queue worker skipped: %s", exc)
-
-
 def create_app() -> Flask:
     _start_background_services()
 
@@ -113,7 +53,6 @@ def create_app() -> Flask:
         static_folder=str(resource_path("static")),
     )
     from .auth import SECRET_KEY as _AUTH_SECRET, is_cloud_managed as _is_cloud
-
     app.secret_key = _AUTH_SECRET
     local_origins = [
         r"http://localhost(?::\d+)?",
@@ -127,35 +66,33 @@ def create_app() -> Flask:
         methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     )
 
-    from .models import bp as models_bp
-    from .datasource import bp as datasource_bp
-    from .chat import bp as chat_bp
-    from .saved_sessions import bp as saved_sessions_bp
-    from .system import bp as system_bp
-    from .output import bp as output_bp
-    from .mcp import bp as mcp_bp
-    from .dashboard import bp as dashboard_bp
-    from .knowledge import bp as knowledge_bp
-    from .workspace import bp as workspace_bp
-
+    from .models          import bp as models_bp
+    from .datasource      import bp as datasource_bp
+    from .chat            import bp as chat_bp
+    from .saved_sessions  import bp as saved_sessions_bp
+    from .system          import bp as system_bp
+    from .output          import bp as output_bp
+    from .mcp             import bp as mcp_bp
+    from .dashboard       import bp as dashboard_bp
+    from .knowledge       import bp as knowledge_bp
+    from .workspace       import bp as workspace_bp
     try:
-        from .memory import bp as memory_bp
+        from .memory      import bp as memory_bp
     except ImportError:
         memory_bp = None
-    from .jobs import bp as jobs_bp
-    from .skills import bp as skills_bp
-    from .commands import bp as commands_bp
-    from .desktop import bp as desktop_bp
-    from .hooks import bp as hooks_bp
-    from .lifecycle import bp as lifecycle_bp
-    from .teams import bp as teams_bp
-    from .workflows import bp as workflows_bp
-    from .workflow_runs import bp as workflow_runs_bp
-    from .auth import bp as auth_bp
-    from .gpu import bp as gpu_bp
-    from .feishu_bot import bp as feishu_bot_bp
-    from .pfs import bp as pfs_bp
-    from .audit import bp as audit_bp
+    from .jobs            import bp as jobs_bp
+    from .skills          import bp as skills_bp
+    from .commands        import bp as commands_bp
+    from .desktop         import bp as desktop_bp
+    from .hooks           import bp as hooks_bp
+    from .lifecycle       import bp as lifecycle_bp
+    from .teams           import bp as teams_bp
+    from .workflows       import bp as workflows_bp
+    from .workflow_runs   import bp as workflow_runs_bp
+    from .auth             import bp as auth_bp
+    from .gpu              import bp as gpu_bp
+    from .feishu_bot       import bp as feishu_bot_bp
+    from .pfs              import bp as pfs_bp
 
     app.register_blueprint(models_bp)
     app.register_blueprint(datasource_bp)
@@ -182,18 +119,14 @@ def create_app() -> Flask:
     app.register_blueprint(gpu_bp)
     app.register_blueprint(feishu_bot_bp)
     app.register_blueprint(pfs_bp)
-    app.register_blueprint(audit_bp)
-    if optional_feature_enabled("FEISHU_BOT"):
-        try:
-            from infrastructure.feishu_long_connection import start_long_connection
+    try:
+        from infrastructure.feishu_long_connection import start_long_connection
 
-            start_long_connection(app)
-        except Exception as exc:
-            # The app remains usable when the optional Feishu SDK is unavailable.
-            log.warning("[startup] Feishu long connection skipped: %s", type(exc).__name__)
-    if optional_feature_enabled("HOOKS"):
-        _run_startup_hooks()
-    _start_durable_queue_worker(app)
+        start_long_connection(app)
+    except Exception as exc:
+        # The app remains usable when the optional Feishu SDK is unavailable.
+        log.warning("[startup] Feishu long connection skipped: %s", type(exc).__name__)
+    _run_startup_hooks()
 
     @app.before_request
     def reject_cross_origin_writes():
@@ -220,19 +153,14 @@ def create_app() -> Flask:
             return None
         path = request.path
         # Exempt auth endpoints, health check, static files, and the login page
-        if (
-            path.startswith("/api/auth/")
-            or path == "/api/health"
-            or path == "/api/feishu-bot/events"
-            or path.startswith("/static/")
-            or path == "/login"
-            or path == "/favicon.ico"
-        ):
+        if (path.startswith("/api/auth/") or path == "/api/health"
+                or path == "/api/feishu-bot/events"
+                or path.startswith("/static/") or path == "/login"
+                or path == "/favicon.ico"):
             return None
         if not path.startswith("/api/"):
             return None
         from .auth import current_user
-
         if not current_user():
             return jsonify({"error": "请先登录", "needs_auth": True}), 401
         return None
@@ -242,10 +170,8 @@ def create_app() -> Flask:
         cloud = _is_cloud()
         if cloud:
             from .auth import current_user
-
             if not current_user():
                 from .auth import _agreement_ctx
-
                 return render_template(
                     "login.html",
                     product_icon=PRODUCT_ICON,
@@ -253,9 +179,7 @@ def create_app() -> Flask:
                     product_short_name=PRODUCT_SHORT_NAME,
                     product_tagline=PRODUCT_TAGLINE,
                     product_version=PRODUCT_VERSION,
-                    quota_limit=__import__(
-                        "data.auth_store", fromlist=["DAILY_TOKEN_LIMIT"]
-                    ).DAILY_TOKEN_LIMIT,
+                    quota_limit=__import__("data.auth_store", fromlist=["DAILY_TOKEN_LIMIT"]).DAILY_TOKEN_LIMIT,
                     **_agreement_ctx(),
                 )
         resp = render_template(
@@ -269,7 +193,6 @@ def create_app() -> Flask:
             product_version=PRODUCT_VERSION,
         )
         from flask import make_response
-
         resp = make_response(resp)
         # Always revalidate the HTML entry page so the browser picks up the
         # latest versioned JS/CSS references instead of serving a stale copy
@@ -286,15 +209,13 @@ def create_app() -> Flask:
             "status": "healthy",
             "service": SERVICE_ID,
             "product": PRODUCT_SHORT_NAME,
-            "durable_queue_enabled": optional_feature_enabled("DURABLE_QUEUE"),
-            "durable_queue_role": (str(os.environ.get("PFS_DURABLE_QUEUE_ROLE") or "embedded").lower()),
-            "durable_queue": bool(app.extensions.get("pfs_durable_queue_worker")),
         }
 
     @app.after_request
     def add_security_headers(response):
         """Apply a restrictive browser baseline while allowing generated charts."""
         is_chart = request.path.startswith("/api/chart/")
+        is_drawio = request.path.startswith("/static/drawio/")
         if is_chart:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'none'; "
@@ -307,6 +228,26 @@ def create_app() -> Flask:
                 "form-action 'none'; "
                 "frame-ancestors 'self'"
             )
+        elif is_drawio:
+            # Self-hosted draw.io editor must be frameable by the chat page
+            # (same origin) and needs worker/wasm for deflate + inline styles.
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; "
+                "worker-src 'self' blob:; "
+                "style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data: blob: https:; "
+                "font-src 'self' data:; "
+                "connect-src 'self'; "
+                "frame-src 'self'; "
+                "object-src 'none'; "
+                "base-uri 'self'; "
+                "form-action 'self'; "
+                "frame-ancestors 'self'"
+            )
+            response.headers["Cache-Control"] = "no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
         elif request.path == "/login":
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "

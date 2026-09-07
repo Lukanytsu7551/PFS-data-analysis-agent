@@ -45,7 +45,7 @@
 |---|---|
 | 数据接入 | CSV/XLSX 上传、SQLite/MySQL/PostgreSQL/SQL Server 连接入口、受控 HTTP 数据源 |
 | 数据理解 | 表和字段预览、数据范围、缺失与重复提示、来源快照 |
-| 分析执行 | 只读 SQL、分组统计、指标目录、安全聚合、异常检测、聚类、决策树和预测评估入口 |
+| 分析执行 | 只读 SQL、分组统计、安全聚合、异常检测、聚类、决策树和时间序列分析入口 |
 | 可视化 | 图表推荐、交互式图表和 Dashboard 交付入口 |
 | Agent | SSE 对话、工具调用、Skills、知识库、Workflow、任务状态和上下文管理 |
 | 协作扩展 | MCP、Teams、Hooks、飞书和云端登录入口默认可用；GPU 算力配置入口可用但执行开关默认关闭；真实外部服务需单独配置，本轮未验收 |
@@ -171,7 +171,7 @@ docker run --rm -p 5001:5001 pfs-data-analysis-agent:local
 
 ## 当前边界
 
-当前交付重点是可下载源码、桌面本地启动和核心数据分析闭环。macOS 本地启动、核心对话、CSV/XLSX、图表、交付物、任务和工作区基础链路已有本地证据。最近一次成功的 GitHub Actions run `34029259331` 验证了提交 `b2a6393` 的 Windows x64/macOS Apple Silicon 构建与 Windows 干净源码安装；当前 `main` 为 `1cc49c9`，尚未运行同 SHA 的 CI。根目录 [`LICENSE`](LICENSE) 现已提供自定义非商业许可；正式 GitHub Release 仍等待最终功能和业务验收，不会仅因许可证文件存在而提前创建。
+当前交付重点是可下载源码、桌面本地启动和核心数据分析闭环。此前 GitHub Actions run `34029259331` 只验证了旧提交 `b2a6393`；当前工作区正在收口运行基线，尚未形成新的提交或同 SHA 的 CI。根目录 [`LICENSE`](LICENSE) 已提供当前适用的许可文本；正式 GitHub Release 仍等待发布候选切片验证，不会仅因许可证文件存在而提前创建。
 
 真实 Windows 电脑安装、macOS/Windows 的安装升级卸载、复杂 Office 原生视觉、真实业务数据验收、真实模型和外部服务、部署及线上验收仍需在对应环境单独完成。本轮不进行真实外部服务验收，不阻塞本地首版。
 

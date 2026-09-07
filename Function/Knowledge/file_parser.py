@@ -55,10 +55,6 @@ _ALL_TEMPLATE_SETS = [
 ]
 
 
-class LLMRequiredError(ValueError):
-    """Raised when a knowledge file needs model-assisted extraction."""
-
-
 def _detect_template(columns: list[str]) -> tuple[str, int]:
     """Return (table_type, match_count) for the best-matching template."""
     norm = {c.strip().lower() for c in columns}
@@ -141,16 +137,13 @@ def extract_text(filepath: str) -> str:
         return _extract_docx_text(filepath)
     if ext in (".xlsx", ".xls"):
         xl = pd.ExcelFile(filepath)
-        try:
-            parts = []
-            for sheet in xl.sheet_names:
-                df = xl.parse(sheet)
-                if df.empty:
-                    continue
-                parts.append(f"[Sheet: {sheet}]\n{_df_to_text(df)}")
-            return "\n\n".join(parts)
-        finally:
-            xl.close()
+        parts = []
+        for sheet in xl.sheet_names:
+            df = xl.parse(sheet)
+            if df.empty:
+                continue
+            parts.append(f"[Sheet: {sheet}]\n{_df_to_text(df)}")
+        return "\n\n".join(parts)
     raise ValueError(f"Unsupported file type: {ext}")
 
 
@@ -313,7 +306,7 @@ def _llm_extract(text: str, client, model: str) -> list[dict]:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def parse_file(filepath: str, client=None, model: str = "") -> dict[str, Any]:
+def parse_file(filepath: str, client, model: str) -> dict[str, Any]:
     """Parse a docx or xlsx file into a preview list of knowledge records.
 
     Returns:
@@ -332,30 +325,23 @@ def parse_file(filepath: str, client=None, model: str = "") -> dict[str, Any]:
     if ext in (".xlsx", ".xls"):
         # Try every sheet; use the first one that looks structured
         xl = pd.ExcelFile(filepath)
-        try:
-            structured_records: list[dict] = []
-            unstructured_texts: list[str] = []
+        structured_records: list[dict] = []
+        unstructured_texts: list[str] = []
 
-            for sheet in xl.sheet_names:
-                df = xl.parse(sheet)
-                if df.empty:
-                    continue
-                table_type, confidence = _detect_template(list(df.columns))
-                if confidence >= _TEMPLATE_THRESHOLD:
-                    structured_records.extend(_df_to_structured(df, table_type))
-                else:
-                    unstructured_texts.append(f"[Sheet: {sheet}]\n{_df_to_text(df)}")
-        finally:
-            xl.close()
+        for sheet in xl.sheet_names:
+            df = xl.parse(sheet)
+            if df.empty:
+                continue
+            table_type, confidence = _detect_template(list(df.columns))
+            if confidence >= _TEMPLATE_THRESHOLD:
+                structured_records.extend(_df_to_structured(df, table_type))
+            else:
+                unstructured_texts.append(f"[Sheet: {sheet}]\n{_df_to_text(df)}")
 
         # If we found any structured sheets, return them directly.
         # Unstructured sheets in the same file are also sent to LLM.
         preview: list[dict] = list(structured_records)
         if unstructured_texts:
-            if client is None or not str(model or "").strip():
-                raise LLMRequiredError(
-                    "当前文件包含非模板内容，需要先配置 LLM 模型后才能解析。"
-                )
             combined = "\n\n".join(unstructured_texts)
             preview.extend(_llm_extract(combined, client, model))
 
@@ -366,10 +352,6 @@ def parse_file(filepath: str, client=None, model: str = "") -> dict[str, Any]:
         return {"format": fmt, "preview": preview}
 
     elif ext == ".docx":
-        if client is None or not str(model or "").strip():
-            raise LLMRequiredError(
-                "DOCX 文档需要先配置 LLM 模型后才能解析。"
-            )
         text = _extract_docx_text(filepath)
         preview = _llm_extract(text, client, model)
         return {"format": "unstructured", "preview": preview}

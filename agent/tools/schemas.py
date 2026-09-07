@@ -162,13 +162,6 @@ AGENT_TOOLS = [
                         "type": "boolean",
                         "description": "Must be true after confirming the exact table names.",
                     },
-                    "operation_key": {
-                        "type": "string",
-                        "description": (
-                            "Optional idempotency key for a retried delete request. "
-                            "The server supplies one for normal chat turns."
-                        ),
-                    },
                 },
                 "required": ["table_names", "confirm"],
             },
@@ -199,9 +192,7 @@ AGENT_TOOLS = [
                 "Run a built-in statistical analysis template on the data.\n"
                 "Steps: (1) call get_schema to know the tables/columns, "
                 "(2) call run_analysis with the appropriate parameters, "
-                "(3) the result is stored as queryable tables — the tool result "
-                "returns the authoritative table list; query or chart only those "
-                "returned names, never assumed names.\n\n"
+                "(3) the result is stored as queryable tables — call generate_chart on them.\n\n"
                 "Available analyses:\n"
                 f"{_ANALYZE_GUIDE}"
             ),
@@ -234,7 +225,7 @@ AGENT_TOOLS = [
                     },
                     "analysis_options": {
                         "type": "object",
-                        "description": "Analysis-specific options. For AB_Test_Analysis: control_group, metric_type (auto/binary/continuous), expected_allocation. For Time_Series_* temporal holdout: evaluation_mode='temporal_holdout', optional holdout_size (1-60), and optional quality_thresholds.",
+                        "description": "Analysis-specific options. For AB_Test_Analysis: control_group, metric_type (auto/binary/continuous), expected_allocation.",
                     },
                 },
                 "required": ["analysis_name", "sql", "target_column"],
@@ -1100,6 +1091,7 @@ CONTROL_TOOL_SCHEMAS = [
 ]
 
 AGENT_TOOLS.extend(CONTROL_TOOL_SCHEMAS)
+
 
 
 TOOL_SCHEMA_VERSIONS = {

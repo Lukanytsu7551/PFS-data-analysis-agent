@@ -10,7 +10,7 @@ import hashlib
 import json
 import re
 import threading
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from infrastructure.paths import data_path
 
@@ -91,12 +91,8 @@ def build_skill_catalog(
     skills: Sequence[Mapping[str, Any]],
     *,
     stats: dict[str, int] | None = None,
-    timeout: float | None = None,
-    abort_check: Callable[[], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Build a catalog while embedding only changed Skill descriptions."""
-    if abort_check is not None:
-        abort_check()
     entries = []
     for skill in skills:
         name = str(skill.get("name") or "")
@@ -113,20 +109,12 @@ def build_skill_catalog(
         })
 
     signature = _embedding_signature()
-    if abort_check is not None:
-        abort_check()
     with _SKILL_CACHE_LOCK:
         cached = _load_embedding_cache(signature)
         stale = [entry for entry in entries if entry["content_hash"] not in cached]
         if stale:
-            vectors = _embed_batch(
-                [entry["text"] for entry in stale],
-                timeout=timeout,
-                abort_check=abort_check,
-            )
+            vectors = _embed_batch([entry["text"] for entry in stale])
             for entry, vector in zip(stale, vectors):
-                if abort_check is not None:
-                    abort_check()
                 cached[entry["content_hash"]] = vector
         current_cache = {
             entry["content_hash"]: cached[entry["content_hash"]]
@@ -136,8 +124,6 @@ def build_skill_catalog(
         if stale or set(current_cache) != set(cached):
             _save_embedding_cache(signature, current_cache)
 
-    if abort_check is not None:
-        abort_check()
     if stats is not None:
         stats["rebuilt"] = len(stale)
         stats["total"] = len(entries)
@@ -150,19 +136,9 @@ def build_skill_catalog(
     return sorted(catalog, key=lambda item: item["name"])
 
 
-def rebuild_skill_embeddings(
-    skills: Sequence[Mapping[str, Any]],
-    *,
-    timeout: float | None = None,
-    abort_check: Callable[[], None] | None = None,
-) -> int:
+def rebuild_skill_embeddings(skills: Sequence[Mapping[str, Any]]) -> int:
     stats: dict[str, int] = {}
-    build_skill_catalog(
-        skills,
-        stats=stats,
-        timeout=timeout,
-        abort_check=abort_check,
-    )
+    build_skill_catalog(skills, stats=stats)
     return stats.get("rebuilt", 0)
 
 def _rrf_fuse(
@@ -201,27 +177,17 @@ def search_skill_catalog(
     query: str,
     *,
     limit: int = 5,
-    timeout: float | None = None,
-    abort_check: Callable[[], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Return at most *limit* skills ranked by neural embedding + lexical + RRF."""
-    if abort_check is not None:
-        abort_check()
     query_raw = str(query or "").strip()
     if not query_raw or not catalog:
         return []
 
-    q_vec = _embed_query(
-        query_raw,
-        timeout=timeout,
-        abort_check=abort_check,
-    )
+    q_vec = _embed_query(query_raw)
 
     # Channel 1: vector similarity (neural embedding)
     vec_ranked = []
     for item in catalog:
-        if abort_check is not None:
-            abort_check()
         emb = item.get("embedding") or []
         score = _cosine(q_vec, emb) if emb else 0.0
         vec_ranked.append((score, dict(item)))
@@ -231,8 +197,6 @@ def search_skill_catalog(
     # Channel 2: lexical score
     lex_ranked = []
     for item in catalog:
-        if abort_check is not None:
-            abort_check()
         text = item.get("text") or f"{item.get('name', '')} {item.get('description', '')}"
         score = _lexical_score(query_raw, text)
         lex_ranked.append((score, dict(item)))
@@ -242,8 +206,6 @@ def search_skill_catalog(
     # Channel 3: name match
     name_ranked = []
     for item in catalog:
-        if abort_check is not None:
-            abort_check()
         score = _name_bonus(item.get("name", ""), query_raw)
         name_ranked.append((score, dict(item)))
     name_ranked.sort(key=lambda x: -x[0])
@@ -252,11 +214,9 @@ def search_skill_catalog(
     # Hybrid: RRF over ALL items (no truncation) + raw score bonuses.
     # RRF alone can bury a strong match if the item only appears in 1-2
     # channels.  Adding vector_score * 1.0 ensures high-confidence neural
-    # matches surface; adding name_score * 0.5 ensures exact-name hits
-    # (e.g. a short alias matching a longer skill name) are not buried by competitors that
-    # rank higher in vector/lexical but lack the name signal.
-    if abort_check is not None:
-        abort_check()
+    # matches surface; adding name_score * 0.5 ensures exact-name hits are not
+    # buried by competitors that rank higher in vector/lexical but lack the
+    # name signal.
     fused = _rrf_fuse(vec_list, lex_list, name_list, limit=len(catalog))
 
     # Build score lookups
@@ -284,8 +244,6 @@ def search_skill_catalog(
     # lower are not lost to truncation.
     passed = []
     for r in fused:
-        if abort_check is not None:
-            abort_check()
         vs = r.get("vector_score", 0.0)
         lex_score = _lexical_score(query_raw, r.get("text") or "")
         name_score = r.get("name_score", 0.0)

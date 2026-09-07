@@ -66,7 +66,7 @@ def apply_prompt_cache_policy(
         return updated, metadata
 
     mode = str(policy.mode or "automatic").lower()
-    if mode in {"openai", "kimi"}:
+    if mode == "openai":
         scope_id = cache_scope_user_id(
             user_id=user_id,
             workspace_id=workspace_id,
@@ -75,12 +75,6 @@ def apply_prompt_cache_policy(
             f"{cache_key}|{scope_id}".encode("utf-8")
         ).hexdigest()[:32]
         updated["prompt_cache_key"] = f"pfs-{scoped_digest}"
-        if mode == "kimi":
-            metadata.update({
-                "cache_key": updated["prompt_cache_key"],
-                "scope_isolated": True,
-            })
-            return updated, metadata
         retention = (
             policy.retention
             if policy.retention in {"in_memory", "24h"}
@@ -90,6 +84,19 @@ def apply_prompt_cache_policy(
         metadata.update({
             "cache_key": updated["prompt_cache_key"],
             "retention": retention,
+            "scope_isolated": True,
+        })
+    elif mode == "kimi":
+        scope_id = cache_scope_user_id(
+            user_id=user_id,
+            workspace_id=workspace_id,
+        )
+        scoped_digest = hashlib.sha256(
+            f"{cache_key}|{scope_id}".encode("utf-8")
+        ).hexdigest()[:32]
+        updated["prompt_cache_key"] = f"pfs-{scoped_digest}"
+        metadata.update({
+            "cache_key": updated["prompt_cache_key"],
             "scope_isolated": True,
         })
     elif mode == "deepseek":

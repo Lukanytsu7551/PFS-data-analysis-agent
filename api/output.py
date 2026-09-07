@@ -84,11 +84,6 @@ def download_export(filename: str):
     if filepath is None:
         abort(404)
 
-    artifact_id = (request.args.get("artifact_id") or "").strip()
-    if artifact_id:
-        from infrastructure.artifact_lifecycle import record_artifact_download
-        record_artifact_download(artifact_id)
-
     return send_file(filepath, as_attachment=True, download_name=filename)
 
 

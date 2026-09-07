@@ -5,12 +5,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from pfs_agent.model_evaluation import evaluate_prediction_rows
-from agent.tools.business.data import (
-    _build_temporal_holdout_evaluation,
-    _model_evaluation_for_result,
-)
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -99,60 +93,6 @@ class PfsAnalysisAccuracyTests(unittest.TestCase):
                 self.assertEqual(4, len(future))
                 self.assertTrue(pd.to_datetime(future["ds"]).gt(frame["date"].max()).all())
                 self.assertTrue(np.isfinite(future["y_pred"].to_numpy(dtype=float)).all())
-                quality = _model_evaluation_for_result(
-                    name,
-                    result,
-                    _breakdown,
-                    metrics,
-                    target_column="y",
-                )
-                self.assertIsNotNone(quality)
-                self.assertEqual("time_series", quality["task_type"])
-                self.assertGreater(quality["scope"]["paired_rows"], 0)
-                self.assertEqual(4, quality["scope"]["excluded_forecast_rows"])
-                self.assertIn("mae", quality["metrics"])
-                self.assertIn("rmse", quality["metrics"])
-
-    def test_time_series_models_pass_real_temporal_holdout_path(self):
-        modules = [
-            ("Time_Series_ARIMA", "1,1,0"),
-            ("Time_Series_SARIMA", "date"),
-            ("Time_Series_VAR", "date,y,x2"),
-            ("Time_Series_Prophet", "date"),
-            ("Time_Series_GRU", "date"),
-        ]
-        n = 32
-        t = np.arange(n, dtype=float)
-        frame = pd.DataFrame(
-            {
-                "date": pd.date_range("2025-01-01", periods=n, freq="D"),
-                "y": 100 + t * 1.8 + (t % 5) * 2,
-                "x2": 50 + t * 0.9 + (t % 3),
-            }
-        )
-        for name, hint in modules:
-            with self.subTest(analyzer=name):
-                try:
-                    quality = _build_temporal_holdout_evaluation(
-                        name,
-                        frame,
-                        "y",
-                        hint,
-                        3,
-                        {"evaluation_mode": "temporal_holdout", "holdout_size": 3},
-                    )
-                except ImportError as exc:
-                    self.skipTest(f"{name} optional dependency unavailable: {exc}")
-                self.assertEqual("temporal_holdout", quality["time_series"]["evaluation_scope"])
-                self.assertEqual(3, quality["scope"]["paired_rows"])
-                self.assertEqual(3, quality["scope"]["total_rows"])
-                self.assertEqual(1.0, quality["scope"]["paired_ratio"])
-                self.assertTrue(
-                    all(
-                        quality["metrics"][metric]["value"] is not None
-                        for metric in ("mae", "rmse", "bias", "mape", "wape", "smape")
-                    )
-                )
 
     def test_arima_auto_order_recovers_from_numeric_selection_failure(self):
         module = _load("Time_Series_ARIMA")
@@ -190,15 +130,6 @@ class PfsAnalysisAccuracyTests(unittest.TestCase):
         coefficient = result.loc[result["feature"] == "x", "coefficient"].iloc[0]
         self.assertAlmostEqual(10.881984, coefficient, places=5)
         self.assertEqual(6, len(breakdown))
-        quality = evaluate_prediction_rows(
-            breakdown,
-            case_id="linear-regression-test",
-            task_type="regression",
-            expected_key="y_actual",
-            predicted_key="y_pred",
-        )
-        self.assertEqual(1.0, quality["metrics"]["r2"]["value"])
-        self.assertEqual(0.0, quality["metrics"]["rmse"]["value"])
 
     def test_sklearn_model_infers_regression_for_continuous_random_forest(self):
         module = _load("Sklearn_Model")
@@ -216,16 +147,6 @@ class PfsAnalysisAccuracyTests(unittest.TestCase):
         self.assertAlmostEqual(100.0, float(importance["importance_pct"].sum()), places=2)
         self.assertEqual(12, len(residuals))
         self.assertTrue(np.isfinite(residuals["predicted"].to_numpy(dtype=float)).all())
-        quality = evaluate_prediction_rows(
-            residuals,
-            case_id="sklearn-regression-test",
-            task_type="regression",
-        )
-        for metric_name in ("r2", "mae", "rmse"):
-            self.assertEqual(
-                float(metrics.loc[metric_name, "value"]),
-                quality["metrics"][metric_name]["value"],
-            )
 
     def test_sklearn_model_rejects_invalid_input_boundaries(self):
         module = _load("Sklearn_Model")

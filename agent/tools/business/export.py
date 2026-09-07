@@ -6,13 +6,10 @@ import logging
 log = logging.getLogger(__name__)
 import os
 import re
-import time
 import uuid
 from pathlib import Path
 from infrastructure.artifact_lifecycle import register_artifact
 from infrastructure.paths import data_path
-from agent.errors import AgentRunTimeout
-from agent.jobs import JobCanceled
 
 REPORT_JOB_SECTION_THRESHOLD = 6
 REPORT_JOB_CHART_THRESHOLD = 3
@@ -26,18 +23,6 @@ class ExportToolsMixin:
     _PROJ_ROOT is imported from prompts to avoid repeating the path logic."""
 
     # ── A5: export directory resolution ───────────────────────────────────────
-
-    def _register_export_artifact(self, path: Path, artifact_type: str) -> str:
-        """Register a generated file, optionally carrying a PFS lineage contract."""
-        metadata = getattr(self, "_artifact_metadata", None)
-        return register_artifact(
-            path,
-            artifact_type=artifact_type,
-            session_id=getattr(self, "_session_id", ""),
-            workspace_id=getattr(self, "_workspace_id", ""),
-            artifact_id=str((metadata or {}).get("artifact_id") or ""),
-            metadata=metadata,
-        )
 
     def _get_export_dir(self) -> str:
         """返回导出文件应该写入的目录。
@@ -74,25 +59,11 @@ class ExportToolsMixin:
 
     # ── Excel export ──────────────────────────────────────────────────────────
 
-    def _tool_export_excel(
-        self,
-        tables: list,
-        filename: str = "",
-        *,
-        timeout: float | None = None,
-        abort_check=None,
-        timeout_provider=None,
-    ) -> str:
+    def _tool_export_excel(self, tables: list, filename: str = "") -> str:
         from Function.Output.excel_export import export_to_excel
 
-        def _remaining_timeout():
-            return timeout_provider() if callable(timeout_provider) else timeout
-
         if not tables or tables == ["*"]:
-            tables = self._discover_all_tables(
-                timeout=_remaining_timeout(),
-                abort_check=abort_check,
-            )
+            tables = self._discover_all_tables()
             if not tables:
                 return "❌ 数据源中没有可用的表格，请先上传数据或运行分析。"
 
@@ -107,44 +78,14 @@ class ExportToolsMixin:
         export_dir = self._get_export_dir()
         os.makedirs(export_dir, exist_ok=True)
         filepath = os.path.join(export_dir, safe_name)
-        # openpyxl selects its engine from the suffix, so keep .xlsx on the
-        # temporary path while making the final rename atomic.
-        temp_path = Path(f"{filepath}.tmp-{uuid.uuid4().hex}.xlsx")
-
-        def _query(sql):
-            return self._execute_source_query(
-                self.data_source,
-                sql,
-                timeout=_remaining_timeout(),
-                abort_check=abort_check,
-            )
 
         try:
-            export_to_excel(
-                self.data_source,
-                tables,
-                str(temp_path),
-                query_runner=(
-                    _query
-                    if timeout is not None
-                    or abort_check is not None
-                    or callable(timeout_provider)
-                    else None
-                ),
-                abort_check=abort_check,
-            )
-            if abort_check is not None:
-                abort_check()
-            os.replace(temp_path, filepath)
-        except (JobCanceled, AgentRunTimeout):
-            temp_path.unlink(missing_ok=True)
-            raise
+            export_to_excel(self.data_source, tables, filepath)
         except Exception as exc:
-            temp_path.unlink(missing_ok=True)
             log.warning("[export] excel export failed: %s", exc)
             return f"❌ 导出失败：{exc}"
 
-        self._register_export_artifact(Path(filepath), "export")
+        register_artifact(Path(filepath), artifact_type="export", session_id=getattr(self, "_session_id", ""), workspace_id=getattr(self, "_workspace_id", ""))
         download_url = self._build_download_url(safe_name)
         return (
             f"✅ Excel 文件已生成，共 {len(tables)} 张表：{', '.join(tables)}。\n\n"
@@ -177,58 +118,21 @@ class ExportToolsMixin:
             if cid in self._chart_store
         ]
 
-    def _render_report_export(
-        self,
-        title: str,
-        sections: list,
-        chart_htmls: list,
-        *,
-        abort_check=None,
-    ) -> str:
+    def _render_report_export(self, title: str, sections: list, chart_htmls: list) -> str:
         from Function.Output.report_export import export_to_report
 
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         export_dir = self._get_export_dir()
         os.makedirs(export_dir, exist_ok=True)
         filepath = os.path.join(export_dir, f"report_{ts}.docx")
-        temp_path = Path(f"{filepath}.tmp-{uuid.uuid4().hex}.docx")
-        temp_zip_path = temp_path.with_suffix(".zip")
 
-        try:
-            _result_path, _temp_download_name = export_to_report(
-                title,
-                sections,
-                str(temp_path),
-                chart_htmls=chart_htmls,
-                abort_check=abort_check,
-            )
-            if abort_check is not None:
-                abort_check()
-            published_path = Path(filepath).with_suffix(
-                ".zip" if chart_htmls else ".docx"
-            )
-            os.replace(_result_path, published_path)
-            if chart_htmls:
-                temp_path.unlink(missing_ok=True)
-            download_name = published_path.name
-        except (JobCanceled, AgentRunTimeout):
-            result_path = locals().get("_result_path")
-            if result_path:
-                Path(result_path).unlink(missing_ok=True)
-            temp_path.unlink(missing_ok=True)
-            temp_zip_path.unlink(missing_ok=True)
-            raise
-        except Exception:
-            result_path = locals().get("_result_path")
-            if result_path:
-                Path(result_path).unlink(missing_ok=True)
-            temp_path.unlink(missing_ok=True)
-            temp_zip_path.unlink(missing_ok=True)
-            raise
+        _result_path, download_name = export_to_report(
+            title, sections, filepath, chart_htmls=chart_htmls
+        )
 
         n_charts = len(chart_htmls)
         chart_note = f"（含 {n_charts} 张图表）" if n_charts else ""
-        self._register_export_artifact(published_path, "report")
+        register_artifact(Path(_result_path), artifact_type="report", session_id=getattr(self, "_session_id", ""), workspace_id=getattr(self, "_workspace_id", ""))
         download_url = self._build_download_url(download_name)
         return (
             f"✅ 报告已生成，共 {len(sections)} 个章节{chart_note}。\n\n"
@@ -245,34 +149,9 @@ class ExportToolsMixin:
             log.warning("[export] report generation failed: %s", exc)
             return f"❌ 报告生成失败：{exc}"
 
-    def _tool_export_report_with_jobs(
-        self,
-        title: str,
-        sections: list,
-        *,
-        timeout: float | None = None,
-        abort_check=None,
-        timeout_provider=None,
-    ):
+    def _tool_export_report_with_jobs(self, title: str, sections: list):
         if not sections:
             return "❌ 报告内容为空，请提供至少一个章节。"
-
-        deadline = (
-            time.monotonic() + max(0.0, float(timeout))
-            if timeout is not None and not callable(timeout_provider)
-            else None
-        )
-
-        def _check_budget() -> None:
-            if abort_check is not None:
-                abort_check()
-            remaining = (
-                timeout_provider()
-                if callable(timeout_provider)
-                else (deadline - time.monotonic() if deadline is not None else None)
-            )
-            if remaining is not None and remaining <= 0:
-                raise AgentRunTimeout
 
         chart_htmls = self._report_chart_htmls()
         should_job = (
@@ -284,14 +163,7 @@ class ExportToolsMixin:
         )
         if not should_job:
             try:
-                return self._render_report_export(
-                    title,
-                    sections,
-                    chart_htmls,
-                    abort_check=_check_budget,
-                )
-            except (JobCanceled, AgentRunTimeout):
-                raise
+                return self._render_report_export(title, sections, chart_htmls)
             except Exception as exc:
                 log.warning("[export] report generation failed: %s", exc)
                 return f"❌ 报告生成失败：{exc}"
@@ -306,10 +178,7 @@ class ExportToolsMixin:
             ctx.check_canceled()
             ctx.set_progress(35, "正在生成 Word 报告")
             result = self._render_report_export(
-                title_snapshot,
-                sections_snapshot,
-                chart_htmls_snapshot,
-                abort_check=ctx.check_canceled,
+                title_snapshot, sections_snapshot, chart_htmls_snapshot
             )
             ctx.check_canceled()
             ctx.set_progress(90, "正在发布报告文件")
@@ -379,36 +248,8 @@ class ExportToolsMixin:
         markdown = f"**{title}**（共 {len(slides)} 张）\n\n" + "\n".join(rows)
         return {"title": title, "slides": slides, "markdown": markdown}
 
-    def _tool_generate_ppt(
-        self,
-        title: str,
-        slides: list,
-        filename: str = "",
-        *,
-        timeout: float | None = None,
-        abort_check=None,
-        timeout_provider=None,
-    ) -> str:
+    def _tool_generate_ppt(self, title: str, slides: list, filename: str = "") -> str:
         from ...prompts import _PROJ_ROOT
-
-        deadline = (
-            time.monotonic() + max(0.0, float(timeout))
-            if timeout is not None and not callable(timeout_provider)
-            else None
-        )
-
-        def _check_budget() -> None:
-            if abort_check is not None:
-                abort_check()
-            remaining = (
-                timeout_provider()
-                if callable(timeout_provider)
-                else (deadline - time.monotonic() if deadline is not None else None)
-            )
-            if remaining is not None and remaining <= 0:
-                raise AgentRunTimeout
-
-        _check_budget()
 
         try:
             from PPT import MckEngine
@@ -545,7 +386,6 @@ class ExportToolsMixin:
         }
 
         for i, spec in enumerate(slides, 1):
-            _check_budget()
             layout = spec.get("layout", "")
             if layout not in _SUPPORTED:
                 return (
@@ -589,9 +429,6 @@ class ExportToolsMixin:
             method = getattr(eng, layout)
             try:
                 method(**params)
-                _check_budget()
-            except (JobCanceled, AgentRunTimeout):
-                raise
             except Exception as exc:
                 log.warning("[export] slide %d (%s) render failed: %s", i, layout, exc)
                 return f"❌ 第 {i} 张幻灯片（{layout}）生成失败：{exc}"
@@ -608,22 +445,14 @@ class ExportToolsMixin:
         export_dir = self._get_export_dir()
         os.makedirs(export_dir, exist_ok=True)
         filepath = os.path.join(export_dir, safe_name)
-        temp_path = Path(f"{filepath}.tmp-{uuid.uuid4().hex}.pptx")
 
         try:
-            _check_budget()
-            eng.save(str(temp_path))
-            _check_budget()
-            os.replace(temp_path, filepath)
-        except (JobCanceled, AgentRunTimeout):
-            temp_path.unlink(missing_ok=True)
-            raise
+            eng.save(filepath)
         except Exception as exc:
-            temp_path.unlink(missing_ok=True)
             log.warning("[export] PPT save failed: %s", exc)
             return f"❌ PPT 文件保存失败：{exc}"
 
-        self._register_export_artifact(Path(filepath), "export")
+        register_artifact(Path(filepath), artifact_type="export", session_id=getattr(self, "_session_id", ""), workspace_id=getattr(self, "_workspace_id", ""))
         download_url = self._build_download_url(safe_name)
         return (
             f"✅ PowerPoint 演示文稿已生成，共 **{total}** 张幻灯片。\n\n"
@@ -648,20 +477,8 @@ class ExportToolsMixin:
         name: str,
         widgets: list,
         color_scheme: str = "",
-        *,
-        timeout: float | None = None,
-        abort_check=None,
     ) -> str:
         color_scheme = color_scheme or getattr(self, "ppt_color_scheme", "mckinsey")
-
-        def _query(sql):
-            return self._execute_source_query(
-                self.data_source,
-                sql,
-                timeout=timeout,
-                abort_check=abort_check,
-            )
-
         try:
             from api.dashboard import build_dashboard
             data = build_dashboard(
@@ -673,13 +490,7 @@ class ExportToolsMixin:
                 widgets_spec=widgets,
                 color_scheme=color_scheme,
                 workspace_authorization=self._workspace_path_authorization(),
-                query_runner=(
-                    _query if timeout is not None or abort_check is not None else None
-                ),
-                abort_check=abort_check,
             )
-        except (JobCanceled, AgentRunTimeout):
-            raise
         except Exception as exc:
             log.warning("[export] dashboard generation failed: %s", exc)
             return f"❌ 看板生成失败：{exc}"
@@ -712,24 +523,8 @@ class ExportToolsMixin:
         name: str,
         widgets: list,
         color_scheme: str = "",
-        *,
-        timeout: float | None = None,
-        abort_check=None,
-        timeout_provider=None,
     ):
         color_scheme = color_scheme or getattr(self, "ppt_color_scheme", "mckinsey")
-
-        def _remaining_timeout():
-            return timeout_provider() if callable(timeout_provider) else timeout
-
-        def _query(sql):
-            return self._execute_source_query(
-                self.data_source,
-                sql,
-                timeout=_remaining_timeout(),
-                abort_check=abort_check,
-            )
-
         try:
             from api.dashboard import (
                 build_dashboard_from_prefetched_widgets,
@@ -739,17 +534,7 @@ class ExportToolsMixin:
                 self.data_source,
                 widgets,
                 self._workspace_path_authorization(),
-                query_runner=(
-                    _query
-                    if timeout is not None
-                    or abort_check is not None
-                    or callable(timeout_provider)
-                    else None
-                ),
-                abort_check=abort_check,
             )
-        except (JobCanceled, AgentRunTimeout):
-            raise
         except Exception as exc:
             log.warning("[export] dashboard prefetch failed: %s", exc)
             return f"❌ 看板生成失败：{exc}"

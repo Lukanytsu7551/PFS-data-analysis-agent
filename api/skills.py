@@ -1,13 +1,13 @@
 """Public catalog for file-based analysis skills."""
 import logging
+import os
 import shutil
-import tempfile
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request
 
 from agent.skills import SkillLoader
-from agent.skills.parser import MAX_SKILL_BYTES, SkillError, parse_skill_file
+from agent.skills.parser import SkillError, parse_skill_file
 from agent.skills.models import SKILL_NAME_RE
 from infrastructure.compat import env, workspace_hidden_dir
 
@@ -160,60 +160,6 @@ def create_skill():
     skill_file.write_text(content, encoding="utf-8")
     log.info("[skills] created user skill %r at %s", name, skill_file)
     return jsonify({"ok": True, "name": name}), 201
-
-
-@bp.post("/api/skills/upload")
-def upload_skill():
-    """Import one user Skill markdown file into the managed skill directory."""
-    uploaded = request.files.get("file")
-    filename = Path(uploaded.filename or "").name if uploaded else ""
-    if not uploaded or not filename or Path(filename).suffix.lower() != ".md":
-        return jsonify({
-            "ok": False,
-            "error": "请上传 .md 格式的 Skill 文件。",
-            "code": "skill_file_invalid",
-        }), 400
-
-    try:
-        raw = uploaded.stream.read(MAX_SKILL_BYTES + 1)
-    except OSError as exc:
-        return jsonify({"ok": False, "error": f"读取 Skill 文件失败：{exc}"}), 400
-    if len(raw) > MAX_SKILL_BYTES:
-        return jsonify({
-            "ok": False,
-            "error": f"Skill 文件不能超过 {MAX_SKILL_BYTES} 字节。",
-            "code": "skill_file_too_large",
-        }), 413
-    try:
-        raw.decode("utf-8")
-    except UnicodeDecodeError:
-        return jsonify({
-            "ok": False,
-            "error": "Skill 文件必须使用 UTF-8 编码。",
-            "code": "skill_file_encoding",
-        }), 400
-
-    user_dir = _user_skills_dir()
-    temp_dir = Path(tempfile.mkdtemp(prefix=".pfs-skill-upload-", dir=str(user_dir)))
-    try:
-        temp_file = temp_dir / "SKILL.md"
-        temp_file.write_bytes(raw)
-        skill = parse_skill_file(temp_file, source="user")
-        target = user_dir / skill.name
-        if target.exists():
-            return jsonify({"ok": False, "error": "Skill already exists.", "code": "skill_exists"}), 409
-        temp_dir.rename(target)
-        temp_dir = None
-    except SkillError as exc:
-        return jsonify({"ok": False, "error": str(exc), "code": "skill_file_invalid"}), 400
-    except OSError as exc:
-        return jsonify({"ok": False, "error": f"保存 Skill 失败：{exc}"}), 500
-    finally:
-        if temp_dir is not None and temp_dir.exists():
-            shutil.rmtree(temp_dir, ignore_errors=True)
-
-    log.info("[skills] uploaded user skill %r", skill.name)
-    return jsonify({"ok": True, "name": skill.name}), 201
 
 
 @bp.put("/api/skills/<path:name>")

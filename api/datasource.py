@@ -3,6 +3,7 @@ import json
 import logging
 import traceback
 import uuid
+import os
 import re
 import threading
 from datetime import datetime
@@ -17,7 +18,6 @@ from data.connector import ExcelDataSource, CSVDataSource, SQLDataSource, HTTPAP
 from data.sources.excel import excel_requires_job, parse_excel_job
 from data.sources.workspace_persistent import WorkspacePersistentSource
 from infrastructure.artifact_lifecycle import register_artifact
-from infrastructure.compat import cloud_login_enabled
 from infrastructure.paths import data_path
 
 log = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ _BASE_SESSION_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _is_cloud() -> bool:
-    return cloud_login_enabled()
+    return bool(os.environ.get("RAILWAY_PROJECT_ID")) or os.environ.get("VERCEL") == "1"
 
 
 def _scoped_dir(base: Path, user_id: str) -> Path:
@@ -65,26 +65,7 @@ WAREHOUSE_SAVE_DIR = _BASE_WAREHOUSE_DIR
 PARSED_EXCEL_DIR = _BASE_UPLOAD_DIR / ".parsed_excel"
 PARSED_EXCEL_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED_EXTS = {".xlsx", ".xls", ".csv"}
-# Keep the limit explicit and user-facing.
-MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 _finalize_lock = threading.RLock()
-
-
-def _upload_root() -> Path:
-    """Resolve the upload root at request time, not only at import time.
-
-    This keeps uploads and lifecycle registration on the same data root when
-    ``PFS_DATA_DIR`` is supplied by a packaged run, test, or process wrapper.
-    """
-    root = data_path("uploads")
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
-def _warehouse_root() -> Path:
-    root = data_path("outputs", "DataWarehouse")
-    root.mkdir(parents=True, exist_ok=True)
-    return root
 
 
 def _allowed(filename: str) -> bool:
@@ -94,7 +75,7 @@ def _allowed(filename: str) -> bool:
 def _friendly_conn_error(exc: Exception, service: str) -> str:
     """Translate a low-level connection exception into a user-readable message.
 
-    `service` is a short label like '外部 API' / '数据库'.
+    `service` is a short label like 'Google Sheets' / '外部 API' / '数据库'.
     Falls back to the raw message when the error is not a known network case.
     """
     # Walk the exception cause chain so a wrapped error is still recognised.
@@ -190,7 +171,7 @@ def _safe_stem(name: str) -> str:
 
 
 def _warehouse_file(filename: str, user_id: str = "") -> Path:
-    return _scoped_dir(_warehouse_root(), user_id) / Path(filename).name
+    return _scoped_dir(_BASE_WAREHOUSE_DIR, user_id) / Path(filename).name
 
 
 def _serialize_source(entry: dict, active_ids: set[str]) -> dict | None:
@@ -281,7 +262,7 @@ def _restore_source(info: dict):
 
 
 def _list_warehouses(user_id: str = "") -> list[dict]:
-    warehouse_dir = _scoped_dir(_warehouse_root(), user_id)
+    warehouse_dir = _scoped_dir(_BASE_WAREHOUSE_DIR, user_id)
     files = sorted(
         warehouse_dir.glob("*.json"),
         key=lambda p: p.stat().st_mtime,
@@ -327,7 +308,7 @@ def _save_current_warehouse(sess, sid: str, name: str, *, autosaved: bool = Fals
         "sources": sources,
         "skipped_sources": skipped,
     }
-    warehouse_dir = _scoped_dir(_warehouse_root(), user_id)
+    warehouse_dir = _scoped_dir(_BASE_WAREHOUSE_DIR, user_id)
     path = warehouse_dir / f"{_safe_stem(name)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     log.info(
@@ -367,8 +348,8 @@ def upload_file(sid: str):
         return jsonify({"error": "未选择文件"}), 400
 
     user_id = _resolve_user_id()
-    upload_dir = _scoped_dir(_upload_root(), user_id)
-    parsed_excel_dir = _scoped_dir(_upload_root(), user_id) / ".parsed_excel"
+    upload_dir = _scoped_dir(_BASE_UPLOAD_DIR, user_id)
+    parsed_excel_dir = _scoped_dir(_BASE_UPLOAD_DIR, user_id) / ".parsed_excel"
     parsed_excel_dir.mkdir(parents=True, exist_ok=True)
 
     sess = session_manager.get_or_create(sid)
@@ -387,14 +368,6 @@ def upload_file(sid: str):
         safe_name = safe_stem if safe_stem else f"upload_{uuid.uuid4().hex[:8]}{ext}"
         save_path = upload_dir / f"{sid[:8]}_{uuid.uuid4().hex[:6]}_{safe_name}"
         f.save(str(save_path))
-        try:
-            file_bytes = save_path.stat().st_size
-        except OSError:
-            file_bytes = 0
-        if file_bytes > MAX_UPLOAD_BYTES:
-            save_path.unlink(missing_ok=True)
-            errors.append(f"{f.filename}: 文件过大（上限 {MAX_UPLOAD_BYTES // (1024 * 1024)} MB）")
-            continue
         register_artifact(save_path, artifact_type="upload", session_id=sid)
         log.info("[upload] saved → %s  (display: %s)", save_path, display_name)
 
@@ -425,12 +398,7 @@ def upload_file(sid: str):
             errors.append(f"{f.filename}: {exc}")
 
     if not added and not pending_jobs:
-        return jsonify({
-            "ok": False,
-            "error": "; ".join(errors) or "文件解析失败",
-            "code": "upload_file_too_large" if errors and all("文件过大" in item for item in errors) else "upload_failed",
-            "errors": errors,
-        }), 413 if errors and all("文件过大" in item for item in errors) else 400
+        return jsonify({"error": "; ".join(errors) or "文件解析失败"}), 400
 
     warehouse_autosave = (
         _autosave_uploaded_warehouse(sess, sid, [item["source_name"] for item in added], user_id=user_id)
@@ -445,7 +413,6 @@ def upload_file(sid: str):
         "source_name": added[0]["source_name"] if added else pending_jobs[0]["source_name"],
         "schema_preview": added[0]["schema_preview"] if added else "",
         "errors": errors,
-        "error_details": [{"code": "upload_file_too_large", "message": item} for item in errors if "文件过大" in item],
         "warehouse_autosave": warehouse_autosave,
     }
     return jsonify(payload), (202 if pending_jobs else 200)
@@ -461,7 +428,7 @@ SAMPLE_DIR = Path(__file__).resolve().parents[1] / "deploy" / "samples"
 @require_session_ownership
 def load_sample_data(sid: str):
     """Load a bundled sample Excel file into the session (cloud-managed only)."""
-    is_cloud = cloud_login_enabled()
+    is_cloud = bool(os.environ.get("RAILWAY_PROJECT_ID")) or os.environ.get("VERCEL") == "1"
     if not is_cloud:
         return jsonify({"error": "示例数据仅在云端演示环境可用"}), 403
 
@@ -470,8 +437,8 @@ def load_sample_data(sid: str):
         return jsonify({"error": "示例数据文件未找到"}), 404
 
     user_id = _resolve_user_id()
-    upload_dir = _scoped_dir(_upload_root(), user_id)
-    parsed_excel_dir = _scoped_dir(_upload_root(), user_id) / ".parsed_excel"
+    upload_dir = _scoped_dir(_BASE_UPLOAD_DIR, user_id)
+    parsed_excel_dir = _scoped_dir(_BASE_UPLOAD_DIR, user_id) / ".parsed_excel"
     parsed_excel_dir.mkdir(parents=True, exist_ok=True)
 
     sess = session_manager.get_or_create(sid)
@@ -525,7 +492,7 @@ def load_sample_data(sid: str):
 def finalize_upload_job(sid: str, jid: str):
     """Attach a completed Excel parse job to the session exactly once."""
     user_id = _resolve_user_id()
-    parsed_excel_dir = _scoped_dir(_upload_root(), user_id) / ".parsed_excel"
+    parsed_excel_dir = _scoped_dir(_BASE_UPLOAD_DIR, user_id) / ".parsed_excel"
     parsed_excel_dir.mkdir(parents=True, exist_ok=True)
 
     sess = session_manager.get_or_create(sid)
@@ -731,123 +698,6 @@ def set_sql_analysis_tables(sid: str, source_id: str):
     sess._combined_schema_cache = None
     sess._invalidate_merged_source()
     return jsonify({"ok": True, "source_id": source_id, "tables": selected})
-
-
-@bp.post("/api/session/<sid>/analysis-tables/delete")
-@require_session_ownership
-def delete_analysis_tables(sid: str):
-    """Delete derived tables with an explicit, session-scoped idempotency key."""
-    sess = session_manager.get(sid)
-    if not sess:
-        return jsonify({"error": "session not found"}), 404
-    payload = request.get_json(silent=True) or {}
-    if not isinstance(payload, dict):
-        return jsonify({"error": "请求体必须是 JSON 对象"}), 400
-
-    operation_key = str(payload.get("operation_key") or "").strip()
-    if not operation_key or len(operation_key) > 240:
-        return jsonify({
-            "ok": False,
-            "error": "删除分析表必须提供长度不超过 240 的 operation_key",
-            "code": "operation_key_required",
-        }), 400
-    if any(ord(char) < 32 for char in operation_key):
-        return jsonify({"ok": False, "error": "operation_key 包含非法控制字符"}), 400
-
-    table_names = payload.get("table_names")
-    if not isinstance(table_names, list) or not table_names or len(table_names) > 32:
-        return jsonify({
-            "ok": False,
-            "error": "table_names 必须是 1 到 32 个表名的数组",
-            "code": "table_names_invalid",
-        }), 400
-    normalized_names = []
-    seen = set()
-    for value in table_names:
-        name = str(value or "").strip()
-        if not name or len(name) > 160:
-            return jsonify({"ok": False, "error": "表名不能为空且长度不能超过 160"}), 400
-        if name not in seen:
-            normalized_names.append(name)
-            seen.add(name)
-    if not normalized_names:
-        return jsonify({"ok": False, "error": "至少需要一个有效表名"}), 400
-    if payload.get("confirm") is not True:
-        return jsonify({
-            "ok": False,
-            "error": "删除分析表必须显式 confirm=true",
-            "code": "confirmation_required",
-        }), 400
-
-    entries = list(sess._active_entries())
-    source_id = str(payload.get("source_id") or "").strip()
-    if source_id:
-        entry = next((item for item in entries if item.get("id") == source_id), None)
-        if entry is None:
-            return jsonify({
-                "ok": False,
-                "error": "指定数据源不存在或未处于启用状态",
-                "code": "active_source_required",
-            }), 400
-    elif len(entries) == 1:
-        entry = entries[0]
-        source_id = str(entry.get("id") or "")
-    elif not entries:
-        return jsonify({
-            "ok": False,
-            "error": "请先连接并启用一个数据源",
-            "code": "data_source_required",
-        }), 400
-    else:
-        return jsonify({
-            "ok": False,
-            "error": "当前有多个启用数据源，请显式指定 source_id",
-            "code": "source_id_required",
-        }), 400
-
-    from agent.agent import BusinessAgent
-
-    source = entry["source"]
-    agent = BusinessAgent(
-        client=None,
-        model="pfs-delete-api",
-        data_source=source,
-        all_sources=[source],
-        session_id=sid,
-        workspace_id=getattr(sess, "workspace_id", ""),
-        analysis_delete_operation_store=sess,
-    )
-    result = agent._tool_delete_analysis_tables(
-        normalized_names,
-        confirm=True,
-        operation_key=operation_key,
-    )
-    audit = dict(getattr(agent, "_last_analysis_delete_audit", None) or {})
-    status = str(audit.get("status") or "failed")
-    if status in {"conflict", "in_progress"}:
-        return jsonify({
-            "ok": False,
-            "source_id": source_id,
-            "operation_key": operation_key,
-            "result": result,
-            "audit": audit,
-            "idempotent_replay": False,
-        }), 409
-
-    persisted = session_manager.persist(sid)
-    response_status = 200 if status in {"succeeded", "partial"} else 400
-    if not persisted:
-        response_status = 503
-        audit["persistence_warning"] = "operation_audit_not_persisted"
-    return jsonify({
-        "ok": status in {"succeeded", "partial"},
-        "source_id": source_id,
-        "operation_key": operation_key,
-        "result": result,
-        "audit": audit,
-        "idempotent_replay": bool(audit.get("idempotent_replay")),
-        "persisted": persisted,
-    }), response_status
 
 
 @bp.post("/api/session/<sid>/sources/<source_id>/toggle")
