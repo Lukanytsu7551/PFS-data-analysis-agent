@@ -38,6 +38,10 @@ class PfsAgentVerticalSliceTests(unittest.TestCase):
         self.assertIn("pfs_sales", schema)
         self.assertIn("sales_amount", schema)
 
+        detail = self.agent._tool_get_table_detail("pfs_sales")
+        self.assertIn("Table: pfs_sales", detail)
+        self.assertIn("sales_amount", detail)
+
         query = self.agent._tool_query_data(
             "SELECT region, SUM(sales_amount) AS total_sales "
             "FROM pfs_sales GROUP BY region ORDER BY total_sales DESC"
@@ -70,6 +74,51 @@ class PfsAgentVerticalSliceTests(unittest.TestCase):
         self.assertIn("Plotly", profile["charts"][0])
         self.assertIn("总行数：**9**", profile["text"])
         self.assertIn("sales_amount", profile["text"])
+
+    def test_run_analysis_persists_the_declared_result_tables(self):
+        result = self.agent._tool_run_analysis(
+            "Regression",
+            "SELECT month, region, product, sales_amount FROM pfs_sales",
+            "sales_amount",
+            n_deciles=1,
+        )
+        self.assertNotIn("requires 'analysis_name'", result)
+        self.assertIn("本次分析已生成的可查询结果表", result)
+        self.assertIn("analysis_metrics", result)
+        tables = set(self.agent.data_source.list_tables())
+        self.assertTrue(
+            {"analysis_result", "analysis_breakdown", "analysis_metrics"}.issubset(tables)
+        )
+
+    def test_named_analysis_result_mapping_is_normalized(self):
+        with TemporaryDirectory(prefix="pfs-screening-") as raw:
+            path = Path(raw) / "screening.csv"
+            pd.DataFrame(
+                {
+                    "target": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+                    "feature_a": [2, 4, 5, 8, 10, 12, 14, 16, 18, 20],
+                    "feature_b": [10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+                }
+            ).to_csv(path, index=False)
+            source = CSVDataSource(str(path), "screening.csv")
+            agent = BusinessAgent(
+                client=None,
+                model="pfs-screening-test",
+                data_source=source,
+                session_id="pfs-screening-test",
+            )
+            result = agent._tool_run_analysis(
+                "Univariate_Screening",
+                "SELECT target, feature_a, feature_b FROM screening",
+                "target",
+                groupby_column="0.05",
+            )
+            self.assertIn("analysis_metrics", result)
+            self.assertTrue(
+                {"analysis_result", "analysis_breakdown", "analysis_metrics"}.issubset(
+                    set(source.list_tables())
+                )
+            )
 
     def test_invalid_inputs_fail_closed_without_mutating_source(self):
         before = set(self.agent.data_source.list_tables())

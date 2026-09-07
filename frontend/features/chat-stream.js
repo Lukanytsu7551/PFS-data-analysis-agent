@@ -1364,6 +1364,13 @@ const _onJobCanceled = _onJobEvent;
 function _onToolStart(ev, ctx) {
   _cancelTailActivity();
   if (ctx.typing && ctx.typing.parentNode) ctx.typing.remove();
+  // read_tool_result only continues a bounded model-side recovery path. It is
+  // intentionally absent from the visible timeline; query/data-evidence cards
+  // carry the useful user-facing result.
+  if (ev.tool === "read_tool_result") {
+    _hideToolActivity(ctx);
+    return;
+  }
   if (getUiIsland("chat") && getUiIsland("chat").startTool) {
     if (getUiIsland("chat").startTool(ctx.stepsEl, ev)) {
       scrollBottom();
@@ -1519,6 +1526,22 @@ function _onToolAudit(ev, ctx) {
   }
   const tool = ev.tool || "";
   if (!tool) return;
+  if (tool === "read_tool_result") {
+    if (ev.ok === false) {
+      const panel = document.createElement("div");
+      panel.className = "tool-audit tool-audit-error tool-audit-has-summary";
+      const statusLine = document.createElement("span");
+      statusLine.className = "tool-audit-status";
+      statusLine.textContent = "补充查询结果读取失败";
+      const body = document.createElement("div");
+      body.className = "tool-audit-summary";
+      body.textContent = ev.content || "完整查询结果读取失败，请检查当前对话是否仍保留该结果。";
+      panel.append(statusLine, body);
+      ctx.stepsEl.appendChild(panel);
+    }
+    _scheduleTailActivity(ctx);
+    return;
+  }
   const panel = document.createElement(ev.content || ev.summary ? "details" : "div");
   panel.className = ev.ok === false ? "tool-audit tool-audit-error" : "tool-audit";
   panel.dataset.tool = tool;
@@ -1556,6 +1579,10 @@ function _onToolAudit(ev, ctx) {
 }
 
 function _onToolEnd(ev, ctx) {
+  if (ev.tool === "read_tool_result") {
+    _scheduleTailActivity(ctx);
+    return;
+  }
   if (getUiIsland("chat") && getUiIsland("chat").endTool) {
     if (getUiIsland("chat").endTool(ctx.stepsEl, ev)) {
       _scheduleTailActivity(ctx);
@@ -1689,6 +1716,13 @@ function _onTextDelta(ev, ctx) {
   scrollBottom();
 }
 
+function _reasoningParts(content) {
+  return String(content || "")
+    .split(/\n\s*---\s*\n/g)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
 function _buildReasoningBlock(content) {
   const block = document.createElement("div");
   block.className = "reasoning-block";
@@ -1716,8 +1750,10 @@ function _onReasoning(ev, ctx) {
     }
   }
   if (ctx.typing.parentNode) ctx.typing.remove();
-  const block = _buildReasoningBlock(ev.content);
-  ctx.bubbleEl.before(block);
+  const parts = _reasoningParts(ev.content);
+  (parts.length ? parts : [""]).forEach((part) => {
+    ctx.bubbleEl.before(_buildReasoningBlock(part));
+  });
   _showToolActivity(ctx);
   scrollBottom();
 }

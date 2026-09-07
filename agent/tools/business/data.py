@@ -188,6 +188,26 @@ def _execute_analysis(
     if analysis_name == "AB_Test_Analysis":
         kwargs["analysis_options"] = analysis_options or {}
     result = run_fn(**kwargs)
+    # Most analyzers use the historical tuple contract, while the univariate
+    # screening analyzer returns a named table mapping.  Normalize both at the
+    # boundary so the persistence layer never tries to unpack a dict as three
+    # or four positional values.
+    if isinstance(result, dict):
+        import pandas as pd
+
+        output_tables = list(entry.get("output_tables") or [])
+        result_df = result.get("analysis_result")
+        breakdown_df = result.get("analysis_breakdown")
+        extra_name = output_tables[2] if len(output_tables) > 2 else ""
+        extra_df = result.get(extra_name) if extra_name else None
+        if result_df is None:
+            raise RuntimeError(
+                f"Analysis module '{analysis_name}' did not return analysis_result."
+            )
+        if breakdown_df is None:
+            breakdown_df = pd.DataFrame()
+        markdown = str(result.get("markdown") or result.get("text") or "")
+        result = (result_df, breakdown_df, extra_df, markdown)
     if analysis_options and analysis_options.get("evaluation_mode"):
         holdout_evaluation = _build_temporal_holdout_evaluation(
             analysis_name,
@@ -602,8 +622,15 @@ class DataToolsMixin:
         workspace_id = str(getattr(self, "_workspace_id", "") or "")
         if workspace_id and authorization is None:
             roots = []
+        # This helper is deliberately SQL-only.  The outer Agent dispatch
+        # validates the complete call (including run_analysis's
+        # ``analysis_name`` and ``target_column``), while this second guard is
+        # also used by direct/internal callers.  Passing ``run_analysis`` back
+        # into the complete argument validator here used to make every valid
+        # analysis fail with "requires analysis_name" because only ``sql`` was
+        # present in this helper's input.
         return validate_tool_args(
-            tool_name,
+            "query_data",
             {"sql": sql},
             allowed_roots=roots,
             workspace_authorization=authorization,
@@ -813,8 +840,6 @@ class DataToolsMixin:
             if src is None:
                 continue
             fn = getattr(src, "get_table_detail", None)
-            if fn is None:
-                continue
             try:
                 tables = self._execute_source_operation(
                     src,
@@ -829,21 +854,52 @@ class DataToolsMixin:
             if abort_check is not None:
                 abort_check()
             if table_name in tables:
-                result = self._execute_source_operation(
-                    src,
-                    lambda: fn(table_name),
-                    timeout=_remaining_timeout(),
-                    abort_check=abort_check,
-                )
-                if abort_check is not None:
-                    abort_check()
-                return result
+                if callable(fn):
+                    result = self._execute_source_operation(
+                        src,
+                        lambda: fn(table_name),
+                        timeout=_remaining_timeout(),
+                        abort_check=abort_check,
+                    )
+                    if abort_check is not None:
+                        abort_check()
+                    return result
+
+                # File connectors expose bounded previews instead of the SQL
+                # connector's get_table_detail method.  Use that common
+                # contract here so Excel/CSV/Feishu tables are not falsely
+                # reported as missing when they are queryable.
+                preview_fn = getattr(src, "get_preview_table", None)
+                if callable(preview_fn):
+                    preview = self._execute_source_operation(
+                        src,
+                        lambda: preview_fn(table_name, max_rows=1),
+                        timeout=_remaining_timeout(),
+                        abort_check=abort_check,
+                    )
+                    if isinstance(preview, dict) and not preview.get("error"):
+                        columns = [
+                            str(column).strip()
+                            for column in (preview.get("columns") or [])
+                            if str(column).strip()
+                        ]
+                        total_rows = preview.get("total_rows")
+                        row_label = (
+                            f"  ({int(total_rows):,} rows)"
+                            if isinstance(total_rows, (int, float))
+                            and not isinstance(total_rows, bool)
+                            else ""
+                        )
+                        return (
+                            f"Table: {table_name}{row_label}\n"
+                            + "\n".join(f"  {column}" for column in columns)
+                        )
         # Fallback: try primary source regardless
         if abort_check is not None:
             abort_check()
         if self.data_source:
             fn = getattr(self.data_source, "get_table_detail", None)
-            if fn:
+            if callable(fn):
                 result = self._execute_source_operation(
                     self.data_source,
                     lambda: fn(table_name),
@@ -853,6 +909,31 @@ class DataToolsMixin:
                 if abort_check is not None:
                     abort_check()
                 return result
+            preview_fn = getattr(self.data_source, "get_preview_table", None)
+            if callable(preview_fn):
+                preview = self._execute_source_operation(
+                    self.data_source,
+                    lambda: preview_fn(table_name, max_rows=1),
+                    timeout=_remaining_timeout(),
+                    abort_check=abort_check,
+                )
+                if isinstance(preview, dict) and not preview.get("error"):
+                    columns = [
+                        str(column).strip()
+                        for column in (preview.get("columns") or [])
+                        if str(column).strip()
+                    ]
+                    total_rows = preview.get("total_rows")
+                    row_label = (
+                        f"  ({int(total_rows):,} rows)"
+                        if isinstance(total_rows, (int, float))
+                        and not isinstance(total_rows, bool)
+                        else ""
+                    )
+                    return (
+                        f"Table: {table_name}{row_label}\n"
+                        + "\n".join(f"  {column}" for column in columns)
+                    )
         return f"Table '{table_name}' not found in any connected data source."
 
     @staticmethod
@@ -1911,7 +1992,7 @@ class DataToolsMixin:
                 analysis_options,
             )
         except KeyError as exc:
-            return str(exc)
+            return f"Analysis error: {exc}"
         except Exception as exc:
             from agent.errors import AgentRunTimeout
             from agent.jobs import JobCanceled
@@ -1980,7 +2061,7 @@ class DataToolsMixin:
                     analysis_name, df, target_column, groupby_column, n_deciles, analysis_options
                 )
             except KeyError as exc:
-                return str(exc)
+                return f"Analysis error: {exc}"
             except Exception as exc:
                 from agent.errors import AgentRunTimeout
                 from agent.jobs import JobCanceled
@@ -2076,7 +2157,11 @@ class DataToolsMixin:
                 timeout=timeout,
                 abort_check=abort_check,
             )
-            if not breakdown_df.empty:
+            # Materialize declared result tables even when a valid analysis
+            # has no rows for one view (for example, no significant variables
+            # or no ROC points).  The model can then inspect an empty table
+            # instead of receiving a misleading "table does not exist" error.
+            if breakdown_df is not None:
                 self._write_analysis_df_with_budget(
                     breakdown_df,
                     "analysis_breakdown",
@@ -2165,6 +2250,19 @@ class DataToolsMixin:
                 abort_check=abort_check,
             )
 
+        output_tables = [
+            str(table).strip()
+            for table in (entry.get("output_tables") or [])
+            if str(table).strip()
+        ]
+        if output_tables:
+            contract = (
+                "\n\n---\n"
+                "**本次分析已生成的可查询结果表**："
+                + "、".join(f"`{table}`" for table in output_tables)
+                + "。仅可查询上述表名；如需其他结果，请先确认工具返回的结果表清单。"
+            )
+            markdown = contract + (f"\n\n{markdown}" if markdown else "")
         return markdown
 
     def _kmeans_build_labeled(self, sql: str, breakdown_df, *, timeout=None, abort_check=None) -> str:

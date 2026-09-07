@@ -199,7 +199,9 @@ AGENT_TOOLS = [
                 "Run a built-in statistical analysis template on the data.\n"
                 "Steps: (1) call get_schema to know the tables/columns, "
                 "(2) call run_analysis with the appropriate parameters, "
-                "(3) the result is stored as queryable tables — call generate_chart on them.\n\n"
+                "(3) the result is stored as queryable tables — the tool result "
+                "returns the authoritative table list; query or chart only those "
+                "returned names, never assumed names.\n\n"
                 "Available analyses:\n"
                 f"{_ANALYZE_GUIDE}"
             ),

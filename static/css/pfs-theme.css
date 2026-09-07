@@ -2887,13 +2887,15 @@ body.pfs-sidebar-rail-collapsed .sb-footer-actions .pfs-icon-slot,
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  flex: 0 0 auto;
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
   margin: 0;
-  padding: 12px 18px 0;
+  padding: 12px 18px 8px;
   position: relative;
   z-index: 3;
+  overflow: visible;
 }
 .composer-shell .input-card:has(.cmd-badge.show, .skill-badge.show) .input-meta {
   display: flex;
@@ -2902,6 +2904,8 @@ body.pfs-sidebar-rail-collapsed .sb-footer-actions .pfs-icon-slot,
   visibility: hidden;
 }
 .composer-shell .cmd-badge {
+  position: static;
+  flex: 0 1 auto;
   min-width: 0;
   max-width: min(100%, 520px);
   box-sizing: border-box;
@@ -2913,14 +2917,33 @@ body.pfs-sidebar-rail-collapsed .sb-footer-actions .pfs-icon-slot,
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.composer-shell #msg-input {
+  order: 2;
+  flex: 0 0 auto;
+  margin: 0;
+}
+.composer-shell .composer-toolbar {
+  order: 3;
+  flex: 0 0 auto;
+}
 
-.input-area { isolation: isolate; }
+.input-area {
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
 .slash-popup {
   z-index: 150;
-  max-height: min(390px, calc(100vh - 180px));
+  position: static;
+  inset: auto;
+  width: min(980px, 100%);
+  box-sizing: border-box;
+  margin: 0 auto 8px;
+  max-height: max(150px, min(390px, calc(100vh - 300px)));
 }
 .slash-popup-scroll {
-  max-height: min(320px, calc(100vh - 240px));
+  max-height: max(120px, min(320px, calc(100vh - 380px)));
 }
 
 @media (max-width: 760px) {

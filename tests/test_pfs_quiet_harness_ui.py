@@ -8,6 +8,7 @@ TEMPLATE = (ROOT / "templates" / "agent_chat.html").read_text(encoding="utf-8")
 THEME = (ROOT / "static" / "css" / "pfs-theme.css").read_text(encoding="utf-8")
 SIDEBAR = (ROOT / "frontend" / "features" / "sidebar.js").read_text(encoding="utf-8")
 APP = (ROOT / "frontend" / "legacy" / "app.js").read_text(encoding="utf-8")
+APP_SETTINGS = (ROOT / "frontend" / "legacy" / "app_settings.js").read_text(encoding="utf-8")
 I18N = (ROOT / "frontend" / "legacy" / "i18n.js").read_text(encoding="utf-8")
 ICONS = (ROOT / "frontend" / "core" / "icons.js").read_text(encoding="utf-8")
 SKILLS = (ROOT / "frontend" / "features" / "skills.js").read_text(encoding="utf-8")
@@ -215,6 +216,16 @@ class QuietHarnessUiContractTests(unittest.TestCase):
             ".composer-chev,",
             "flex: 0 0 18px",
             "text-overflow: ellipsis",
+            ".composer-shell .input-meta",
+            "padding: 12px 18px 8px",
+            ".composer-shell #msg-input",
+            "order: 2",
+            ".input-area {",
+            "display: flex",
+            ".slash-popup {",
+            "position: static",
+            "width: min(980px, 100%)",
+            "max-height: max(150px, min(390px, calc(100vh - 300px)))",
             "@media (min-width: 961px) and (max-width: 1280px)",
         ):
             self.assertIn(token, THEME)
@@ -330,6 +341,11 @@ class QuietHarnessUiContractTests(unittest.TestCase):
         )
         self.assertGreaterEqual(DASHBOARD.count('class="db-icon"'), 4)
         self.assertNotRegex(DASHBOARD, r"[\U0001F300-\U0001FAFF]")
+
+    def test_gpu_settings_entry_is_available_with_explicit_execution_switch(self):
+        self.assertIn('["gpu", "GPU算力"]', APP_SETTINGS)
+        self.assertNotIn('["gpu", "GPU算力", "规划中"]', APP_SETTINGS)
+        self.assertIn("renderSwitch(uiState.gpuEnabled, setGpuEnabled)", APP_SETTINGS)
 
 
 if __name__ == "__main__":

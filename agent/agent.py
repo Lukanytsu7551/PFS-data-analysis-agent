@@ -419,6 +419,8 @@ _SENSITIVE_TOOL_ARG_KEYS = frozenset({
 
 def _tool_detail_value(value: Any, *, key: str = "") -> Any:
     normalized_key = str(key or "").strip().lower().replace("-", "_")
+    if normalized_key in {"artifact_id", "claim_id"}:
+        return "[内部结果标识已隐藏]"
     if (
         normalized_key in _SENSITIVE_TOOL_ARG_KEYS
         or normalized_key.endswith("_api_key")
@@ -464,6 +466,55 @@ def _format_tool_detail(
     if len(detail) > 30_000:
         detail = detail[:30_000] + "\n…[详情过长，已截断]"
     return detail
+
+
+def _user_tool_audit_content(
+    tool_name: str,
+    data: Any,
+    *,
+    args: Dict[str, Any] | None = None,
+    ok: bool = True,
+) -> str:
+    """Return a user-facing audit summary without leaking recovery internals.
+
+    ``read_tool_result`` is an implementation detail used to continue a turn
+    from a bounded tool preview.  The model needs the recovered text and the
+    opaque artifact id, but the UI only needs to say what was recovered.
+    """
+    if tool_name != "read_tool_result":
+        return str(data)
+    if not ok:
+        return "完整查询结果读取失败，请检查当前对话是否仍保留该结果。"
+
+    payload = data if isinstance(data, dict) else {}
+    query = str(payload.get("query") or (args or {}).get("query") or "")
+    query = " ".join(query.split())[:80]
+    returned = payload.get("returned_chars")
+    total = payload.get("total_chars")
+    match_count = payload.get("match_count")
+    parts = ["已补充读取完整查询结果"]
+    if query:
+        parts.append(f"匹配“{query}”")
+    if match_count is not None:
+        parts.append(f"命中 {match_count} 处")
+    if returned is not None and total is not None:
+        parts.append(f"返回 {returned}/{total} 字符")
+    elif returned is not None:
+        parts.append(f"返回 {returned} 字符")
+    return "，".join(parts) + "。"
+
+
+def _user_tool_audit_summary(
+    tool_name: str,
+    summary: str,
+    data: Any,
+    *,
+    args: Dict[str, Any] | None = None,
+    ok: bool = True,
+) -> str:
+    if tool_name == "read_tool_result":
+        return _user_tool_audit_content(tool_name, data, args=args, ok=ok)
+    return str(summary or "")
 
 
 class BusinessAgent(DataToolsMixin, ExportToolsMixin):
@@ -3982,20 +4033,35 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                                 "[pfs-policy] blocked tool=%s code=%s reason=%s",
                                 name, _pfs_decision.code, _pfs_decision.reason,
                             )
+                            _workspaceless_team_fallback = (
+                                not _workspace_available
+                                and _has_sources
+                                and name in {"agent_delegate", "team_delegate"}
+                                and _pfs_decision.code == "scope_forbidden"
+                                and "workspace:read" in _pfs_decision.reason
+                            )
+                            policy_message = (
+                                f"[PFS_POLICY_BLOCK] {_pfs_decision.code}: "
+                                f"{_pfs_decision.reason}"
+                            )
+                            if _workspaceless_team_fallback:
+                                policy_message += (
+                                    " 当前只有已连接的数据源，没有挂载工作目录；"
+                                    "本轮不能委派 Teams。请不要重试委派，继续使用本地"
+                                    " get_schema、query_data 或 run_analysis 完成分析。"
+                                )
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tc.id,
-                                "content": (
-                                    f"[PFS_POLICY_BLOCK] {_pfs_decision.code}: "
-                                    f"{_pfs_decision.reason}"
-                                ),
+                                "content": policy_message,
                             })
                             yield {"type": "tool_end", "tool": name}
                             yield {
                                 "type": "agent_activity",
                                 "message": "策略门已拦截不满足运行条件的工具调用…",
                             }
-                            _consecutive_errors += 1
+                            if not _workspaceless_team_fallback:
+                                _consecutive_errors += 1
                             continue
                         _pfs_tool_call_counts[name] = _pfs_tool_call_counts.get(name, 0) + 1
                         _pfs_total_tool_calls += 1
@@ -4034,7 +4100,11 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                         "workspace_command":     f"执行受控操作: {args.get('operation', '?')}",
                         "browse_webpage":        f"浏览网页: {args.get('url', '')[:70]}",
                         "configure_hooks":       "配置 Hooks 自动化",
-                        "read_tool_result":      f"读取工具结果: {args.get('artifact_id', '?')}",
+                        "read_tool_result":      (
+                            f"补充查询结果：匹配“{str(args.get('query') or '').strip()[:40]}”"
+                            if str(args.get("query") or "").strip()
+                            else "补充查询结果"
+                        ),
                         "structured_output":     "校验结构化输出",
                         "load_analysis_skill":  f"加载分析技能: {args.get('name', '?')}",
                         "task_create":          f"创建工作区任务: {args.get('title', '?')}",
@@ -4099,12 +4169,19 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                                 "tool": name,
                                 "ok": False,
                                 "error": envelope.error,
-                                "summary": envelope.summary,
-                                "content": str(envelope.data),
+                                "summary": _user_tool_audit_summary(
+                                    name, envelope.summary, envelope.data,
+                                    args=args, ok=False,
+                                ),
+                                "content": _user_tool_audit_content(
+                                    name, envelope.data, args=args, ok=False,
+                                ),
                                 "sources": envelope.sources,
                                 "artifacts": envelope.artifacts,
                                 "elapsed_seconds": envelope.debug.get("elapsed_seconds"),
-                                "args_preview": envelope.debug.get("args_preview", {}),
+                                "args_preview": _tool_detail_value(
+                                    envelope.debug.get("args_preview", {})
+                                ),
                             }
                             messages.append({
                                 "role": "tool",
@@ -4224,12 +4301,19 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                             "tool": name,
                             "ok": envelope.ok,
                             "error": envelope.error,
-                            "summary": envelope.summary,
-                            "content": str(envelope.data),
+                            "summary": _user_tool_audit_summary(
+                                name, envelope.summary, envelope.data,
+                                args=_args, ok=envelope.ok,
+                            ),
+                            "content": _user_tool_audit_content(
+                                name, envelope.data, args=_args, ok=envelope.ok,
+                            ),
                             "sources": envelope.sources,
                             "artifacts": envelope.artifacts,
                             "elapsed_seconds": envelope.debug.get("elapsed_seconds"),
-                            "args_preview": envelope.debug.get("args_preview", {}),
+                            "args_preview": _tool_detail_value(
+                                envelope.debug.get("args_preview", {})
+                            ),
                             "parallel": True,
                         }
                         messages.append({
@@ -5940,8 +6024,6 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                         recoverable_tool_error = _recoverable_team_state
                     else:
                         _check_request_budget()
-                        _result_preview = str(tool_result)[:120].replace("\n", " ")
-                        log.info("[tool] %s OK  %.2fs  result=%r", name, time.monotonic() - _tool_t0, _result_preview)
 
                     envelope = make_tool_result(
                         name,
@@ -5956,6 +6038,22 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                         runtime=self._workspace_runtime(),
                         args=args,
                     )
+                    _result_preview = str(tool_result)[:120].replace("\n", " ")
+                    if envelope.ok:
+                        log.info(
+                            "[tool] %s OK  %.2fs  result=%r",
+                            name,
+                            time.monotonic() - _tool_t0,
+                            _result_preview,
+                        )
+                    else:
+                        log.warning(
+                            "[tool] %s FAILED  %.2fs  error=%s result=%r",
+                            name,
+                            time.monotonic() - _tool_t0,
+                            envelope.error,
+                            _result_preview,
+                        )
                     _remember_turn_tool_result_artifacts(
                         _allowed_tool_result_artifacts,
                         envelope.artifacts,
@@ -5966,12 +6064,19 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                         "tool": name,
                         "ok": envelope.ok,
                         "error": envelope.error,
-                        "summary": envelope.summary,
-                        "content": str(envelope.data),
+                        "summary": _user_tool_audit_summary(
+                            name, envelope.summary, envelope.data,
+                            args=args, ok=envelope.ok,
+                        ),
+                        "content": _user_tool_audit_content(
+                            name, envelope.data, args=args, ok=envelope.ok,
+                        ),
                         "sources": envelope.sources,
                         "artifacts": envelope.artifacts,
                         "elapsed_seconds": envelope.debug.get("elapsed_seconds"),
-                        "args_preview": envelope.debug.get("args_preview", {}),
+                        "args_preview": _tool_detail_value(
+                            envelope.debug.get("args_preview", {})
+                        ),
                         "recovery": {
                             "sql": str(args.get("sql", ""))[:4000]
                             if name in {"query_data", "create_analysis_table"} else "",

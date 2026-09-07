@@ -1146,17 +1146,17 @@ details.tool-audit {
 .hint-chip:active { transform: translateY(0) scale(.97); }
 
 /* ── Reasoning chain ─────────────────────────────────────────── */
-.reasoning-block { background: var(--color-accent-soft); border: 1px solid var(--color-accent-tint);
+.reasoning-block { background: var(--color-primary-soft); border: 1px solid var(--color-primary-tint);
   border-radius: var(--radius-md); margin-bottom: 8px; overflow: hidden; }
 .reasoning-toggle { display: flex; align-items: center; gap: 6px;
-  padding: 7px 12px; cursor: pointer; font-size: var(--fs-sm); color: var(--color-accent);
+  padding: 7px 12px; cursor: pointer; font-size: var(--fs-sm); color: var(--color-primary);
   font-weight: 500; user-select: none; transition: background var(--t-fast); }
-.reasoning-toggle:hover { background: #f3e8ff; }
+.reasoning-toggle:hover { background: #e7edff; }
 .reasoning-arrow { transition: transform .2s; font-size: var(--fs-2xs); display: inline-block; }
 .reasoning-toggle.open .reasoning-arrow { transform: rotate(90deg); }
 .reasoning-body { display: none; padding: 0 12px 10px;
   font-size: var(--fs-sm); color: #6b7280; line-height: 1.65;
-  white-space: pre-wrap; border-top: 1px solid var(--color-accent-tint);
+  white-space: pre-wrap; border-top: 1px solid var(--color-primary-tint);
   max-height: 400px; overflow-y: auto; }
 .reasoning-body.open { display: block; }
 
@@ -2212,8 +2212,8 @@ details.tool-audit {
 
 .reasoning-block {
   max-width: var(--workspace-reading-max);
-  border-color: var(--color-border);
-  background: color-mix(in srgb, var(--color-accent-soft) 38%, var(--color-surface));
+  border-color: var(--color-primary-tint);
+  background: color-mix(in srgb, var(--color-primary-soft) 72%, var(--color-surface));
 }
 
 /* A team-less workspace needs one useful empty state, not two large blank panes. */

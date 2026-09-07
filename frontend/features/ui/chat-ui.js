@@ -985,6 +985,13 @@ export function mountChatUi() {
     return true;
   }
 
+  function _reasoningParts(content) {
+    return String(content || "")
+      .split(/\n\s*---\s*\n/g)
+      .map(part => part.trim())
+      .filter(Boolean);
+  }
+
   function addReasoning(target, content, typing) {
     const msg = _stateFor(target);
     const bubble = _bubbleFor(target);
@@ -993,21 +1000,24 @@ export function mountChatUi() {
     const text = String(content || "");
     msg.reasoning.push(text);
 
-    const block = document.createElement("div");
-    block.className = "reasoning-block";
-    const toggle = document.createElement("div");
-    toggle.className = "reasoning-toggle";
-    toggle.innerHTML = `${svgMarkup("chevronRight", { className: "reasoning-arrow", size: 12 })}<span>${window.t ? t('reasoning_toggle') : "Reasoning"}</span>`;
-    const body = document.createElement("div");
-    body.className = "reasoning-body";
-    body.textContent = text;
-    toggle.addEventListener("click", () => {
-      toggle.classList.toggle("open");
-      body.classList.toggle("open");
+    const parts = _reasoningParts(text);
+    (parts.length ? parts : [""]).forEach(part => {
+      const block = document.createElement("div");
+      block.className = "reasoning-block";
+      const toggle = document.createElement("div");
+      toggle.className = "reasoning-toggle";
+      toggle.innerHTML = `${svgMarkup("chevronRight", { className: "reasoning-arrow", size: 12 })}<span>${window.t ? t('reasoning_toggle') : "Reasoning"}</span>`;
+      const body = document.createElement("div");
+      body.className = "reasoning-body";
+      body.textContent = part;
+      toggle.addEventListener("click", () => {
+        toggle.classList.toggle("open");
+        body.classList.toggle("open");
+      });
+      block.appendChild(toggle);
+      block.appendChild(body);
+      bubble.before(block);
     });
-    block.appendChild(toggle);
-    block.appendChild(body);
-    bubble.before(block);
     // Reasoning has finished rendering, but the backend may still be deciding
     // whether to call another tool. Keep a visible hand-off state until the
     // next tool_start or final output replaces it.
@@ -1160,6 +1170,10 @@ export function mountChatUi() {
     if (!msg) return false;
     msg.tools = msg.tools || [];
     hideToolActivity(target, { delayMs: 0 });
+    // Recovering a bounded tool result is an internal continuation step. Keep
+    // it out of the user-facing timeline; the recovered data is represented by
+    // the query step and its data-evidence panel instead.
+    if (ev.tool === "read_tool_result") return true;
     msg.tools.forEach(item => {
       if (item.kind === "step" && item.markedFinished && !item.finished && !item.finishTimer) {
         _finishToolItem(msg, item);
@@ -1210,6 +1224,7 @@ export function mountChatUi() {
     const msg = _stateFor(target);
     if (!msg || !Array.isArray(msg.tools)) return false;
     const tool = arguments.length > 1 && arguments[1] ? arguments[1].tool : "";
+    if (tool === "read_tool_result") return true;
     const step = msg.tools.find(item =>
       item.kind === "step" &&
       !item.finished &&
@@ -1260,6 +1275,24 @@ export function mountChatUi() {
     const msg = _stateFor(target);
     const tool = ev.tool || "";
     if (!tool) return false;
+    if (tool === "read_tool_result") {
+      if (ev.ok === false) {
+        msg.tools = msg.tools || [];
+        msg.tools.push({
+          id: `panel-${++toolSeq}`,
+          kind: "audit",
+          panelClass: "tool-audit",
+          tool,
+          ok: false,
+          status: "补充查询结果读取失败",
+          content: ev.content || "完整查询结果读取失败，请检查当前对话是否仍保留该结果。",
+          argsTitle: "",
+          open: false,
+        });
+        _renderToolsFor(msg);
+      }
+      return true;
+    }
     const step = _latestStep(msg, tool);
     if (!step) return false;
     if (!step.finished) {

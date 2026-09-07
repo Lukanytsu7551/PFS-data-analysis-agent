@@ -3036,7 +3036,7 @@ const pfs = () => globalThis.PFS;
       ["general", "通用"],
       ["llm", "LLM模型"],
       ["model", "知识库检索"],
-      ["gpu", "GPU算力", "规划中"],
+      ["gpu", "GPU算力"],
       ["memory", "记忆"],
       ["bots", "机器人"],
       ["hooks", "Hooks"],

@@ -546,9 +546,10 @@ Avoid extra round trips for simple queries.
 5. After raw results, add a concise business interpretation grounded in those results.
 For open-ended requests with no metric, dimension or analysis direction, inspect schema
 if needed and then use ask_user.
-6. run_analysis outputs may include analysis_result, analysis_breakdown,
-analysis_metrics, analysis_roc and analysis_elbow. Treat them as result tables only
-after the tool confirms creation."""
+6. run_analysis returns an authoritative list of the result tables created by the
+selected analysis module. Treat only that returned list as queryable: never query all
+of analysis_result / analysis_breakdown / analysis_metrics / analysis_roc /
+analysis_elbow by assumption, and do not query a table that is absent from the list."""
 
 
 WORKSPACE_RULES = """## Workspace and local-file rules
@@ -616,7 +617,13 @@ Each fresh request requires fresh member work; do not present an old mailbox res
 new analysis. Teammates are bounded read-only model calls: they may inspect schema,
 query data, search knowledge and read relevant Workspace files, but cannot mutate data,
 create nested teams or ask the user questions. Include the business goal in assignments
-and use a verifier for important metrics, SQL or conclusions."""
+and use a verifier for important metrics, SQL or conclusions.
+
+When the current run has no mounted Workspace, do not automatically create or delegate
+a team for an upload-only analysis: team delegation is a Workspace-scoped extension in
+that state. Run the analysis locally with the available data tools. If the user
+explicitly requests team delegation, explain that a Workspace must be mounted first
+instead of retrying the blocked delegation."""
 
 
 HOOKS_RULES = """## Hooks configuration rules
@@ -732,7 +739,13 @@ def get_system_prompt(
     if context.needs_output:
         blocks.append(OUTPUT_RULES)
     if context.teams_enabled:
-        blocks.append(TEAMS_RULES)
+        teams_rules = TEAMS_RULES
+        if not context.has_workspace:
+            teams_rules += (
+                "\n\nCurrent run status: no Workspace is mounted. Keep Teams dormant unless "
+                "the user explicitly asks to configure or use it."
+            )
+        blocks.append(teams_rules)
     if context.needs_hooks:
         blocks.append(HOOKS_RULES)
     if context.source_count > 1:
