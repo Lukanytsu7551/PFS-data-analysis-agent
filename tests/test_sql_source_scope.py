@@ -27,6 +27,7 @@ class SqlSourceScopeTests(unittest.TestCase):
                     INSERT INTO private_notes VALUES ('must not be exposed');
                     """
                 )
+            connection.close()
 
             source = SQLDataSource(f"sqlite:///{database}", "PFS SQLite E2E")
             self.assertEqual(["sales_report"], source.set_analysis_tables(["sales_report"]))
@@ -58,6 +59,7 @@ class SqlSourceScopeTests(unittest.TestCase):
             with sqlite3.connect(database) as connection:
                 connection.execute("CREATE TABLE sales_report (value INTEGER)")
                 connection.execute("INSERT INTO sales_report VALUES (1)")
+            connection.close()
 
             source = SQLDataSource(f"sqlite:///{database}", "PFS SQLite Scope")
             source.set_analysis_tables(["sales_report"])
