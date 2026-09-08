@@ -137,6 +137,7 @@ class PfsDurableRecoveryTests(unittest.TestCase):
             self.assertIsNotNone(recovered_canceled["finished_at"])
 
             events = reopened_store.list_events("recovery-session")
+            reopened_store.close()
             recovery_events = {
                 event["job_id"]: event
                 for event in events
