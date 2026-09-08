@@ -75,7 +75,7 @@ def _allowed(filename: str) -> bool:
 def _friendly_conn_error(exc: Exception, service: str) -> str:
     """Translate a low-level connection exception into a user-readable message.
 
-    `service` is a short label like 'Google Sheets' / '外部 API' / '数据库'.
+    `service` is a short label like '外部 API' / '数据库'.
     Falls back to the raw message when the error is not a known network case.
     """
     # Walk the exception cause chain so a wrapped error is still recognised.

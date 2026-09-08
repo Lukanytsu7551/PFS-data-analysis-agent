@@ -369,6 +369,12 @@ _SENSITIVE_TOOL_ARG_KEYS = frozenset({
 
 def _tool_detail_value(value: Any, *, key: str = "") -> Any:
     normalized_key = str(key or "").strip().lower().replace("-", "_")
+    # Artifact identifiers are useful to the model-side recovery path, but
+    # they are implementation details in the user-facing tool timeline.  Keep
+    # them out of expanded details so a long ``tr_...`` value is never mistaken
+    # for an actionable analysis step.
+    if normalized_key in {"artifact_id", "claim_id"}:
+        return "[内部结果标识已隐藏]"
     if (
         normalized_key in _SENSITIVE_TOOL_ARG_KEYS
         or normalized_key.endswith("_api_key")
@@ -2633,7 +2639,7 @@ class BusinessAgent(DataToolsMixin, ExportToolsMixin):
                         "workspace_command":     f"执行受控操作: {args.get('operation', '?')}",
                         "browse_webpage":        f"浏览网页: {args.get('url', '')[:70]}",
                         "configure_hooks":       "配置 Hooks 自动化",
-                        "read_tool_result":      f"读取工具结果: {args.get('artifact_id', '?')}",
+                        "read_tool_result":      "读取补充结果",
                         "structured_output":     "校验结构化输出",
                         "load_analysis_skill":  f"加载分析技能: {args.get('name', '?')}",
                         "task_create":          f"创建工作区任务: {args.get('title', '?')}",

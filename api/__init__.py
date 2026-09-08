@@ -1,6 +1,5 @@
 """Flask application factory."""
 import logging
-import os
 from infrastructure.compat import env
 from urllib.parse import urlsplit
 
@@ -19,20 +18,6 @@ from infrastructure.paths import resource_path
 log = logging.getLogger(__name__)
 
 
-def _start_background_services() -> None:
-    """Start long-lived background services (local only, skipped on Vercel)."""
-    if os.environ.get("VERCEL"):
-        return
-    if not resource_path("MCP").is_dir():
-        log.info("[startup] bundled MCP resources are not installed; continuing without them")
-    else:
-        try:
-            from MCP.flowchart_server import ensure_flowchart_server
-            ensure_flowchart_server()
-        except Exception as e:
-            log.warning("[startup] flowchart server: %s", e)
-
-
 def _run_startup_hooks() -> None:
     try:
         from agent.hooks.models import HookContext
@@ -45,8 +30,6 @@ def _run_startup_hooks() -> None:
 
 
 def create_app() -> Flask:
-    _start_background_services()
-
     app = Flask(
         __name__,
         template_folder=str(resource_path("templates")),

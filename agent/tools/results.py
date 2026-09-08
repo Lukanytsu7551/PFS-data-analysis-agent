@@ -272,7 +272,17 @@ def persist_large_tool_result(
         return raw, None, {"persisted": False, "chars": len(text)}
 
     digest = hashlib.sha256(encoded).hexdigest()
-    artifact_id = f"tr_{digest[:32]}" if deduplicate else f"tr_{uuid.uuid4().hex}"
+    if deduplicate:
+        # ``get_schema`` is content-deduplicated only within the active
+        # session.  A content-only ID can point at a file created by another
+        # session, while the returned metadata correctly names the current
+        # session; the reader then rejects it as a metadata mismatch.  Keep
+        # the deterministic reuse property, but include the session namespace
+        # in the ID so isolated sessions can never share a mutable artifact.
+        dedup_key = f"{session_id}\x00{digest}".encode("utf-8")
+        artifact_id = f"tr_{hashlib.sha256(dedup_key).hexdigest()[:32]}"
+    else:
+        artifact_id = f"tr_{uuid.uuid4().hex}"
     root = _result_root(runtime)
     root.mkdir(parents=True, exist_ok=True)
     target = root / f"{artifact_id}.json"
@@ -383,8 +393,45 @@ def read_tool_result_artifact(
     if str(record.get("workspace_id") or "") != expected_workspace:
         raise ToolResultAccessError("artifact workspace metadata mismatch")
     expected_session = str(artifact.get("session_id") or "")
+    active_session = str(session_id or "")
+    if expected_session and expected_session != active_session:
+        raise ToolResultAccessError("artifact is not available in this session")
+    effective_artifact_id = str(artifact_id)
     if expected_session and expected_session != str(record.get("session_id") or ""):
-        raise ToolResultAccessError("artifact session metadata mismatch")
+        # Before session-scoped IDs were introduced, get_schema used the
+        # content digest as its filename.  An old session could therefore
+        # receive metadata for the current session while the on-disk record
+        # belonged to whichever session wrote the same schema first.  The
+        # current session has already authorized this exact digest; migrate
+        # that legacy content into its session namespace, preserving the
+        # session/workspace checks above.
+        legacy_id = f"tr_{str(record.get('sha256') or '')[:32]}"
+        if str(artifact_id) != legacy_id:
+            raise ToolResultAccessError("artifact session metadata mismatch")
+        _preview, migrated_artifact, _debug = persist_large_tool_result(
+            active_session,
+            str(record.get("tool") or "get_schema"),
+            str(record.get("data") or ""),
+            runtime=runtime,
+            threshold=1,
+            deduplicate=True,
+        )
+        migrated_id = str((migrated_artifact or {}).get("artifact_id") or "")
+        migrated_record = (
+            load_tool_result_artifact(
+                migrated_id,
+                runtime=runtime,
+                workspace_root=workspace_root,
+            )
+            if migrated_id else None
+        )
+        if (
+            migrated_record is None
+            or str(migrated_record.get("session_id") or "") != active_session
+        ):
+            raise ToolResultAccessError("artifact session metadata mismatch")
+        record = migrated_record
+        effective_artifact_id = migrated_id
     expected_sha = str(artifact.get("sha256") or "")
     if expected_sha and expected_sha != str(record.get("sha256") or ""):
         raise ToolResultAccessError("artifact SHA-256 metadata mismatch")
@@ -416,7 +463,7 @@ def read_tool_result_artifact(
                 )
             content = "\n\n".join(snippets)[:bounded_limit]
         return {
-            "artifact_id": artifact_id,
+            "artifact_id": effective_artifact_id,
             "tool": str(record.get("tool") or ""),
             "sha256": str(record.get("sha256") or ""),
             "query": clean_query,
@@ -430,7 +477,7 @@ def read_tool_result_artifact(
     content = text[bounded_offset:bounded_offset + bounded_limit]
     next_offset = bounded_offset + len(content)
     return {
-        "artifact_id": artifact_id,
+        "artifact_id": effective_artifact_id,
         "tool": str(record.get("tool") or ""),
         "sha256": str(record.get("sha256") or ""),
         "offset": bounded_offset,

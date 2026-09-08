@@ -6,7 +6,7 @@
 
 <h1 align="center">PFS Data Analysis Agent</h1>
 
-<p align="center">A local, general-purpose data analysis workbench.</p>
+<p align="center">A local intelligent data analysis workbench.</p>
 
 <p align="center">
   Connect files, databases, or controlled data sources; ask questions in natural language; run bounded analysis; and keep the result trail for review.
@@ -16,10 +16,12 @@
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB.svg" alt="Python 3.10+" />
   <img src="https://img.shields.io/badge/Backend-Flask-111827.svg" alt="Flask" />
   <img src="https://img.shields.io/badge/Frontend-Vanilla%20JS%20%2B%20Vite-646CFF.svg" alt="Vanilla JS and Vite" />
-  <img src="https://img.shields.io/badge/Desktop-macOS%20%2F%20Windows-0f766e.svg" alt="Desktop" />
+  <img src="https://img.shields.io/badge/Desktop-macOS%20%2F%20Windows-0b5bd3.svg" alt="Desktop" />
 </p>
 
 > Current version: `0.1.0-dev`. This is a desktop-first development build focused on local startup and reviewable analysis flows.
+
+PFS supports natural-language analysis, controlled data queries, chart generation, multi-format report delivery, and result-history review.
 
 ## Highlights
 

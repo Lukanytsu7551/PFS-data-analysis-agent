@@ -6,7 +6,7 @@
 
 <h1 align="center">PFS 数据分析 Agent</h1>
 
-<p align="center">一款本地运行的通用数据分析工作台</p>
+<p align="center">一款本地智能分析工作台</p>
 
 <p align="center">
   连接文件、数据库或受控数据源，用自然语言提出问题，执行有边界的分析，生成图表和交付物，并回看每次运行。
@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB.svg" alt="Python 3.10+" />
   <img src="https://img.shields.io/badge/Backend-Flask-111827.svg" alt="Flask" />
   <img src="https://img.shields.io/badge/Frontend-Vanilla%20JS%20%2B%20Vite-646CFF.svg" alt="Vanilla JS and Vite" />
-  <img src="https://img.shields.io/badge/Desktop-macOS%20%2F%20Windows-0f766e.svg" alt="Desktop" />
+  <img src="https://img.shields.io/badge/Desktop-macOS%20%2F%20Windows-0b5bd3.svg" alt="Desktop" />
 </p>
 
 <p align="center">
@@ -29,6 +29,8 @@
 </p>
 
 > 当前版本：`0.1.0-dev`。这是一个以桌面本地运行和可复核分析链路为重点的开发版本。
+
+PFS 支持自然语言分析、受控数据查询、图表生成、多格式报告交付和结果历史回看。
 
 ## 项目亮点
 

@@ -2169,6 +2169,11 @@ function _legacyOutlineBody(ev, ctx, meta) {
 function _onAskUser(ev, ctx) {
   _cancelTailActivity();
   _hideToolActivity(ctx);
+  // Providers should emit one clarification event per turn.  If a
+  // compatibility endpoint or a duplicated stream frame sends the same event
+  // twice, keep one actionable card instead of stacking identical choices and
+  // encouraging repeated submissions.
+  if (state.askUserPending) return;
   // Keep typing-dots visible during ask_user so the user sees a continuous
   // "thinking" state.  _streamChat's finally block will skip cleanup while
   // state.askUserPending is true; the dots are removed when the user submits

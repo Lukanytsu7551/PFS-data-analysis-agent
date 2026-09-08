@@ -1026,6 +1026,7 @@ def chat_stream(sid: str):
         pending_steps: dict[str, list[dict]] = {}
         artifact_signatures: set[str] = set()
         stream_error = ""
+        awaiting_user_input = False
 
         def _append_parent_artifact(artifact: dict) -> None:
             if not isinstance(artifact, dict) or not artifact:
@@ -1245,6 +1246,11 @@ def chat_stream(sid: str):
                         "content": format_feishu_ask_user(event),
                     }
                     etype = "text"
+                elif etype == "ask_user":
+                    # A web ask_user turn is an intentional pause, not an
+                    # empty assistant answer.  The card remains in the
+                    # browser and the next user selection starts a new turn.
+                    awaiting_user_input = True
                 elif etype == "hook_event":
                     runner.append_tracked_event(conversation_job_id, {
                         "type": "hook_event",
@@ -1351,7 +1357,13 @@ def chat_stream(sid: str):
                     _finish_step(tool, ok=not bool(stream_error), error=stream_error)
             completed_normally = True
             final_answer = "".join(collected).strip()
-            if not final_answer:
+            if awaiting_user_input:
+                # Do not write the old fallback text into session history.  It
+                # made a follow-up selection look like a second unrelated
+                # question after reload and polluted the next model prompt.
+                final_answer = ""
+                log.info("[chat] turn paused for user input  sid=%s", sid)
+            elif not final_answer:
                 # Never post a title-only response to Feishu (or retain an
                 # empty assistant turn) when a provider/tool produced no text.
                 # Details remain in server logs; the user gets an actionable,
@@ -1365,11 +1377,17 @@ def chat_stream(sid: str):
                     sid, is_internal_feishu, bool(stream_error),
                 )
             sess.add_user(message)
-            sess.add_assistant(
-                final_answer,
-                reasoning="".join(collected_reasoning),
-                chart_ids=turn_chart_ids,
-            )
+            if awaiting_user_input:
+                # Keep the user turn boundary without creating a visible
+                # assistant bubble or persisting the misleading empty-result
+                # fallback.  The next answer is handled as a fresh turn.
+                sess.add_assistant("")
+            else:
+                sess.add_assistant(
+                    final_answer,
+                    reasoning="".join(collected_reasoning),
+                    chart_ids=turn_chart_ids,
+                )
             if is_internal_feishu:
                 # Web-originated turns already arrive in the browser through
                 # this request's SSE.  Only mobile/desktop Feishu turns need
@@ -1399,7 +1417,7 @@ def chat_stream(sid: str):
                     # completed Web analysis into a failed conversation.
                     log.warning("[feishu] conversation sync failed sid=%s: %s", sid, exc)
                     yield _sse({"type": "feishu_sync", "status": "failed"})
-            if hook_engine and hook_context:
+            if not awaiting_user_input and hook_engine and hook_context:
                 end_context = hook_context.child(
                     event_name="turn_end",
                     final_answer=final_answer,
@@ -1415,11 +1433,16 @@ def chat_stream(sid: str):
                     "answer": final_answer,
                     "step_count": step_count,
                     "chart_ids": turn_chart_ids,
+                    "awaiting_user_input": awaiting_user_input,
                     "activation": activation.to_record(),
                 })
                 if not sess.cancel_requested:
                     try:
-                        if memory_enabled and _schedule_memory_extraction is not None:
+                        if (
+                            not awaiting_user_input
+                            and memory_enabled
+                            and _schedule_memory_extraction is not None
+                        ):
                             _schedule_memory_extraction(
                                 provider=sess.model_provider
                                 or config_manager.get_default_provider()
@@ -1433,7 +1456,11 @@ def chat_stream(sid: str):
                             )
                         # Governance piggybacks on turn end: the 24h lock-file
                         # gate makes this a cheap stat() on most turns.
-                        if memory_enabled and _maybe_schedule_memory_consolidation is not None:
+                        if (
+                            not awaiting_user_input
+                            and memory_enabled
+                            and _maybe_schedule_memory_consolidation is not None
+                        ):
                             _maybe_schedule_memory_consolidation(
                                 provider=sess.model_provider
                                 or config_manager.get_default_provider()

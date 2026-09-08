@@ -288,8 +288,8 @@ def capabilities():
                 "report_export_csv": "implemented_server_recomputed",
             },
             "models": {
-                "deepseek_chat": "verified_local_http",
-                "other_provider_live_runs": "pending",
+                "openai_compatible_catalog": "implemented",
+                "configured_provider_live_run": "environment_dependent",
             },
             "runtime": {
                 "tool_policy_gate": "implemented_first_slice",

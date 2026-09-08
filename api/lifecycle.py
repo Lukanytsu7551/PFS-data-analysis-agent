@@ -1,7 +1,8 @@
 """API endpoints for local artifact lifecycle visibility and cleanup."""
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, send_file
 
 from data.workspace import workspace_manager
+from .state import require_session_ownership
 
 from data.memory_store import (
     list_memory_trash,
@@ -15,6 +16,7 @@ from infrastructure.artifact_lifecycle import (
     lifecycle_report,
     load_lifecycle_settings,
     list_artifact_trash,
+    list_registered_artifacts,
     list_session_trash,
     list_upload_trash,
     prune_missing_registered,
@@ -23,8 +25,10 @@ from infrastructure.artifact_lifecycle import (
     reclaim_expired_upload_trash,
     recycle_registered_artifact,
     recycle_unregistered_artifact,
+    record_artifact_download,
     registered_artifact_reference_preview,
     restore_artifact_trash,
+    resolve_registered_artifact_path,
     save_lifecycle_settings,
     uploads_storage_preview,
     recycle_upload_file,
@@ -102,6 +106,84 @@ def get_workspace_storage_preview():
 @bp.get("/api/lifecycle/artifacts/preview")
 def get_artifact_cleanup_preview():
     return jsonify({"ok": True, "preview": artifact_cleanup_preview()})
+
+
+def _session_delivery_artifacts(sid: str, limit: int) -> list[dict]:
+    """List downloadable results, excluding source uploads from result history."""
+    return [
+        item
+        for item in list_registered_artifacts(session_id=str(sid)[:160], limit=limit)
+        if str(item.get("type") or "") != "upload"
+    ]
+
+
+@bp.get("/api/session/<sid>/lifecycle/artifacts")
+@require_session_ownership
+def get_session_registered_artifacts(sid: str):
+    """List lightweight result history owned by the current session."""
+    try:
+        limit = int(request.args.get("limit", "50"))
+    except ValueError:
+        return jsonify({"ok": False, "error": "limit 必须是整数"}), 400
+    artifacts = _session_delivery_artifacts(sid, limit)
+    for item in artifacts:
+        item["download_url"] = (
+            f"/api/session/{sid}/lifecycle/artifacts/{item['id']}/download"
+        )
+        item["detail_url"] = f"/api/session/{sid}/lifecycle/artifacts/{item['id']}"
+    return jsonify({"ok": True, "artifacts": artifacts})
+
+
+@bp.get("/api/session/<sid>/lifecycle/artifacts/<artifact_id>")
+@require_session_ownership
+def get_session_registered_artifact(sid: str, artifact_id: str):
+    """Read one result's path-free metadata within its owning session."""
+    matches = [
+        item
+        for item in _session_delivery_artifacts(sid, 200)
+        if str(item.get("id") or "") == str(artifact_id)
+    ]
+    if not matches:
+        return jsonify({
+            "ok": False,
+            "error": "产物不存在或不属于此会话",
+            "code": "artifact_not_found",
+        }), 404
+    artifact = matches[0]
+    artifact["download_url"] = (
+        f"/api/session/{sid}/lifecycle/artifacts/{artifact['id']}/download"
+    )
+    artifact["detail_url"] = f"/api/session/{sid}/lifecycle/artifacts/{artifact['id']}"
+    return jsonify({"ok": True, "artifact": artifact})
+
+
+@bp.get("/api/session/<sid>/lifecycle/artifacts/<artifact_id>/download")
+@require_session_ownership
+def download_session_registered_artifact(sid: str, artifact_id: str):
+    """Download an active result only from its owning session/storage root."""
+    matches = [
+        item
+        for item in _session_delivery_artifacts(sid, 200)
+        if str(item.get("id") or "") == str(artifact_id)
+    ]
+    if not matches:
+        return jsonify({
+            "ok": False,
+            "error": "产物不存在或不属于此会话",
+            "code": "artifact_not_found",
+        }), 404
+    resolved = resolve_registered_artifact_path(
+        str(artifact_id), session_id=str(sid)[:160]
+    )
+    if resolved is None:
+        return jsonify({
+            "ok": False,
+            "error": "产物文件已不存在",
+            "code": "artifact_missing",
+        }), 404
+    _, target = resolved
+    record_artifact_download(str(artifact_id))
+    return send_file(target, as_attachment=True, download_name=target.name)
 
 
 @bp.get("/api/lifecycle/uploads/preview")

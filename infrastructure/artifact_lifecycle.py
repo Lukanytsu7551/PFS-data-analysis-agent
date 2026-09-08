@@ -109,6 +109,10 @@ def _session_owned_artifacts(session_id: str, exclude_files: set[Path]) -> list[
     for item in _active_registry_items(items):
         if str(item.get("session_id") or "") != session_id:
             continue
+        # Workspace artifacts belong to the mounted project, not to the chat
+        # archive.  Archiving a session must never move them out of the project.
+        if str(item.get("storage_scope") or "data") == "workspace":
+            continue
         if str(item.get("type") or "") not in {"chart", "export", "report", "upload"}:
             continue
         relative = str(item.get("path") or "")
@@ -430,8 +434,8 @@ def prune_registry_for_paths(relative_paths: set[str]) -> int:
     cleanup sweeper, so they do not linger as "registered but missing".
 
     `relative_paths` are paths relative to the managed data root (separator
-    normalized to `/`). Only entries whose file is gone AND whose status is
-    active are removed; archived/recycled entries are never touched.
+    normalized to `/`). Workspace artifacts are outside that root and are not
+    candidates for this cleanup path.
     """
     normalized = {str(value).replace("\\", "/") for value in (relative_paths or ()) if str(value or "")}
     if not normalized:
@@ -441,6 +445,8 @@ def prune_registry_for_paths(relative_paths: set[str]) -> int:
         removed = 0
         for key, item in list(items.items()):
             if str(item.get("status") or "active") != "active":
+                continue
+            if str(item.get("storage_scope") or "data") != "data":
                 continue
             if str(item.get("path") or "").replace("\\", "/") in normalized:
                 items.pop(key, None)
@@ -458,15 +464,14 @@ def prune_missing_registered() -> dict[str, int]:
     Used to reconcile historical "registered but missing" entries (e.g. files
     removed by earlier cleanup sweeps before registry sync existed).
     """
-    root = data_path().resolve(strict=False)
     with _LOCK:
         items = _load_registry()
         removed: list[str] = []
         for key, item in list(items.items()):
             if str(item.get("status") or "active") != "active":
                 continue
-            relative = str(item.get("path") or "")
-            if not relative or not (root / relative).is_file():
+            target = _artifact_path(item)
+            if target is None or not target.is_file():
                 removed.append(key)
                 items.pop(key, None)
         if removed:
@@ -493,17 +498,42 @@ def register_artifact(
     Unknown or out-of-root files are never registered, so later scans remain
     conservative and cannot be used to delete arbitrary paths.
     """
-    root = data_path().resolve(strict=False)
     resolved = path.resolve(strict=False)
-    if not path.is_file() or not _within(resolved, root):
-        raise ValueError("产物路径不在受控数据目录内")
+    data_root = data_path().resolve(strict=False)
+    storage_root = data_root
+    storage_scope = "data"
+    if not path.is_file():
+        raise ValueError("产物文件不存在")
+    if not _within(resolved, data_root):
+        if not workspace_id:
+            raise ValueError("工作区产物缺少 workspace_id")
+        try:
+            from data.workspace import workspace_manager
+
+            workspace_root = workspace_manager.root_for_workspace(workspace_id)
+        except (OSError, RuntimeError, ValueError):
+            workspace_root = None
+        artifacts_root = (
+            (workspace_root / "artifacts").resolve(strict=False)
+            if workspace_root is not None
+            else None
+        )
+        if (
+            workspace_root is None
+            or artifacts_root is None
+            or not _within(resolved, artifacts_root)
+        ):
+            raise ValueError("产物路径不在受控数据目录或已知工作区 artifacts 目录内")
+        storage_root = workspace_root.resolve(strict=False)
+        storage_scope = "workspace"
     key = artifact_id or uuid.uuid4().hex
     with _LOCK:
         items = _load_registry()
         items[key] = {
             "id": key,
             "type": artifact_type,
-            "path": str(resolved.relative_to(root)),
+            "path": str(resolved.relative_to(storage_root)),
+            "storage_scope": storage_scope,
             "session_id": session_id,
             "workspace_id": workspace_id,
             "created_at": _now(),
@@ -528,6 +558,109 @@ def _safe_relative_path(value: str) -> Path:
     return relative
 
 
+def _artifact_root(item: dict[str, Any]) -> Path | None:
+    """Resolve an artifact's private storage root."""
+    if str(item.get("storage_scope") or "data") != "workspace":
+        return data_path().resolve(strict=False)
+    workspace_id = str(item.get("workspace_id") or "")
+    if not workspace_id:
+        return None
+    try:
+        from data.workspace import workspace_manager
+
+        return workspace_manager.root_for_workspace(workspace_id)
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _artifact_path(item: dict[str, Any]) -> Path | None:
+    """Resolve one registry entry without allowing its storage boundary to escape."""
+    root = _artifact_root(item)
+    if root is None:
+        return None
+    try:
+        relative = _safe_relative_path(str(item.get("path") or ""))
+    except ValueError:
+        return None
+    target = (root / relative).resolve(strict=False)
+    if not _within(target, root):
+        return None
+    if str(item.get("storage_scope") or "data") == "workspace":
+        artifacts_root = (root / "artifacts").resolve(strict=False)
+        if not _within(target, artifacts_root):
+            return None
+    return target
+
+
+def list_registered_artifacts(*, session_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+    """Return lightweight, path-free metadata for active artifacts."""
+    limit = max(1, min(int(limit), 200))
+    with _LOCK:
+        items = list(_load_registry().values())
+    items = [
+        item
+        for item in items
+        if str(item.get("status") or "active") == "active"
+        and (not session_id or str(item.get("session_id") or "") == session_id)
+    ]
+    items.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    result: list[dict[str, Any]] = []
+    for item in items[:limit]:
+        relative = str(item.get("path") or "")
+        suffix = Path(relative).suffix.lower().lstrip(".")
+        artifact_type = str(item.get("type") or "")
+        public_type = suffix if suffix in {"xlsx", "docx", "pptx"} else artifact_type
+        result.append(
+            {
+                "id": str(item.get("id") or ""),
+                "type": public_type,
+                "filename": Path(relative).name,
+                "session_id": str(item.get("session_id") or ""),
+                "workspace_id": str(item.get("workspace_id") or ""),
+                "created_at": str(item.get("created_at") or ""),
+                "size_bytes": int(item.get("size_bytes") or 0),
+                "download_count": int(item.get("download_count") or 0),
+            }
+        )
+    return result
+
+
+def resolve_registered_artifact_path(
+    artifact_id: str, *, session_id: str = ""
+) -> tuple[dict[str, Any], Path] | None:
+    """Resolve one active artifact after checking its owning session."""
+    key = str(artifact_id or "")
+    with _LOCK:
+        item = dict(_load_registry().get(key) or {})
+    if not item or str(item.get("status") or "active") != "active":
+        return None
+    if session_id and str(item.get("session_id") or "") != str(session_id):
+        return None
+    target = _artifact_path(item)
+    if target is None or not target.is_file():
+        return None
+    return item, target
+
+
+def record_artifact_download(artifact_id: str) -> bool:
+    """Increment lightweight download telemetry for an active artifact."""
+    with _LOCK:
+        items = _load_registry()
+        item = items.get(str(artifact_id or ""))
+        if not item or str(item.get("status") or "active") != "active":
+            return False
+        history = list(item.get("download_history") or [])[-49:]
+        history.append(_now())
+        item["download_history"] = history
+        item["download_count"] = len(history)
+        _save_registry(items)
+    _record(
+        "artifact_downloaded",
+        {"artifact_id": str(artifact_id), "download_count": len(history)},
+    )
+    return True
+
+
 def artifact_cleanup_preview() -> dict[str, Any]:
     """List registry-backed artifacts that disappeared and unregistered files."""
     root = data_path().resolve(strict=False)
@@ -535,8 +668,16 @@ def artifact_cleanup_preview() -> dict[str, Any]:
     with _LOCK:
         items = _load_registry()
     active_items = _active_registry_items(items)
-    registered_paths = {str(item.get("path") or "") for item in active_items}
-    missing = [item["id"] for item in active_items if not (root / str(item.get("path") or "")).is_file()]
+    registered_paths = {
+        str(item.get("path") or "")
+        for item in active_items
+        if str(item.get("storage_scope") or "data") == "data"
+    }
+    missing = [
+        item["id"]
+        for item in active_items
+        if (_artifact_path(item) is None or not _artifact_path(item).is_file())
+    ]
     unknown: list[dict[str, Any]] = []
     for kind, directory in managed.items():
         if not directory.exists():
@@ -837,7 +978,8 @@ def registered_artifact_reference_preview() -> dict[str, Any]:
     for item in active_items:
         artifact_id = str(item.get("id") or "")
         relative = str(item.get("path") or "")
-        resolved = root / relative
+        resolved = _artifact_path(item)
+        storage_scope = str(item.get("storage_scope") or "data")
         base = {
             "id": artifact_id,
             "type": str(item.get("type") or ""),
@@ -845,15 +987,16 @@ def registered_artifact_reference_preview() -> dict[str, Any]:
             "size_bytes": int(item.get("size_bytes") or 0),
             "session_id": str(item.get("session_id") or ""),
             "workspace_id": str(item.get("workspace_id") or ""),
+            "storage_scope": storage_scope,
         }
-        if not resolved.is_file():
+        if resolved is None or not resolved.is_file():
             missing.append(base)
             continue
         tokens = _artifact_reference_tokens(item)
         matched = sorted(token for token in tokens if token and token in corpus)
         if matched:
             referenced.append({**base, "matched_tokens": matched[:3]})
-        else:
+        elif storage_scope == "data":
             unreferenced.append(base)
     return {
         "registered": len(active_items),
@@ -923,6 +1066,8 @@ def recycle_registered_artifact(artifact_id: str) -> dict[str, Any]:
         item = items.get(artifact_id)
         if not item or str(item.get("status") or "active") != "active":
             raise FileNotFoundError(artifact_id)
+        if str(item.get("storage_scope") or "data") != "data":
+            raise ValueError("工作区产物请在工作目录中管理")
         artifact_type = str(item.get("type") or "")
         if artifact_type not in {"chart", "export", "report"}:
             raise ValueError("仅支持回收 chart/export/report 已登记产物")

@@ -39,6 +39,12 @@ class RetiredFeatureTests(unittest.TestCase):
             with self.subTest(relative=relative):
                 self.assertFalse((ROOT / relative).exists())
 
+    def test_retired_flowchart_service_is_not_started(self):
+        application_factory = (ROOT / "api" / "__init__.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("flowchart_server", application_factory)
+
     def test_legacy_google_credentials_are_not_returned_or_resaved(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "datasource.json"

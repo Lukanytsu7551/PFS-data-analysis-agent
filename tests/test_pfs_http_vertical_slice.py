@@ -140,12 +140,16 @@ class PfsHttpVerticalSliceTests(unittest.TestCase):
         self.assertFalse(response.get_json()["ok"])
         self.assertIn("format must be json or csv", response.get_json()["error"])
 
-    def test_capabilities_report_real_verified_and_pending_boundaries(self):
+    def test_capabilities_report_implemented_and_environment_boundaries(self):
         response = self.client.get("/api/pfs/capabilities")
         self.assertEqual(200, response.status_code)
         payload = response.get_json()
         self.assertEqual("implemented_server_recomputed", payload["reporting"]["report_export_json"])
-        self.assertEqual("verified_local_http", payload["models"]["deepseek_chat"])
+        self.assertEqual("implemented", payload["models"]["openai_compatible_catalog"])
+        self.assertEqual(
+            "environment_dependent",
+            payload["models"]["configured_provider_live_run"],
+        )
         self.assertIn("other_connectors_pending", payload["runtime"]["external_sources"])
         self.assertNotIn("evidence_ledger", payload)
         self.assertEqual(404, self.client.get("/api/pfs/ledger").status_code)
