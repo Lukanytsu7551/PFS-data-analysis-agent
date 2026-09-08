@@ -515,3 +515,14 @@ class SQLDataSource(DataSource):
             "total_cached": len(self._loaded) + len(self._cache_tables),
             "row_limit": _LAZY_LOAD_ROW_LIMIT,
         }
+
+    def close(self) -> None:
+        """Release DuckDB and SQLAlchemy resources for desktop/test shutdown."""
+        try:
+            self._duck.close()
+        except Exception:
+            pass
+        try:
+            self._engine.dispose()
+        except Exception:
+            pass

@@ -126,6 +126,7 @@ class PfsDurableRecoveryTests(unittest.TestCase):
             first_store._conn.close()
 
             reopened_store = JobsStore(db_path)
+            self.addCleanup(reopened_store.close)
             recovered_failed = reopened_store.get(failed_job["id"])
             recovered_canceled = reopened_store.get(canceled_job["id"])
 

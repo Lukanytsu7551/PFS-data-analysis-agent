@@ -65,6 +65,7 @@ class ArtifactHistoryTests(unittest.TestCase):
                 )
                 self.assertEqual(200, downloaded.status_code)
                 self.assertEqual(b"pfs-artifact", downloaded.data)
+                downloaded.close()
 
                 self.assertEqual(
                     404,

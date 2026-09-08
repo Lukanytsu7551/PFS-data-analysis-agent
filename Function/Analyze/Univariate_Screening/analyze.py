@@ -104,6 +104,12 @@ def _try_scipy(y: np.ndarray, x: np.ndarray) -> Dict[str, float]:
         yv, xv = y[mask], x[mask]
         if len(yv) < _MIN_OBS:
             return {}
+        # scipy changed how a constant regressor is represented across
+        # versions/platforms (some return a finite p-value, others NaN).
+        # A constant candidate has no identifiable slope, so keep the public
+        # result stable and let the caller render it as an unscored variable.
+        if np.all(xv == xv[0]):
+            return {}
         res = _sp.linregress(xv, yv)
         return {
             "intercept":   float(res.intercept),
