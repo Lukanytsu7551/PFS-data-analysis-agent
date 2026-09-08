@@ -30,7 +30,7 @@ from infrastructure.compat import env
 
 from ._utils import (
     _clean_identifier, _dedup_columns, _list_tables, _table_schema_str,
-    _preview_table_dict, _query, _register,
+    _preview_table_dict, _query_with_recovery, _register,
 )
 from .excel import _excel_engine, _parse_sheets_parallel
 from .base import DataSource
@@ -299,11 +299,7 @@ class WorkspacePersistentSource(DataSource):
                 df.columns = _dedup_columns([_clean_identifier(c) for c in df.columns])
                 df = df.dropna(how="all")
                 with acquire_synchronous_workspace_write_lease(self._db_path, self._lease_owner_id):
-                    self._conn.register("_tmp_ws_", df)
-                    self._conn.execute(
-                        f'CREATE OR REPLACE TABLE "{table_name}" AS SELECT * FROM _tmp_ws_'
-                    )
-                    self._conn.unregister("_tmp_ws_")
+                    _register(self._conn, table_name, df)
                 return True
             except Exception as e2:
                 log.error("[WorkspaceDS] CSV %s pandas fallback failed: %s", file_path, e2)
@@ -359,18 +355,10 @@ class WorkspacePersistentSource(DataSource):
                 else:
                     table_name = _clean_identifier(sheet) or f"{base_table_name}_{sheet}"
                 try:
-                    self._conn.register("_tmp_ws_", df)
-                    self._conn.execute(
-                        f'CREATE OR REPLACE TABLE "{table_name}" AS SELECT * FROM _tmp_ws_'
-                    )
-                    self._conn.unregister("_tmp_ws_")
+                    _register(self._conn, table_name, df)
                     registered.append(table_name)
                 except Exception as e:
                     log.error("[WorkspaceDS] register sheet %s failed: %s", sheet, e)
-                    try:
-                        self._conn.unregister("_tmp_ws_")
-                    except Exception:
-                        pass
 
         log.info("[WorkspaceDS] registered Excel %s → tables=%s", file_path, registered)
         return registered
@@ -394,7 +382,7 @@ class WorkspacePersistentSource(DataSource):
 
     def execute_query(self, sql: str) -> Tuple[pd.DataFrame, str]:
         with self._db_lock:
-            return _query(self._conn, sql)
+            return _query_with_recovery(self._conn, sql, self.list_tables())
 
     def get_preview(self) -> List[dict]:
         result = []

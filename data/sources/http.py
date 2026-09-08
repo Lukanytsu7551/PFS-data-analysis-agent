@@ -10,7 +10,7 @@ import requests
 
 from ._utils import (
     _clean_identifier, _dedup_columns, _list_tables, _new_conn,
-    _preview_table_dict, _query, _register, _table_schema_str,
+    _preview_table_dict, _query_with_recovery, _register, _table_schema_str,
 )
 from .base import DataSource
 
@@ -80,7 +80,7 @@ class HTTPAPIDataSource(DataSource):
         return _list_tables(self._conn)
 
     def execute_query(self, sql: str) -> Tuple[pd.DataFrame, str]:
-        return _query(self._conn, sql)
+        return _query_with_recovery(self._conn, sql, self.list_tables())
 
     def create_analysis_table(self, sql: str, table_name: str = "analysis_data", _df=None) -> str:
         if _df is not None:

@@ -2,6 +2,7 @@
 import { $, state } from "../core/runtime.js";
 import { getUiIsland } from "../core/ui-registry.js";
 import { iconSpan } from "../core/icons.js";
+import { setPickerBackdrop } from "../core/picker-overlay.js";
 
 const pfs = () => globalThis.PFS;
 
@@ -208,34 +209,90 @@ const pfs = () => globalThis.PFS;
     });
   }
 
+  function _limitPickerList(picker, list, maxHeight) {
+    if (!picker || !list || !Number.isFinite(maxHeight)) return;
+    const pickerStyle = getComputedStyle(picker);
+    const listStyle = getComputedStyle(list);
+    const verticalPadding = (parseFloat(pickerStyle.paddingTop) || 0)
+      + (parseFloat(pickerStyle.paddingBottom) || 0);
+    const listPadding = (parseFloat(listStyle.paddingTop) || 0)
+      + (parseFloat(listStyle.paddingBottom) || 0);
+    const headerHeight = picker.querySelector(".skill-picker-head")?.offsetHeight || 0;
+    const searchHeight = picker.querySelector(".skill-picker-search")?.offsetHeight || 0;
+    const available = Math.floor(maxHeight - verticalPadding - listPadding - headerHeight - searchHeight - 2);
+    list.style.maxHeight = `${Math.max(1, available)}px`;
+  }
+
   function _positionModelPicker(trigger) {
     const picker = $("model-picker");
     if (!picker || !trigger) return;
+
     const rect = trigger.getBoundingClientRect();
+    const viewportWidth = Math.max(280, window.innerWidth || document.documentElement.clientWidth);
+    const viewportHeight = Math.max(240, window.innerHeight || document.documentElement.clientHeight);
+    const viewportGap = 12;
+    const gap = 10;
     const width = Math.min(460, Math.max(320, rect.width + 160));
-    const actualWidth = Math.min(width, window.innerWidth - 24);
-    picker.style.width = `${actualWidth}px`;
     const sidebarTrigger = trigger.id === "model-picker-trigger-sidebar";
     const sidebarRight = document.querySelector("#app-sidebar .sb-main")
       ?.getBoundingClientRect?.().right || 0;
-    const preferredLeft = sidebarTrigger
-      ? Math.max(rect.right + 10, sidebarRight + 12)
+
+    let preferredLeft = sidebarTrigger
+      ? Math.max(rect.right + gap, sidebarRight + gap)
       : rect.left;
-    picker.style.left = `${Math.max(12, Math.min(preferredLeft, window.innerWidth - actualWidth - 12))}px`;
-    const gap = 8;
-    const pickerHeight = Math.min(picker.offsetHeight || picker.scrollHeight || 320, window.innerHeight - 24);
+    let actualWidth = Math.min(width, viewportWidth - viewportGap * 2);
     if (sidebarTrigger) {
-      picker.style.top = `${Math.max(12, Math.min(rect.top, window.innerHeight - pickerHeight - 12))}px`;
-      picker.style.bottom = "auto";
+      // Keep a sidebar-launched picker entirely in the main canvas. On narrow
+      // windows it becomes narrower instead of sliding back over the status rail.
+      const availableRight = viewportWidth - preferredLeft - viewportGap;
+      if (availableRight >= 240) actualWidth = Math.min(actualWidth, availableRight);
+      else {
+        preferredLeft = Math.max(viewportGap, sidebarRight + 8);
+        actualWidth = Math.max(220, viewportWidth - preferredLeft - viewportGap);
+      }
+    }
+    const left = Math.max(viewportGap, Math.min(preferredLeft, viewportWidth - actualWidth - viewportGap));
+    picker.style.right = "auto";
+    picker.style.bottom = "auto";
+    picker.style.width = `${Math.round(actualWidth)}px`;
+    picker.style.left = `${Math.round(left)}px`;
+
+    const composer = sidebarTrigger
+      ? null
+      : trigger.closest(".composer-shell") || document.querySelector(".composer-shell");
+    const composerRect = composer?.getBoundingClientRect?.() || null;
+    const boundaryTop = composerRect
+      ? Math.max(viewportGap, composerRect.top - gap)
+      : Math.max(viewportGap, rect.top - gap);
+    const availableAbove = Math.max(1, boundaryTop - viewportGap);
+    const availableBelow = Math.max(1, viewportHeight - (composerRect?.bottom || rect.bottom) - viewportGap);
+    const maxPanelHeight = Math.min(460, viewportHeight - viewportGap * 2);
+
+    // The picker is measured after its width is known. Reserve a complete
+    // slot first, then cap the scrollable list to that slot so the panel never
+    // covers the writing surface or the sidebar status block.
+    const placeBelow = !sidebarTrigger
+      && availableAbove < 160
+      && availableBelow > availableAbove;
+    const slotHeight = sidebarTrigger
+      ? viewportHeight - viewportGap * 2
+      : (placeBelow ? availableBelow : availableAbove);
+    const constrainedHeight = Math.max(1, Math.min(maxPanelHeight, slotHeight));
+    picker.style.maxHeight = `${Math.round(constrainedHeight)}px`;
+    _limitPickerList(picker, $("model-picker-list"), constrainedHeight);
+
+    const pickerHeight = Math.min(
+      picker.getBoundingClientRect().height || picker.scrollHeight || 320,
+      maxPanelHeight,
+    );
+    if (sidebarTrigger) {
+      picker.style.top = `${Math.max(viewportGap, Math.min(rect.top, viewportHeight - pickerHeight - viewportGap))}px`;
       return;
     }
-    const below = rect.bottom + gap;
-    if (below + pickerHeight <= window.innerHeight) {
-      picker.style.top = `${below}px`;
-      picker.style.bottom = "auto";
+    if (!placeBelow) {
+      picker.style.top = `${Math.max(viewportGap, boundaryTop - pickerHeight)}px`;
     } else {
-      picker.style.top = "auto";
-      picker.style.bottom = `${Math.max(12, window.innerHeight - rect.top + gap)}px`;
+      picker.style.top = `${Math.min(viewportHeight - pickerHeight - viewportGap, (composerRect?.bottom || rect.bottom) + gap)}px`;
     }
   }
 
@@ -253,7 +310,13 @@ const pfs = () => globalThis.PFS;
     renderModelPicker();
     const picker = $("model-picker");
     picker?.classList.add("open");
-    if (picker) picker.style.visibility = "hidden";
+    picker?.setAttribute("aria-modal", "true");
+    setPickerBackdrop(true);
+    if (picker) {
+      picker.style.visibility = "hidden";
+      picker.style.removeProperty("max-height");
+      $("model-picker-list")?.style.removeProperty("max-height");
+    }
     _positionModelPicker(button);
     if (picker) picker.style.visibility = "";
     _syncModelLabels($("model-sel")?.value || "");
@@ -263,6 +326,9 @@ const pfs = () => globalThis.PFS;
   function closeModelPicker() {
     $("model-picker")?.classList.remove("open");
     $("model-picker")?.removeAttribute("style");
+    $("model-picker-list")?.style.removeProperty("max-height");
+    $("model-picker")?.removeAttribute("aria-modal");
+    setPickerBackdrop(false);
     for (const id of ["model-picker-trigger", "model-picker-trigger-sidebar"]) {
       $(id)?.setAttribute("aria-expanded", "false");
     }

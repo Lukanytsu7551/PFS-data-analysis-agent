@@ -10,6 +10,7 @@ import pandas as pd
 from data.sources.csv import CSVDataSource
 from data.sources.excel import ExcelDataSource
 from data.sources.http import HTTPAPIDataSource
+from data.sources.workspace_persistent import WorkspacePersistentSource
 
 
 FIXTURE = Path(__file__).resolve().parents[1] / "data" / "fixtures" / "pfs_sales.csv"
@@ -103,6 +104,59 @@ class PfsDataSourceTests(unittest.TestCase):
             self.assertEqual(70, int(frame.iloc[0]["total_sales"]))
             self.assertEqual(2, source.get_preview()[0]["total_rows"])
             self.assertIn("Orders", source.get_schema())
+
+    def test_excel_numeric_filename_alias_and_text_measures_are_queryable(self):
+        """File-derived names and numeric-looking Excel text must not break SQL."""
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "25年单边流_24年单边流入.xlsx"
+            with pd.ExcelWriter(path, engine="openpyxl") as writer:
+                pd.DataFrame(
+                    {
+                        "设置自定义人数": ["10", "20"],
+                        "设置固定人数": ["20", "20"],
+                    }
+                ).to_excel(writer, sheet_name="Sheet1", index=False)
+
+            source = ExcelDataSource(str(path), path.name)
+            physical_table = "Sheet1"
+            self.assertEqual([physical_table], source.list_tables())
+            frame, error = source.execute_query(
+                'SELECT ROUND(设置自定义人数 * 100.0 / '
+                'NULLIF(设置固定人数 + 设置自定义人数, 0), 2) AS ratio '
+                'FROM "Sheet1" ORDER BY ratio'
+            )
+            self.assertEqual("", error)
+            self.assertEqual([33.33, 50.0], frame["ratio"].tolist())
+
+    def test_existing_workspace_text_measures_are_recovered_without_mutation(self):
+        """Older persisted workspaces with VARCHAR measures get a safe retry."""
+        with TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "workspace.duckdb"
+            import duckdb
+
+            connection = duckdb.connect(str(db_path))
+            connection.execute(
+                'CREATE TABLE "_25年单边流_24年单边流入" '
+                '("设置自定义人数" VARCHAR, "设置固定人数" VARCHAR)'
+            )
+            connection.execute(
+                'INSERT INTO "_25年单边流_24年单边流入" VALUES (\'10\', \'20\'), (\'20\', \'20\')'
+            )
+            connection.close()
+
+            source = WorkspacePersistentSource(str(db_path))
+            try:
+                frame, error = source.execute_query(
+                    'SELECT ROUND(设置自定义人数 * 100.0 / '
+                    'NULLIF(设置固定人数 + 设置自定义人数, 0), 2) AS ratio '
+                    'FROM "25年单边流_24年单边流入" ORDER BY ratio'
+                )
+                self.assertEqual("", error)
+                self.assertEqual([33.33, 50.0], frame["ratio"].tolist())
+                schema = source.get_schema()
+                self.assertIn("VARCHAR", schema)
+            finally:
+                source.close()
 
     def test_http_json_and_csv_are_loaded_from_local_fixture_server(self):
         json_source = HTTPAPIDataSource(f"{self.base_url}/sales.json", display_name="远程销售 JSON")

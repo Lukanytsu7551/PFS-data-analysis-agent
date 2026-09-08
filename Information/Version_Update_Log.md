@@ -15,7 +15,7 @@
 
 - macOS 本地启动、核心对话、CSV/XLSX 分析、图表、交付物、任务和工作区基础链路已有本地证据。
 - 代码、前端格式、静态检查和离线回归测试按开发门禁执行。
-- 历史 CI run `34029259331` 验证过提交 `b2a6393` 的 Windows x64、macOS Apple Silicon、Windows 干净源码安装和两端打包；当前工作区已进入新的运行基线收口，新的提交和同 SHA CI 尚待生成。
+- CI run `34191614452` 已验证远端发布候选树 `ae8142c0a6754ed7635eea9ffece550979833d01` 的 Windows x64、macOS Apple Silicon、Windows 干净源码安装、前端质量和两端打包；最新 SQL 兼容修复已纳入当前发布切片，仍需新的同 SHA CI 后再生成正式 Release。
 
 ### 当前边界
 

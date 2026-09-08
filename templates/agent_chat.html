@@ -672,6 +672,11 @@
 
     <!-- Input area -->
     <div class="input-area">
+      <!-- Picker scrim: keeps the active picker visually separate from the
+           message stream and prevents clicks through to another control. -->
+      <button class="pfs-picker-backdrop" id="pfs-picker-backdrop" type="button"
+              data-action="closePickers" aria-label="关闭选择器" aria-hidden="true" inert></button>
+
       <!-- Model picker: custom surface so it matches the Skill picker. -->
       <div class="model-picker" id="model-picker" role="dialog" aria-label="选择模型">
         <div class="skill-picker-head">

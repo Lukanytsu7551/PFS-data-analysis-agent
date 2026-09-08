@@ -7,6 +7,7 @@ intentionally underscore-prefixed and not re-exported — concrete sources
 import them directly.
 """
 import datetime
+import hashlib
 import logging
 import re
 from typing import List, Optional, Tuple
@@ -19,6 +20,11 @@ log = logging.getLogger(__name__)
 
 
 # ── Identifier / column helpers ──────────────────────────────────────────────
+
+
+def _quote_identifier(name: str) -> str:
+    """Quote a DuckDB identifier without changing its spelling."""
+    return '"' + str(name).replace('"', '""') + '"'
 
 def _clean_identifier(raw: str) -> str:
     """Turn an arbitrary string into a safe DuckDB/SQL identifier."""
@@ -44,6 +50,110 @@ def _dedup_columns(cols: List[str]) -> List[str]:
             seen[c] += 1
             result.append(f"{c}_{seen[c]}")
     return result
+
+
+def _resolve_table_name(name: str, available_tables: List[str]) -> str | None:
+    """Resolve a model-facing table name to the registered table spelling.
+
+    Imported files use :func:`_clean_identifier` for DuckDB table names.  A
+    filename such as ``25年单边流.xlsx`` therefore becomes
+    ``_25年单边流``.  Models and users may still refer to the display spelling
+    without that leading underscore.  Only an exact, case-insensitive, or
+    normalized match is accepted; arbitrary fuzzy matching is deliberately
+    avoided because table names are part of the SQL authorization boundary.
+    """
+    requested = str(name or "").strip()
+    if not requested:
+        return None
+    tables = [str(table) for table in (available_tables or []) if str(table)]
+    exact = next((table for table in tables if table == requested), None)
+    if exact:
+        return exact
+    folded = requested.casefold()
+    insensitive = next((table for table in tables if table.casefold() == folded), None)
+    if insensitive:
+        return insensitive
+    normalized = _clean_identifier(requested).casefold()
+    return next((table for table in tables if table.casefold() == normalized), None)
+
+
+def _parse_local_sql_tables(sql: str):
+    """Return a sqlglot tree and its physical table nodes when parseable."""
+    try:
+        import sqlglot
+        import sqlglot.expressions as exp
+
+        parsed = sqlglot.parse_one(
+            str(sql or ""), dialect="duckdb", error_level=sqlglot.ErrorLevel.RAISE
+        )
+        cte_names = {
+            str(cte.alias_or_name).strip().casefold()
+            for cte in parsed.find_all(exp.CTE)
+            if cte.alias_or_name
+        }
+        nodes = []
+        for node in parsed.find_all(exp.Table):
+            name = str(node.name or "").strip()
+            if not name or name.casefold() in cte_names:
+                continue
+            # Local imported tables are unqualified.  Leave qualified names
+            # untouched; their catalog/dialect semantics must be preserved.
+            if str(getattr(node, "db", "") or "").strip() or str(
+                getattr(node, "catalog", "") or ""
+            ).strip():
+                continue
+            nodes.append(node)
+        return parsed, nodes
+    except Exception as exc:
+        log.debug("[sql] table rewrite skipped: %s", exc)
+        return None, []
+
+
+def _rewrite_sql_table_aliases(sql: str, available_tables: List[str]) -> str:
+    """Rewrite only safely-resolvable local table aliases in *sql*.
+
+    This fixes normalized filenames (for example ``25...`` → ``_25...``)
+    before execution while leaving unknown identifiers unchanged so the normal
+    SQL error and scope checks remain visible to the caller.
+    """
+    parsed, nodes = _parse_local_sql_tables(sql)
+    if parsed is None:
+        return sql
+
+    changed = False
+    try:
+        from sqlglot import expressions as exp
+
+        for node in nodes:
+            resolved = _resolve_table_name(node.name, available_tables)
+            if resolved and resolved != node.name:
+                node.set("this", exp.Identifier(this=resolved, quoted=True))
+                changed = True
+        return parsed.sql(dialect="duckdb") if changed else sql
+    except Exception as exc:
+        log.debug("[sql] table alias rewrite failed: %s", exc)
+        return sql
+
+
+def _rewrite_sql_table_refs(sql: str, table_map: dict[str, str]) -> str:
+    """Replace parsed local table references using an exact table map."""
+    parsed, nodes = _parse_local_sql_tables(sql)
+    if parsed is None:
+        return sql
+    folded_map = {str(key).casefold(): str(value) for key, value in table_map.items()}
+    changed = False
+    try:
+        from sqlglot import expressions as exp
+
+        for node in nodes:
+            target = folded_map.get(str(node.name or "").casefold())
+            if target and target != node.name:
+                node.set("this", exp.Identifier(this=target, quoted=True))
+                changed = True
+        return parsed.sql(dialect="duckdb") if changed else sql
+    except Exception as exc:
+        log.debug("[sql] table reference rewrite failed: %s", exc)
+        return sql
 
 
 def _detect_header_row(rows: list, scan: int = 10) -> int:
@@ -224,9 +334,171 @@ def _coerce_problem_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+_LEADING_ZERO_NUMBER = re.compile(r"^[+-]?0\d+(?:\.\d+)?$")
+
+
+def _is_numeric_text_series(series: pd.Series) -> bool:
+    """Return whether a text series is safely usable as a numeric measure.
+
+    Numeric-looking identifiers such as ``00123`` are intentionally kept as
+    text.  Percent strings and mixed values are also left untouched because
+    their business meaning cannot be inferred safely at the data-source layer.
+    """
+    if series is None:
+        return False
+    values = series.dropna().astype(str).str.strip()
+    values = values[values.ne("")]
+    if values.empty:
+        return False
+    if values.str.contains(r"%", regex=True).any():
+        return False
+    if values.map(lambda value: bool(_LEADING_ZERO_NUMBER.fullmatch(value))).any():
+        return False
+    numeric = pd.to_numeric(values.str.replace(",", "", regex=False), errors="coerce")
+    return bool(numeric.notna().all())
+
+
+def _promote_numeric_text_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Promote unambiguous numeric text before registering a DataFrame."""
+    df = df.copy()
+    for column in df.columns:
+        dtype = df[column].dtype
+        if not (dtype == object or pd.api.types.is_string_dtype(dtype)):
+            continue
+        non_null = df[column].dropna()
+        if non_null.empty or not _is_numeric_text_series(df[column]):
+            continue
+        cleaned = df[column].astype("string").str.strip().str.replace(",", "", regex=False)
+        df[column] = pd.to_numeric(cleaned, errors="coerce")
+    return df
+
+
+def _numeric_text_columns(
+    conn: duckdb.DuckDBPyConnection, table: str, sample_size: int = 200
+) -> list[str]:
+    """Find VARCHAR columns that contain only unambiguous numeric text."""
+    try:
+        description = conn.execute(f"DESCRIBE {_quote_identifier(table)}").fetchall()
+    except Exception:
+        return []
+
+    candidates: list[str] = []
+    for row in description:
+        column = str(row[0])
+        type_name = str(row[1]).upper()
+        if not re.search(r"\b(?:VARCHAR|TEXT|STRING|CHAR)\b", type_name):
+            continue
+        try:
+            frame = conn.execute(
+                f"SELECT {_quote_identifier(column)} FROM {_quote_identifier(table)} "
+                f"LIMIT {int(sample_size)}"
+            ).df()
+        except Exception:
+            continue
+        if not frame.empty and _is_numeric_text_series(frame.iloc[:, 0]):
+            candidates.append(column)
+    return candidates
+
+
+def _referenced_local_tables(sql: str, available_tables: List[str]) -> list[str]:
+    """Return registered physical tables referenced by a local SQL statement."""
+    _parsed, nodes = _parse_local_sql_tables(sql)
+    result: list[str] = []
+    seen: set[str] = set()
+    for node in nodes:
+        resolved = _resolve_table_name(node.name, available_tables)
+        if resolved and resolved not in seen:
+            seen.add(resolved)
+            result.append(resolved)
+    return result
+
+
+def _is_numeric_binding_error(error: str) -> bool:
+    """Recognize DuckDB's text-vs-number binding error for a safe retry."""
+    text = str(error or "").lower()
+    return "varchar" in text and (
+        "no function matches" in text
+        or "cannot multiply" in text
+        or "cannot add" in text
+        or "cannot divide" in text
+        or "cannot subtract" in text
+    )
+
+
+def _query_with_recovery(
+    conn: duckdb.DuckDBPyConnection,
+    sql: str,
+    available_tables: List[str] | None = None,
+) -> Tuple[pd.DataFrame, str]:
+    """Execute local SQL with two conservative compatibility retries.
+
+    First, normalize imported filename aliases to their registered table names.
+    If DuckDB reports a numeric expression over VARCHAR data, build temporary
+    views that cast only unambiguous numeric-text columns to DOUBLE and retry.
+    The source table is never mutated, and all temporary views are dropped
+    before returning.
+    """
+    tables = [str(table) for table in (available_tables or []) if str(table)]
+    normalized_sql = _rewrite_sql_table_aliases(sql, tables)
+    frame, error = _query(conn, normalized_sql)
+    if not error or not _is_numeric_binding_error(error):
+        return frame, error
+
+    referenced = _referenced_local_tables(normalized_sql, tables)
+    if not referenced:
+        return frame, error
+
+    view_map: dict[str, str] = {}
+    views: list[str] = []
+    query_fingerprint = hashlib.sha1(normalized_sql.encode("utf-8")).hexdigest()[:12]
+    try:
+        for index, table in enumerate(referenced):
+            numeric_columns = _numeric_text_columns(conn, table)
+            if not numeric_columns:
+                continue
+            view_name = f"_pfs_numeric_text_{query_fingerprint}_{index}"
+            expressions = []
+            numeric_set = set(numeric_columns)
+            for row in conn.execute(f"DESCRIBE {_quote_identifier(table)}").fetchall():
+                column = str(row[0])
+                identifier = _quote_identifier(column)
+                if column in numeric_set:
+                    expressions.append(f"TRY_CAST({identifier} AS DOUBLE) AS {identifier}")
+                else:
+                    expressions.append(identifier)
+            conn.execute(
+                f"CREATE OR REPLACE TEMP VIEW {_quote_identifier(view_name)} AS "
+                f"SELECT {', '.join(expressions)} FROM {_quote_identifier(table)}"
+            )
+            view_map[table] = view_name
+            views.append(view_name)
+
+        if not view_map:
+            return frame, error
+        retry_sql = _rewrite_sql_table_refs(normalized_sql, view_map)
+        retry_frame, retry_error = _query(conn, retry_sql)
+        if not retry_error:
+            log.info("[sql] retried numeric-text expression successfully: tables=%s", referenced)
+            return retry_frame, ""
+        return retry_frame, retry_error
+    except Exception as exc:
+        log.debug("[sql] numeric-text retry skipped: %s", exc)
+        return frame, error
+    finally:
+        for view_name in views:
+            try:
+                conn.execute(f"DROP VIEW IF EXISTS {_quote_identifier(view_name)}")
+            except Exception:
+                pass
+
+
 def _register(conn: duckdb.DuckDBPyConnection, table: str, df: pd.DataFrame):
     """Zero-copy register a DataFrame as a DuckDB table (no INSERT at all)."""
     df = _sanitize_df(df)
+    # Excel/CSV exports sometimes store measures as text.  Promote only
+    # unambiguous numeric columns; identifiers with leading zeroes and mixed
+    # or percent values remain text.
+    df = _promote_numeric_text_columns(df)
     # 将所有 object 列强制转为 str/None，防止 DuckDB 把含空格的数字串
     # 误判为 DOUBLE 并尝试 cast，导致 InvalidInputException。
     df = _coerce_problem_columns(df)

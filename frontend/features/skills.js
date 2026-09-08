@@ -1,6 +1,7 @@
 // Independent Skill picker. Skills never enter the slash-command catalog.
 import { $, state } from "../core/runtime.js";
 import { iconSpan, svgMarkup } from "../core/icons.js";
+import { setPickerBackdrop } from "../core/picker-overlay.js";
 
 const pfs = () => globalThis.PFS;
   const SKILLS = [];
@@ -274,9 +275,63 @@ const pfs = () => globalThis.PFS;
     if (event.key === "Escape") { event.preventDefault(); close(); return; }
   }
 
+  function _limitComposerPickerList(picker, list, maxHeight) {
+    if (!picker || !list || !Number.isFinite(maxHeight)) return;
+    const pickerStyle = getComputedStyle(picker);
+    const listStyle = getComputedStyle(list);
+    const verticalPadding = (parseFloat(pickerStyle.paddingTop) || 0)
+      + (parseFloat(pickerStyle.paddingBottom) || 0);
+    const listPadding = (parseFloat(listStyle.paddingTop) || 0)
+      + (parseFloat(listStyle.paddingBottom) || 0);
+    const headerHeight = picker.querySelector(".skill-picker-head")?.offsetHeight || 0;
+    const searchHeight = picker.querySelector(".skill-picker-search")?.offsetHeight || 0;
+    const available = Math.floor(maxHeight - verticalPadding - listPadding - headerHeight - searchHeight - 2);
+    list.style.maxHeight = `${Math.max(1, available)}px`;
+  }
+
+  function _positionComposerSkillPicker(anchor) {
+    const picker = $("composer-skill-picker");
+    if (!picker || !anchor) return;
+
+    const rect = anchor.getBoundingClientRect();
+    const viewportWidth = Math.max(280, window.innerWidth || document.documentElement.clientWidth);
+    const viewportHeight = Math.max(240, window.innerHeight || document.documentElement.clientHeight);
+    const viewportGap = 12;
+    const gap = 10;
+    const width = Math.min(390, Math.max(280, rect.width + 150), viewportWidth - viewportGap * 2);
+    const left = Math.max(viewportGap, Math.min(rect.left, viewportWidth - width - viewportGap));
+    const shell = document.querySelector(".composer-shell");
+    const shellRect = shell?.getBoundingClientRect?.() || null;
+    const boundaryTop = shellRect
+      ? Math.max(viewportGap, shellRect.top - gap)
+      : Math.max(viewportGap, rect.top - gap);
+    const surfaceBottom = shellRect?.bottom || rect.bottom;
+    const availableAbove = Math.max(1, boundaryTop - viewportGap);
+    const availableBelow = Math.max(1, viewportHeight - surfaceBottom - viewportGap);
+    const placeBelow = availableAbove < 160 && availableBelow > availableAbove;
+    const slotHeight = Math.max(1, Math.min(420, placeBelow ? availableBelow : availableAbove));
+
+    picker.style.right = "auto";
+    picker.style.bottom = "auto";
+    picker.style.width = `${Math.round(width)}px`;
+    picker.style.left = `${Math.round(left)}px`;
+    picker.style.maxHeight = `${Math.round(slotHeight)}px`;
+    _limitComposerPickerList(picker, $("composer-skill-list"), slotHeight);
+
+    const pickerHeight = Math.min(
+      picker.getBoundingClientRect().height || picker.scrollHeight || 320,
+      slotHeight,
+    );
+    const top = placeBelow
+      ? Math.min(viewportHeight - pickerHeight - viewportGap, surfaceBottom + gap)
+      : Math.max(viewportGap, boundaryTop - pickerHeight);
+    picker.style.top = `${Math.round(top)}px`;
+  }
+
   function openComposerSkillPicker(trigger) {
     const picker = $("composer-skill-picker");
     if (!picker) return;
+    pfs()?.models?.closeModelPicker?.();
     pfs()?.slash?.closeSlashPopup?.();
     pfs()?.sidebar?.closePanel?.("skills");
     const search = $("composer-skill-search");
@@ -284,20 +339,15 @@ const pfs = () => globalThis.PFS;
     if (search) search.value = "";
     renderComposerPicker();
     picker.classList.add("open");
+    picker.setAttribute("aria-modal", "true");
+    setPickerBackdrop(true);
     if (trigger) trigger.setAttribute("aria-expanded", "true");
     const anchor = trigger || $("composer-skill-trigger");
     if (anchor) {
       picker.style.visibility = "hidden";
-      const rect = anchor.getBoundingClientRect();
-      const viewportWidth = Math.max(280, window.innerWidth || document.documentElement.clientWidth);
-      const width = Math.min(390, viewportWidth - 24, Math.max(280, rect.width + 150));
-      picker.style.width = `${width}px`;
-      const height = Math.min(picker.scrollHeight, Math.max(180, window.innerHeight - 24));
-      const left = Math.max(12, Math.min(rect.left, viewportWidth - width - 12));
-      let top = rect.top - height - 8;
-      if (top < 12) top = Math.min(window.innerHeight - height - 12, rect.bottom + 8);
-      picker.style.left = `${Math.round(left)}px`;
-      picker.style.top = `${Math.max(12, Math.round(top))}px`;
+      picker.style.removeProperty("max-height");
+      $("composer-skill-list")?.style.removeProperty("max-height");
+      _positionComposerSkillPicker(anchor);
       picker.style.visibility = "visible";
     }
     requestAnimationFrame(() => search?.focus());
@@ -307,7 +357,11 @@ const pfs = () => globalThis.PFS;
     const picker = $("composer-skill-picker");
     if (!picker) return;
     picker.classList.remove("open");
-    ["left", "top", "width", "visibility"].forEach(property => picker.style.removeProperty(property));
+    ["left", "top", "right", "bottom", "width", "max-height", "visibility"]
+      .forEach(property => picker.style.removeProperty(property));
+    $("composer-skill-list")?.style.removeProperty("max-height");
+    picker.removeAttribute("aria-modal");
+    setPickerBackdrop(false);
     $("composer-skill-trigger")?.setAttribute("aria-expanded", "false");
   }
 
@@ -727,6 +781,11 @@ const pfs = () => globalThis.PFS;
   const composerSearch = $("composer-skill-search");
   composerSearch?.addEventListener("input", onComposerSearch);
   composerSearch?.addEventListener("keydown", onComposerKeyDown);
+  document.addEventListener("click", event => {
+    if (!event.target.closest("#composer-skill-picker, #composer-skill-trigger")) {
+      closeComposerSkillPicker();
+    }
+  });
 
 export const skills = Object.freeze({
     SKILLS, open, close, isOpen, render, loadSkills, getSkill, selectSkill, clearSkill,

@@ -87,7 +87,7 @@ README 的“界面预览”展示了当前真实工作台；截图来自隔离�
 
 ## 验收边界
 
-本文件描述产品结构，不替代运行验收。此前 GitHub Actions run `34029259331` 只验证了旧提交 `b2a6393`；当前工作区正在收口运行基线，尚未形成新的提交或同 SHA 的 CI。根目录 [`LICENSE`](LICENSE) 已提供当前适用的许可文本，但正式 GitHub Release 仍等待发布候选切片验证。
+本文件描述产品结构，不替代运行验收。GitHub Actions run `34191614452` 已验证远端发布候选树 `ae8142c0a6754ed7635eea9ffece550979833d01` 的 Windows x64、macOS Apple Silicon、Windows 干净源码安装、前端质量和两端打包。最新 SQL 兼容修复已纳入当前发布切片，仍需新的同 SHA CI 后再作为正式候选；正式 GitHub Release 仍等待实机、真实业务与 Office 验收。
 
 真实 Windows 电脑安装、macOS/Windows 安装升级卸载、复杂 Office 原生视觉、真实业务数据、真实模型和外部服务、部署及线上访问仍需在对应环境单独确认。本轮不进行真实外部服务验收，不阻塞本地首版。
 

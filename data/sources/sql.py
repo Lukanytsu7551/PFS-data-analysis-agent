@@ -25,7 +25,15 @@ import duckdb
 import pandas as pd
 from infrastructure.compat import env
 
-from ._utils import _new_conn, _preview_table_dict, _query, _register, _table_schema_str
+from ._utils import (
+    _new_conn,
+    _preview_table_dict,
+    _query,
+    _query_with_recovery,
+    _register,
+    _rewrite_sql_table_aliases,
+    _table_schema_str,
+)
 from .base import DataSource
 
 log = logging.getLogger(__name__)
@@ -372,6 +380,10 @@ class SQLDataSource(DataSource):
         The result is then registered as a temporary view in DuckDB so that
         subsequent analysis tables can JOIN against it.
         """
+        # Normalize imported/legacy table spellings before scope validation.
+        # For example, a file-derived table named ``_25年销售`` may be
+        # referenced by the model as ``25年销售``.
+        sql = _rewrite_sql_table_aliases(sql, self.list_tables())
         # Identify which known tables this SQL references
         try:
             referenced = self._assert_analysis_scope(sql)
@@ -402,7 +414,7 @@ class SQLDataSource(DataSource):
                 return pd.DataFrame(), str(exc)
 
         # All referenced tables are in DuckDB — run locally
-        df, err = _query(self._duck, sql)
+        df, err = _query_with_recovery(self._duck, sql, self.list_tables())
         if not err:
             return df, ""
 

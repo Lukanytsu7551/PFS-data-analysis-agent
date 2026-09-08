@@ -15,7 +15,7 @@
 
 - macOS startup, core chat, CSV/XLSX analysis, charts, deliverables, jobs, and workspace basics have local evidence.
 - Code, frontend formatting, static checks, and offline regression tests follow the development gates.
-- The historical CI run `34029259331` validated commit `b2a6393` for Windows x64, macOS Apple Silicon, a clean Windows source install, and both desktop packages. The worktree is now being realigned to the runtime baseline; a new commit and same-SHA CI result are still pending.
+- CI run `34191614452` validated the remote release-candidate tree `ae8142c0a6754ed7635eea9ffece550979833d01` for Windows x64, macOS Apple Silicon, a clean Windows source install, frontend quality, and both desktop packages. The latest SQL compatibility fix is now included in the current release slice; a new same-SHA CI result is still required before the formal Release.
 
 ### Current boundary
 

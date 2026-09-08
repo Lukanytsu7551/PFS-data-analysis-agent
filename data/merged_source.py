@@ -28,7 +28,7 @@ import pandas as pd
 from .sources._utils import (
     _new_conn,
     _table_schema_str,
-    _query,
+    _query_with_recovery,
     _register,
 )
 from .sources.base import DataSource
@@ -139,7 +139,7 @@ class MergedDataSource(DataSource):
     def execute_query(self, sql: str) -> Tuple[pd.DataFrame, str]:
         """在合并连接上执行 SQL。SQL 中的表名应使用 src{N}__ 前缀。"""
         with self._lock:
-            return _query(self._conn, sql)
+            return _query_with_recovery(self._conn, sql, self.list_tables())
 
     def create_analysis_table(self, sql: str, table_name: str = "analysis_data",
                               _df=None) -> str:

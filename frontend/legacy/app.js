@@ -75,6 +75,10 @@ if (globalThis.__pfsAppDelegationRegistered) {
       closeSkillPicker: () => sidebar.closePanel("skills"),
       openComposerSkillPicker: (el) => pfs().skills.openComposerSkillPicker(el),
       closeComposerSkillPicker: () => pfs().skills.closeComposerSkillPicker(),
+      closePickers: () => {
+        pfs().models?.closeModelPicker?.();
+        pfs().skills?.closeComposerSkillPicker?.();
+      },
       pickSkillUpload: () => pfs().skills.pickSkillUpload?.(),
       closeSkillModal: () => pfs().skills?.closeSkillModal?.(),
       openModelPicker: (el) => pfs().models.openModelPicker(el),
@@ -103,6 +107,8 @@ if (globalThis.__pfsAppDelegationRegistered) {
 
       // Independent side panels (skills / knowledge / mcp) — island loading via openSidePanel
       openPanel: (el, name) => {
+        pfs().models?.closeModelPicker?.();
+        pfs().skills?.closeComposerSkillPicker?.();
         sidebar.rememberSurfaceTrigger(name, el);
         if (name === "skills") {
           pfs().skills.open();
@@ -143,11 +149,17 @@ if (globalThis.__pfsAppDelegationRegistered) {
       openSaveDialog: () => sessions.openSaveDialog(),
       loadSavedList: () => sessions.loadSavedList(),
       setSidebarNav: (_el, nav) => sidebar.setSidebarNav(nav || "agent"),
-      openSidebarDrawer: (el, tab) => sidebar.openSidebarDrawer(tab || "sessions", el),
+      openSidebarDrawer: (el, tab) => {
+        pfs().models?.closeModelPicker?.();
+        pfs().skills?.closeComposerSkillPicker?.();
+        sidebar.openSidebarDrawer(tab || "sessions", el);
+      },
       closeSidebarDrawer: () => sidebar.closeSidebarDrawer(),
       closeSidebarSurfaces: () => sidebar.closeSidebarSurfaces(),
       setDrawerTab: (_el, tab) => sidebar.setDrawerTab(tab || "sessions"),
       openMcpSettings: (el) => {
+        pfs().models?.closeModelPicker?.();
+        pfs().skills?.closeComposerSkillPicker?.();
         sidebar.rememberSurfaceTrigger("mcp", el);
         pfs().mcp.openMcpSettings();
       },
