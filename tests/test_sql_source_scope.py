@@ -29,6 +29,7 @@ class SqlSourceScopeTests(unittest.TestCase):
                 )
 
             source = SQLDataSource(f"sqlite:///{database}", "PFS SQLite E2E")
+            self.addCleanup(source.close)
             self.assertEqual(["sales_report"], source.set_analysis_tables(["sales_report"]))
 
             frame, error = source.execute_query(
@@ -59,6 +60,7 @@ class SqlSourceScopeTests(unittest.TestCase):
                 connection.execute("INSERT INTO sales_report VALUES (1)")
 
             source = SQLDataSource(f"sqlite:///{database}", "PFS SQLite Scope")
+            self.addCleanup(source.close)
             source.set_analysis_tables(["sales_report"])
 
             _frame, error = source.execute_query("SELECT * FROM private_notes")
