@@ -92,7 +92,7 @@ class ReleaseIdentityTests(unittest.TestCase):
                     self.assertNotIn(legacy_name, content)
 
     def test_release_notes_identify_pfs_and_disclose_signing_boundary(self):
-        self.assertIn("Unsigned PFS Data Analysis Agent desktop test packages.", self.workflow)
+        self.assertIn("PFS Data Analysis Agent desktop release packages.", self.workflow)
         self.assertIn("not code-signed", self.workflow)
         self.assertIn("notarized", self.workflow)
         self.assertIn("SHA256SUMS.txt", self.workflow)

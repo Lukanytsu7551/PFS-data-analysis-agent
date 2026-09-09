@@ -14,7 +14,7 @@ class ProductIdentityTests(unittest.TestCase):
     def test_source_default_and_environment_override_remain_unchanged(self):
         with patch.object(product_identity.sys, "frozen", False, create=True):
             with patch.dict(os.environ, {}, clear=True):
-                self.assertEqual("0.1.0-dev", product_identity._resolve_product_version())
+                self.assertEqual("0.1.0", product_identity._resolve_product_version())
             with patch.dict(os.environ, {"PFS_PRODUCT_VERSION": "2.4.0-dev"}, clear=True):
                 self.assertEqual("2.4.0-dev", product_identity._resolve_product_version())
 
@@ -65,7 +65,7 @@ class ProductIdentityTests(unittest.TestCase):
                 patch.dict(os.environ, {"PFS_PRODUCT_VERSION": "9.9.9"}, clear=True),
             ):
                 self.assertEqual(
-                    "0.1.0-dev",
+                    "0.1.0",
                     product_identity._resolve_product_version(),
                 )
 

@@ -1,6 +1,6 @@
 # PFS Release Notes
 
-## 0.1.0-dev · 2026-09-09
+## 0.1.0 · 2026-09-09
 
 ### Product capabilities
 

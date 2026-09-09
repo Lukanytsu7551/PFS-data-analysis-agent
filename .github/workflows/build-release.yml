@@ -417,7 +417,7 @@ jobs:
             sha256sum *.exe *.dmg > SHA256SUMS.txt
           )
           files+=(release-upload/SHA256SUMS.txt)
-          notes="Unsigned PFS Data Analysis Agent desktop test packages. The Windows package is not code-signed; the macOS packages are not code-signed or notarized. SHA256SUMS.txt is included for download verification. Do not treat these artifacts as signed or notarized releases."
+          notes="PFS Data Analysis Agent desktop release packages. The Windows package is not code-signed; the macOS packages are not code-signed or notarized. SHA256SUMS.txt is included for download verification. Do not treat these artifacts as signed or notarized releases."
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release edit "$RELEASE_TAG" \
               --title "$RELEASE_TAG" \

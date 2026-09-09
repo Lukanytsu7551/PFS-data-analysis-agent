@@ -19,7 +19,7 @@
   <img src="https://img.shields.io/badge/Desktop-macOS%20%2F%20Windows-0b5bd3.svg" alt="Desktop" />
 </p>
 
-> Current version: `0.1.0-dev`. This is a desktop-first development build focused on local startup and reviewable analysis flows.
+> Current version: `0.1.0`. This desktop release focuses on local startup and reviewable analysis flows.
 
 PFS supports natural-language analysis, controlled data queries, chart generation, multi-format report delivery, and result-history review.
 
