@@ -34,14 +34,14 @@ PFS supports natural-language analysis, controlled data queries, chart generatio
 
 ## Core capabilities
 
-| Area | What PFS provides |
-|---|---|
-| Data | CSV/XLSX upload, SQLite/MySQL/PostgreSQL/SQL Server entry points, and controlled HTTP sources |
-| Understanding | Table and field preview, coverage, missing/duplicate signals, and source snapshots |
-| Analysis | Read-only SQL, grouped metrics, safe aggregations, anomaly detection, clustering, decision trees, and time-series analysis entry points |
-| Visualization | Chart recommendations, interactive charts, and a Dashboard delivery entry point |
-| Agent | SSE chat, tool calls, Skills, knowledge base, workflows, jobs, and context management |
-| Extensions | MCP, Teams, Hooks, Feishu, and cloud-login interfaces are enabled by default; remote GPU is off by default; real external services require configuration and are not accepted in this pass |
+| Area          | What PFS provides                                                                                                                                               |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Data          | CSV/XLSX upload, SQLite/MySQL/PostgreSQL/SQL Server entry points, and controlled HTTP sources                                                                   |
+| Understanding | Table and field preview, coverage, missing/duplicate signals, and source snapshots                                                                              |
+| Analysis      | Read-only SQL, grouped metrics, safe aggregations, anomaly detection, clustering, decision trees, and time-series analysis entry points                         |
+| Visualization | Chart recommendations, interactive charts, and a Dashboard delivery entry point                                                                                 |
+| Agent         | SSE chat, tool calls, Skills, knowledge base, workflows, jobs, and context management                                                                           |
+| Extensions    | MCP, Teams, Hooks, Feishu, and cloud-login interfaces are retained as optional surfaces; remote GPU is off by default and requires explicit local configuration |
 
 ## Quick demo
 
@@ -59,7 +59,7 @@ The image below shows the current Flask workbench, captured from an isolated loc
 
 ![PFS Data Analysis Agent workbench](./docs/assets/pfs-workbench-overview.png)
 
-Showcase path: start the app → upload `data/fixtures/pfs_sales.csv` → open metric preview → run the analysis → review Claim/Evidence and the source snapshot → create a deliverable → revisit it in task history.
+Showcase path: start the app → upload `data/fixtures/pfs_sales.csv` → open metric preview → run the analysis → review the result summary and source snapshot → create a deliverable → revisit it in task history.
 
 ## Quick start
 
@@ -107,22 +107,22 @@ Keep API keys out of Dockerfiles, images, and Git. See `docker-compose.yml` for 
 
 ## Slash commands
 
-| Command | Purpose |
-|---|---|
-| `/new` | Start a clean analysis conversation |
-| `/sessions` | View or refresh saved conversations |
-| `/data` | Open data preview and table selection |
-| `/status` | Inspect model, source, and context state |
-| `/jobs` | View task history and status |
-| `/skills` | View or select Skills |
-| `/knowledge` | Open the knowledge base |
-| `/mcp` | Manage MCP connections and tools |
-| `/workspace` | Manage workspace and permissions |
-| `/stop` | Stop the current response |
-| `/compact` | Compact the current context |
-| `/help` | Show command help |
+| Command      | Purpose                                  |
+| ------------ | ---------------------------------------- |
+| `/new`       | Start a clean analysis conversation      |
+| `/sessions`  | View or refresh saved conversations      |
+| `/data`      | Open data preview and table selection    |
+| `/status`    | Inspect model, source, and context state |
+| `/jobs`      | View task history and status             |
+| `/skills`    | View or select Skills                    |
+| `/knowledge` | Open the knowledge base                  |
+| `/mcp`       | Manage MCP connections and tools         |
+| `/workspace` | Manage workspace and permissions         |
+| `/stop`      | Stop the current response                |
+| `/compact`   | Compact the current context              |
+| `/help`      | Show command help                        |
 
-`/teams` and `/robot` are enabled extension surfaces. Local team and configuration flows are available; real external-service availability depends on the target environment and is not accepted in this pass.
+`/teams` and `/robot` are optional extension surfaces. External connections depend on the target environment, credentials, and explicit user configuration; no external call starts without a target and credentials.
 
 ## Examples
 
@@ -162,13 +162,13 @@ The public built-in catalog currently contains:
 
 Keep model keys in local configuration or environment variables. Other legacy provider identifiers are not part of the default catalog.
 
-## Current boundary
+## Version and platform boundary
 
-The current delivery focus is a downloadable source repository, desktop local startup, and a core data-analysis loop. The earlier GitHub Actions run `34029259331` validated only the old commit `b2a6393`; the current worktree is being realigned to the runtime baseline and has not produced a new commit or same-SHA CI result. The root [`LICENSE`](LICENSE) contains the currently applicable license text; a formal GitHub Release remains deferred until the release-candidate slice is verified.
+The current version targets local use on Windows x64 and macOS Apple Silicon. No macOS Intel installer is provided. Final installers and version numbers are published on [GitHub Releases](https://github.com/Lukanytsu7551/PFS-data-analysis-agent/releases).
 
-Installation on a physical Windows computer, macOS/Windows install-upgrade-uninstall flows, complex Office rendering in native applications, real business-data acceptance, real models and external services, deployment, and live verification still require their target environments. Real external services are not accepted in this pass and do not block the local first release.
+Business Canvas and Google Sheets are outside the current product scope. MCP, Teams, Hooks, Feishu, and cloud login remain optional extension surfaces. GPU/remote execution is retained but disabled by default and requires explicit local configuration.
 
-Local tests, fixed fixtures, or configuration files prove only their respective layer. Enabled integrations do not start an external call without a target and credentials; remote GPU remains off by default.
+The current version is designed for structured data files and database connections; image upload and visual analysis are not part of the current capability set. Availability of models, databases, external services, and local dependencies depends on the target environment, and a fixed fixture does not replace validation with real data.
 
 ## Development checks
 

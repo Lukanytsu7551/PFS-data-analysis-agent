@@ -1,6 +1,6 @@
 # PFS Release Notes
 
-## 0.1.0-dev · 2026-09-06
+## 0.1.0-dev · 2026-09-09
 
 ### Product capabilities
 
@@ -13,11 +13,12 @@
 
 ### Validation status
 
-- macOS startup, core chat, CSV/XLSX analysis, charts, deliverables, jobs, and workspace basics have local evidence.
-- Code, frontend formatting, static checks, and offline regression tests follow the development gates.
-- CI run `34191614452` validated the remote release-candidate tree `ae8142c0a6754ed7635eea9ffece550979833d01` for Windows x64, macOS Apple Silicon, a clean Windows source install, frontend quality, and both desktop packages. The latest SQL compatibility fix is now included in the current release slice; a new same-SHA CI result is still required before the formal Release.
+- The current acceptance set for Excel, Word, and PPT deliverables has completed visual review.
+- Local startup, CSV/XLSX analysis, charts, deliverables, jobs, and workspace basics follow the project quality gates.
+- Windows x64 and macOS Apple Silicon are the target platforms; no macOS Intel installer is provided.
 
 ### Current boundary
 
-- Physical Windows/macOS installation, a formal Release, real external services, deployment, and live access require separate checks in their target environments.
-- Local samples and offline tests do not promise production data quality, external-service availability, or live service operation.
+- Business Canvas and Google Sheets are outside the current product scope.
+- MCP, Teams, Hooks, Feishu, and cloud login remain optional extensions; GPU/remote execution is disabled by default.
+- Image upload and visual analysis are not part of the current version; local samples and offline tests do not promise production data quality or external-service availability.
